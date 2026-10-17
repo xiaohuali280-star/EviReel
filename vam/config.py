@@ -21,6 +21,23 @@ class Settings(BaseSettings):
     ffprobe_path: str = "ffprobe"
     enable_event_finalize: bool = True
     enable_legacy_http_api: bool = False
+    asr_enabled: bool = True
+    asr_model: str = "tiny"
+    asr_model_revision: str = ""
+    asr_model_cache: str = "data/asr-models"
+    asr_local_files_only: bool = True
+    asr_language: str = ""
+    asr_device: str = "cpu"
+    asr_compute_type: str = "int8"
+    asr_cpu_threads: int = Field(2, ge=1, le=32)
+    asr_beam_size: int = Field(5, ge=1, le=10)
+    asr_vad_filter: bool = True
+    asr_timeout_s: float = Field(900, gt=0, le=7200)
+    asr_max_segments: int = Field(20000, ge=1, le=100000)
+    asr_max_text_chars: int = Field(2000000, ge=1, le=10000000)
+    transcript_chunk_max_chars: int = Field(500, ge=16, le=4000)
+    transcript_chunk_max_duration_s: float = Field(30, gt=0, le=300)
+    transcript_chunk_pause_s: float = Field(1.5, ge=0, le=30)
     embedding_api_key_override: str = ""
     embedding_base_url_override: str = ""
     embedding_model_override: str = ""

@@ -53,10 +53,25 @@ class VideoRegistry:
 
     def public(self, row):
         ready = bool(row["active_generation"])
+        transcript = self.transcript_state(row)
         return {key: row[key] for key in ("video_id", "original_name", "size_bytes", "duration", "created_at", "status", "active_generation", "last_error")} | {
-            "capabilities": {"playback": bool(row["playback_path"]), "vision": ready, "transcript": False},
+            "capabilities": {"playback": bool(row["playback_path"]), "vision": ready,
+                             "transcript": transcript["readable"], "transcript_search": transcript["searchable"]},
+            "transcript": {"status": row["transcript_status"], "error": row["transcript_error"], **transcript},
             "content_url": f"/api/videos/{row['video_id']}/content" if row["playback_path"] else None,
         }
+
+    def transcript_state(self, row):
+        from vam.memory.transcript import TranscriptStore
+        generation = row["transcript_generation"]
+        if generation:
+            if not re.fullmatch(r"[0-9a-f]{32}", generation):
+                raise DomainError(409, "invalid_index_version", "Invalid transcript memory version")
+            path = self.asset(row["video_id"], f"memory/{generation}.sqlite3")
+            if path.is_file():
+                return TranscriptStore(path, row["video_id"]).state()
+        return {"text_version": None, "search_version": None, "readable": False, "searchable": False,
+                "text_status": "not_ready", "language": None, "search_uses_older_text": False}
 
     def list(self, offset=0, limit=50):
         with self.db.connect() as conn:
@@ -71,13 +86,16 @@ class VideoRegistry:
         return self.get(video_id)
 
     def update_video(self, video_id, **fields):
-        allowed = {"status", "playback_path", "active_generation", "model_fingerprint", "last_error"}
+        allowed = {"status", "playback_path", "active_generation", "model_fingerprint", "last_error",
+                   "source_sha256", "transcript_generation", "transcript_status", "transcript_error"}
         if not fields or not fields.keys() <= allowed:
             raise ValueError("invalid registry update")
         with self.db.connect(write=True) as conn:
             conn.execute("UPDATE videos SET " + ",".join(k + "=?" for k in fields) + " WHERE video_id=?", (*fields.values(), video_id))
 
-    def create_job(self, video_id, max_queued):
+    def create_job(self, video_id, max_queued, kind="video"):
+        if kind not in {"video", "transcript"}:
+            raise ValueError("unsupported indexing job kind")
         row = self.get(video_id)
         if row["status"] in {"deleting", "delete_failed"}:
             raise DomainError(409, "video_deleting", "Video deletion must finish before indexing")
@@ -88,11 +106,20 @@ class VideoRegistry:
                 raise DomainError(409, "index_running", "This video already has an indexing job")
             if conn.execute("SELECT COUNT(*) FROM index_jobs WHERE status IN ('queued','running')").fetchone()[0] >= max_queued:
                 raise DomainError(429, "queue_full", "Indexing queue is full; retry later")
-            attempt = conn.execute("SELECT COALESCE(MAX(attempt),0)+1 FROM index_jobs WHERE video_id=?", (video_id,)).fetchone()[0]
-            conn.execute("INSERT INTO index_jobs(job_id,video_id,generation,status,phase,attempt,started_at,updated_at) VALUES(?,?,?,'queued','queued',?,?,?)",
-                         (jid, video_id, jid, attempt, now, now))
+            attempt = conn.execute("SELECT COALESCE(MAX(attempt),0)+1 FROM index_jobs WHERE video_id=? AND kind=?", (video_id, kind)).fetchone()[0]
+            conn.execute("INSERT INTO index_jobs(job_id,video_id,generation,status,phase,attempt,started_at,updated_at,kind) VALUES(?,?,?,'queued','queued',?,?,?,?)",
+                         (jid, video_id, jid, attempt, now, now, kind))
             conn.execute("UPDATE videos SET status='queued',last_error=NULL WHERE video_id=?", (video_id,))
         return jid
+
+    def finish(self, video_id, job_id, *, status, result, error_code=None, error=None, vision_generation=None, fingerprint=None):
+        with self.db.connect(write=True) as conn:
+            if vision_generation:
+                conn.execute("UPDATE videos SET active_generation=?,model_fingerprint=? WHERE video_id=?", (vision_generation, fingerprint, video_id))
+            conn.execute("UPDATE videos SET status=?,last_error=? WHERE video_id=?", (status, error, video_id))
+            conn.execute("UPDATE index_jobs SET status=?,phase=?,result=?,error_code=?,error=?,updated_at=? WHERE job_id=?",
+                         (status, 'done' if status in {'succeeded', 'partial'} else status,
+                          json.dumps(result, ensure_ascii=False), error_code, error, time.time(), job_id))
 
     def job(self, job_id):
         with self.db.connect() as conn:
@@ -125,5 +152,6 @@ class VideoRegistry:
 
     def recover(self):
         with self.db.connect(write=True) as conn:
+            conn.execute("UPDATE videos SET transcript_status='interrupted',transcript_error='Server stopped during transcript indexing' WHERE transcript_status='running' AND video_id IN (SELECT video_id FROM index_jobs WHERE status IN ('queued','running'))")
             conn.execute("UPDATE videos SET status='interrupted',last_error='Server stopped before indexing finished' WHERE video_id IN (SELECT video_id FROM index_jobs WHERE status IN ('queued','running'))")
             conn.execute("UPDATE index_jobs SET status='interrupted',phase='interrupted',error_code='server_restart',error='Server stopped before indexing finished',updated_at=? WHERE status IN ('queued','running')", (time.time(),))

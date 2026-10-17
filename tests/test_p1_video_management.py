@@ -93,7 +93,7 @@ def upload(client, media, color="red", filename="same.mp4"):
 def test_upload_index_and_original_persistence(client, media):
     vid, jid = upload(client, media)
     detail = client.get(f"/api/videos/{vid}").json()
-    assert detail["capabilities"] == {"playback": True, "vision": True, "transcript": False}
+    assert detail["capabilities"] == {"playback": True, "vision": True, "transcript": False, "transcript_search": False}
     row = client.app.state.indexing.registry.get(vid)
     assert client.app.state.indexing.registry.asset(vid, row["source_path"]).read_bytes() == (media / "red.mp4").read_bytes()
     assert client.get("/api/videos").json()["total"] == 1
@@ -341,7 +341,7 @@ def test_no_usable_frames_is_failed(client, media, settings):
     job = terminal(client, result["job_id"])
     assert job["status"] == "failed"
     assert client.get(f"/api/videos/{result['video_id']}").json()["capabilities"] == {
-        "playback": True, "vision": False, "transcript": False}
+        "playback": True, "vision": False, "transcript": False, "transcript_search": False}
 
 def test_tier_only_changes_are_persisted(settings, backend, tmp_path):
     store = FrameStore(backend=backend, persist_path=str(tmp_path / "tier.sqlite3"))

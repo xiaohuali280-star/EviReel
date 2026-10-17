@@ -1,0 +1,50 @@
+{
+  "reference": "The red triangle is above the blue square.",
+  "sample_origin": "Windows Microsoft Zira Desktop synthesized speech",
+  "reference_interval_s": [
+    0,
+    3.068979591836735
+  ],
+  "model": "tiny.en",
+  "device": "cpu",
+  "compute_type": "int8",
+  "video_duration_s": 3.04,
+  "vad_filter": true,
+  "raw_audio_segments": [
+    {
+      "start": 0.0,
+      "end": 7.0,
+      "text": " The red triangle is above the blue square.",
+      "avg_logprob": -0.3064993197719256,
+      "no_speech_prob": 0.005855773109942675,
+      "compression_ratio": 0.8571428571428571,
+      "temperature": 0
+    }
+  ],
+  "segments": [
+    {
+      "segment_id": "s-000000",
+      "start_t": 0.0,
+      "end_t": 3.04,
+      "text": "The red triangle is above the blue square.",
+      "language": "en",
+      "quality": {
+        "avg_logprob": -0.3064993197719256,
+        "no_speech_prob": 0.005855773109942675,
+        "compression_ratio": 0.8571428571428571,
+        "temperature": 0.0
+      },
+      "raw_text": " The red triangle is above the blue square.",
+      "raw_start_t": 0.0,
+      "raw_end_t": 7.0,
+      "time_clipped": true
+    }
+  ],
+  "text": "The red triangle is above the blue square.",
+  "keyword_check": true,
+  "status": "passed",
+  "raw_start_deviation_from_file_boundary_s": 0.0,
+  "raw_end_deviation_from_file_boundary_s": 3.931020408163265,
+  "timing_note": "Boundary comparison to synthesized audio file; not word-alignment ground truth. Video-facing intervals are clipped to actual video duration.",
+  "elapsed_s": 3.704
+}

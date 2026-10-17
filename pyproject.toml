@@ -39,6 +39,8 @@ include = ["vam*"]
 
 [tool.setuptools.package-data]
 "vam.storage" = ["migrations/*.sql"]
+"vam.memory" = ["migrations/*.sql"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]
+asr = ["faster-whisper>=1.2.1,<2"]

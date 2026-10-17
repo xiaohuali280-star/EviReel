@@ -10,6 +10,10 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from vam.runtime import run_sync
+from vam.asr.audio import ASRError
+from vam.asr.indexer import checksum, index_transcript
+from vam.asr.transcriber import FasterWhisperTranscriber
+from vam.memory.transcript import TranscriptStore
 
 from vam.indexing.media import ALLOWED_EXTENSIONS, inspect_upload, prepare_playback
 from vam.retrieval.frame_store import FrameStore
@@ -38,14 +42,15 @@ class PersistentProgress:
         self.registry.update_job(job_id, phase="publishing", result=result)
 
     def fail(self, job_id, *, error):
-        self.registry.update_job(job_id, status="failed", phase="failed", error_code="index_failed", error=str(error)[:800])
+        self.registry.update_job(job_id, status="running", phase="vision_failed", error_code="index_failed", error=str(error)[:800])
 
 class IndexingService:
-    def __init__(self, settings, *, backend=None, indexer=None):
+    def __init__(self, settings, *, backend=None, indexer=None, transcriber=None):
         self.settings = settings
         self.registry = VideoRegistry(settings.data_root)
         self.backend = backend
         self.indexer = indexer or index_video_async
+        self.transcriber = transcriber or FasterWhisperTranscriber(settings)
         self.progress = PersistentProgress(self.registry)
         self.owner = OwnerLock(self.registry.root)
         self.semaphore = asyncio.Semaphore(settings.index_concurrency)
@@ -65,6 +70,11 @@ class IndexingService:
                 deleting = [r[0] for r in conn.execute("SELECT video_id FROM videos WHERE status='deleting'")]
             for video_id in deleting:
                 self.delete(video_id)
+            # Only transient audio is removed; published/cached transcript tables survive.
+            for row in self.registry.list(limit=1000000)["items"]:
+                work = self.registry.asset(row["video_id"], "cache/transcript-work")
+                if work.exists():
+                    shutil.rmtree(work)
         except BaseException:
             self.owner.release()
             raise
@@ -140,17 +150,52 @@ class IndexingService:
             if not registered and directory.exists():
                 shutil.rmtree(self.registry.directory(video_id))
 
-    def schedule(self, video_id):
+    def schedule(self, video_id, *, kind="video"):
         if self.closed:
             raise DomainError(503, "server_stopping", "Server is stopping")
         self._usable_video(video_id)
         if self.leases.get(video_id):
             raise DomainError(409, "video_busy", "Video is in use; retry indexing later")
-        job_id = self.registry.create_job(video_id, self.settings.max_queued_jobs)
+        job_id = self.registry.create_job(video_id, self.settings.max_queued_jobs, kind)
         task = asyncio.create_task(self._run(video_id, job_id))
         self.tasks[job_id] = task
         task.add_done_callback(lambda _: self.tasks.pop(job_id, None))
         return job_id
+
+    def _transcript_store(self, video_id, candidate=None):
+        row = self.registry.get(video_id)
+        generation = row["transcript_generation"] or candidate or row["active_generation"]
+        if not generation or not re.fullmatch(r"[0-9a-f]{32}", generation):
+            raise DomainError(409, "transcript_not_ready", "Transcript indexing has not started")
+        path = self.registry.asset(video_id, f"memory/{generation}.sqlite3")
+        store = TranscriptStore(path, video_id)
+        if not row["transcript_generation"]:
+            self.registry.update_video(video_id, transcript_generation=generation)
+        return store
+
+    async def _run_transcript(self, video_id, job_id, source, candidate):
+        store = self._transcript_store(video_id, candidate)
+        self.registry.update_video(video_id, transcript_status="running", transcript_error=None)
+        try:
+            row = self.registry.get(video_id)
+            digest = row["source_sha256"] or await run_sync(checksum, source)
+            if not row["source_sha256"]:
+                self.registry.update_video(video_id, source_sha256=digest)
+            def progress(phase, current, total):
+                self.progress.progress(job_id, phase=phase, current=current, total=total)
+            result = await index_transcript(source=source, source_sha256=digest, store=store, settings=self.settings,
+                                            transcriber=self.transcriber, backend=self.backend or get_backend(),
+                                            progress=progress, work_root=self.registry.asset(video_id, "cache/transcript-work"))
+            self.registry.update_video(video_id, transcript_status=result["status"], transcript_error=result.get("error"))
+            return result
+        except asyncio.CancelledError:
+            self.registry.update_video(video_id, transcript_status="interrupted", transcript_error="Transcript job interrupted")
+            raise
+        except Exception as exc:
+            code = exc.code if isinstance(exc, ASRError) else "transcript_failed"
+            message = str(exc) if isinstance(exc, ASRError) else "Transcript indexing failed; previous published text/index is retained"
+            self.registry.update_video(video_id, transcript_status="failed", transcript_error=message)
+            return {"status": "failed", "error_code": code, "error": message, **store.state()}
 
     def _store(self, video_id, generation):
         if not re.fullmatch(r"[0-9a-f]{32}", generation):
@@ -165,38 +210,69 @@ class IndexingService:
         store.asset_root = str(assets)
         return store
 
+    async def _run_vision(self, video_id, job_id, source):
+        self.registry.update_job(job_id, status="running", phase="playback")
+        playback = await run_sync(prepare_playback, source, self.registry.directory(video_id), self.settings)
+        self.registry.update_video(video_id, playback_path=playback.name)
+        store = self._store(video_id, job_id)
+        cfg = self.settings
+        await self.indexer(
+            tmp_path=str(source), cleanup_temp=False, fps=cfg.video_fps, max_frames=cfg.video_max_frames,
+            laplacian_min=cfg.video_laplacian_min, diff_threshold=cfg.video_diff_threshold,
+            ssim_threshold=cfg.video_ssim_threshold, hist_threshold=cfg.video_hist_threshold,
+            similarity_threshold=cfg.video_similarity_threshold, frame_id_prefix="v",
+            video_absolute_start_time=None, debug=False, store_instance=store, manager_instance=self.progress,
+            existing_job_id=job_id, cache_root=store.asset_root, run_inline=True,
+        )
+        job = self.registry.job(job_id)
+        if job["phase"] == "vision_failed":
+            raise RuntimeError(job["error"] or "index failed")
+        result = job["result"] or {}
+        if result.get("count", 0) <= 0 or not await store.list_frames():
+            raise RuntimeError("index contains no usable frames")
+        partial = bool(result.get("truncated") or result.get("filter_report", {}).get("embed_failures", {}).get("count"))
+        result["model"] = {"fingerprint": store.model_fingerprint(), "dimension": store._dim}
+        return store, result, partial
+
     async def _run(self, video_id, job_id):
         logger.info("index_queued video_id=%s job_id=%s", video_id, job_id)
         try:
             async with self.semaphore:
                 row = self.registry.get(video_id)
+                kind = self.registry.job(job_id)["kind"]
                 self.registry.update_video(video_id, status="running", last_error=None)
-                self.registry.update_job(job_id, status="running", phase="playback")
+                self.registry.update_job(job_id, status="running", phase="starting")
                 source = self.registry.asset(video_id, row["source_path"])
-                playback = await run_sync(prepare_playback, source, self.registry.directory(video_id), self.settings)
-                self.registry.update_video(video_id, playback_path=playback.name)
-                store = self._store(video_id, job_id)
-                cfg = self.settings
-                await self.indexer(
-                    tmp_path=str(source), cleanup_temp=False, fps=cfg.video_fps, max_frames=cfg.video_max_frames,
-                    laplacian_min=cfg.video_laplacian_min, diff_threshold=cfg.video_diff_threshold,
-                    ssim_threshold=cfg.video_ssim_threshold, hist_threshold=cfg.video_hist_threshold,
-                    similarity_threshold=cfg.video_similarity_threshold, frame_id_prefix="v",
-                    video_absolute_start_time=None, debug=False, store_instance=store, manager_instance=self.progress,
-                    existing_job_id=job_id, cache_root=store.asset_root, run_inline=True,
-                )
-                job = self.registry.job(job_id)
-                if job["status"] == "failed":
-                    raise RuntimeError(job["error"] or "index failed")
-                result = job["result"] or {}
-                if result.get("count", 0) <= 0 or not await store.list_frames():
-                    raise RuntimeError("index contains no usable frames")
-                partial = bool(result.get("truncated") or result.get("filter_report", {}).get("embed_failures", {}).get("count"))
-                result["video_id"] = video_id
-                result["capabilities"] = {"playback": True, "vision": True, "transcript": False}
-                result["model"] = {"fingerprint": store.model_fingerprint(), "dimension": store._dim}
-                self.registry.publish(video_id, job_id, store.model_fingerprint(), result, partial)
-                logger.info("index_complete video_id=%s job_id=%s partial=%s", video_id, job_id, partial)
+                vision_store, result, vision_partial = None, {}, False
+                vision = {"status": "not_requested"}
+                if kind == "video":
+                    try:
+                        vision_store, result, vision_partial = await self._run_vision(video_id, job_id, source)
+                        vision = {"status": "partial" if vision_partial else "ready"}
+                    except Exception:
+                        vision = {"status": "failed", "error_code": "index_failed", "error": "Visual indexing failed; retry is available"}
+                        self.registry.update_job(job_id, status="running", phase="vision_failed")
+                # A transcript-only retry can run without a usable visual index. On
+                # initial ingestion both adapters share the same generation DB.
+                candidate = (row["active_generation"] or job_id) if kind == "transcript" else job_id
+                transcript = await self._run_transcript(video_id, job_id, source, candidate)
+                result.update(video_id=video_id, stages={"vision": vision, "transcript": transcript})
+                if kind == "transcript":
+                    status = "failed" if transcript["status"] == "failed" else ("partial" if transcript["status"] == "partial" else "succeeded")
+                elif vision_store:
+                    status = "partial" if vision_partial or transcript["status"] in {"failed", "partial"} else "succeeded"
+                else:
+                    status = "partial" if transcript["status"] in {"ready", "partial"} else "failed"
+                error = transcript if transcript["status"] in {"failed", "partial"} else (vision if vision["status"] == "failed" else {})
+                published_row = self.registry.get(video_id)
+                if vision_store:
+                    published_row["active_generation"] = job_id
+                result["capabilities"] = self.registry.public(published_row)["capabilities"]
+                self.registry.finish(video_id, job_id, status=status, result=result,
+                                     error_code=error.get("error_code"), error=error.get("error"),
+                                     vision_generation=job_id if vision_store else None,
+                                     fingerprint=vision_store.model_fingerprint() if vision_store else None)
+                logger.info("index_complete video_id=%s job_id=%s status=%s", video_id, job_id, status)
         except asyncio.CancelledError:
             self.registry.update_job(job_id, status="interrupted", phase="interrupted",
                                      error_code="server_shutdown", error="Server stopped before indexing finished")
@@ -204,18 +280,29 @@ class IndexingService:
             raise
         except Exception as exc:
             logger.warning("index_failed video_id=%s job_id=%s error_type=%s", video_id, job_id, type(exc).__name__)
-            self.registry.update_job(job_id, status="failed", phase="failed", error_code="index_failed", error=str(exc)[:800])
+            self.registry.update_job(job_id, status="failed", phase="failed", error_code="index_failed", error="Indexing failed; retry is available")
             self.registry.update_video(video_id, status="failed", last_error="Indexing failed; see job details and retry")
         finally:
-            job = self.registry.job(job_id)
-            if job["status"] in {"failed", "interrupted"}:
-                # No caller can reference an unpublished generation.
+            row = self.registry.get(video_id)
+            # A failed visual generation may still own a usable/cached transcript.
+            if job_id not in {row["active_generation"], row["transcript_generation"]}:
                 path = self.registry.asset(video_id, f"memory/{job_id}.sqlite3")
                 for suffix in ("", "-wal", "-shm", ".lock"):
                     Path(str(path) + suffix).unlink(missing_ok=True)
                 assets = self.registry.asset(video_id, f"cache/{job_id}")
                 if assets.exists():
                     shutil.rmtree(assets)
+
+    @asynccontextmanager
+    async def transcript_context(self, video_id):
+        row = self._usable_video(video_id)
+        if not row["transcript_generation"]:
+            raise DomainError(409, "transcript_not_ready", "No transcript job has initialized this video")
+        release = self._retain(video_id)
+        try:
+            yield self._transcript_store(video_id)
+        finally:
+            release()
 
     @asynccontextmanager
     async def memory_context(self, video_id):

@@ -1,0 +1,1 @@
+"""Packaged transcript schema resources."""

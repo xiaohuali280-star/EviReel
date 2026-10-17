@@ -1,5 +1,7 @@
 # EviReel — P1 视频管理 API
 
+本文保留 P1 视觉管理协议；P2 字幕扩展、独立状态与新增 transcript_search 能力见 [P2 字幕接口](P2_TRANSCRIPT_API.md)。当前完整视频索引会分别执行视觉与字幕阶段。
+
 EviReel 在原 VAM 上增加多视频资产、独立视觉记忆、持久任务和视频播放。P1 尚不包含 ASR、持久聊天会话或 React 网页。
 
 ## 安装和运行

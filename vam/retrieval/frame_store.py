@@ -372,6 +372,13 @@ class FrameStore:
     def embedding_name(self) -> str:
         return getattr(self._backend, "name", "unknown")
 
+    def transcripts(self, video_id):
+        """Use independent transcript tables in this same persistent memory file."""
+        if not self._persist_path:
+            raise RuntimeError("transcripts require a persistent per-video memory store")
+        from vam.memory.transcript import TranscriptStore
+        return TranscriptStore(self._persist_path, video_id)
+
     def _connect_db(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self._persist_path, timeout=30.0, isolation_level=None, check_same_thread=False, factory=ClosingConnection)
         conn.row_factory = sqlite3.Row
