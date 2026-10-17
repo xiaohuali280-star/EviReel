@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional, Tuple
 
 import json
+import math
 import httpx
 import asyncio
 import os
@@ -249,10 +250,10 @@ class OpenRouterEmbeddingsClient:
 
     def _headers(self) -> Dict[str, str]:
         cfg = get_settings()
-        if not cfg.api_key:
+        if not (cfg.embedding_api_key_override or cfg.api_key):
             raise RuntimeError("DASHSCOPE_API_KEY, SILICONFLOW_API_KEY, or OPENROUTER_API_KEY is missing")
         return {
-            "Authorization": f"Bearer {cfg.api_key}",
+            "Authorization": f"Bearer {(cfg.embedding_api_key_override or cfg.api_key)}",
             "Content-Type": "application/json",
             "HTTP-Referer": "http://localhost",
             "X-Title": cfg.app_name,
@@ -272,7 +273,7 @@ class OpenRouterEmbeddingsClient:
 
     def _post(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         cfg = get_settings()
-        base_url = (cfg.chat_base_url or "https://api.siliconflow.cn/v1").rstrip("/")
+        base_url = (cfg.embedding_base_url_override or cfg.chat_base_url or "https://api.siliconflow.cn/v1").rstrip("/")
         url = f"{base_url}/embeddings"
         last_err: Optional[Exception] = None
         for i in range(4):
@@ -303,12 +304,20 @@ class OpenRouterEmbeddingsClient:
         data = raw.get("data")
         if not isinstance(data, list) or not data:
             raise RuntimeError(f"unexpected embedding response: {raw}")
+        if any(isinstance(item, dict) and "index" in item for item in data):
+            if any(not isinstance(item, dict) or type(item.get("index")) is not int for item in data):
+                raise RuntimeError("embedding response has invalid indices")
+            if sorted(item["index"] for item in data) != list(range(len(data))):
+                raise RuntimeError("embedding response has duplicate or missing indices")
+            data = sorted(data, key=lambda item: item["index"])
         vectors: List[List[float]] = []
         for item in data:
             emb = item.get("embedding") if isinstance(item, dict) else None
             if not isinstance(emb, list):
                 raise RuntimeError(f"missing embedding in response item: {item}")
             vectors.append([float(v) for v in emb])
+        from vam.vision.backends import validate_embeddings
+        validate_embeddings(vectors, expected_count=len(vectors), expected_dim=get_settings().embedding_dimensions or None)
         return vectors, len(vectors[0])
 
     def generate_text_embeddings(
@@ -319,7 +328,10 @@ class OpenRouterEmbeddingsClient:
     ) -> Tuple[List[List[float]], int]:
         payload = self._base_payload(input_type=input_type)
         payload["input"] = list(texts)
-        return self._extract_embeddings(self._post(payload))
+        vectors, dim = self._extract_embeddings(self._post(payload))
+        if len(vectors) != len(payload["input"]):
+            raise RuntimeError("embedding response count mismatch")
+        return vectors, dim
 
     def generate_image_embeddings(
         self,
@@ -340,4 +352,7 @@ class OpenRouterEmbeddingsClient:
             }
             for url in image_urls
         ]
-        return self._extract_embeddings(self._post(payload))
+        vectors, dim = self._extract_embeddings(self._post(payload))
+        if len(vectors) != len(payload["input"]):
+            raise RuntimeError("embedding response count mismatch")
+        return vectors, dim

@@ -138,9 +138,7 @@ class StoreBaseline(unittest.IsolatedAsyncioTestCase):
     async def test_retention_tier_changes_survive_reload_after_event_finalization(self):
         """Desired contract: this can reveal an upstream tier-only persistence defect."""
         frames = await self.seed()
-        # Isolate the separate upstream missing-re import; production remains untouched.
-        with patch("vam.retrieval.frame_store.re", re, create=True):
-            await self.store.finalize_event_memory(frames=frames)
+        await self.store.finalize_event_memory(frames=frames)
         await self.store.apply_retention_policy()
         reloaded = FrameStore(backend=self.backend, persist_path=self.store._persist_path)
         self.assertEqual([f.memory_tier for f in await reloaded.list_frames()], ["recent"] * 3)
@@ -156,27 +154,13 @@ class StoreBaseline(unittest.IsolatedAsyncioTestCase):
 
 
 class TransportAndVideoBaseline(unittest.TestCase):
-    def test_websocket_keeps_connection_history_but_reconnect_starts_empty(self):
-        module = importlib.import_module("vam.server.ws.agent_chat")
+    def test_websocket_requires_explicit_video_binding(self):
         from vam.server.app import create_app
-        lengths = []
-
-        async def fake_response(*, transcript, history):
-            lengths.append(len(history))
-            history.extend([{"role": "user", "content": transcript}, {"role": "assistant", "content": "mock"}])
-            yield {"type": "final", "text": "mock", "result": {"answer": "mock"}}
-
-        with patch.object(module, "stream_agent_response", fake_response), TestClient(create_app()) as client:
+        with TestClient(create_app()) as client:
             with client.websocket_connect("/ws/agent") as ws:
                 self.assertEqual(ws.receive_json()["type"], "info")
-                for text in ("question", "follow-up"):
-                    ws.send_json({"type": "text", "text": text})
-                    self.assertEqual(ws.receive_json()["type"], "final")
-            with client.websocket_connect("/ws/agent") as ws:
-                ws.receive_json()
-                ws.send_json({"type": "text", "text": "reconnect"})
-                self.assertEqual(ws.receive_json()["type"], "final")
-        self.assertEqual(lengths, [0, 2, 0])
+                ws.send_json({"type": "text", "text": "missing video"})
+                self.assertEqual(ws.receive_json()["code"], "invalid_request")
 
     def test_ffmpeg_extracts_timestamped_frames_from_synthetic_video(self):
         self.assertIsNotNone(shutil.which("ffmpeg"))

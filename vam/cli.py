@@ -22,7 +22,7 @@ def run_server():
         reload = False
 
     package_root = Path(__file__).resolve().parent
-    print(f"Starting VAM server on port {port} (reload={reload})...")
+    print(f"Starting EviReel server on port {port} (reload={reload})...")
     uvicorn.run(
         "vam.server.app:app",
         host="0.0.0.0",
@@ -30,5 +30,5 @@ def run_server():
         log_level="info",
         reload=reload,
         reload_dirs=[str(package_root)] if reload else None,
-        ws_max_size=1024 * 1024 * 1024 * 2
+        ws_max_size=64 * 1024
     )

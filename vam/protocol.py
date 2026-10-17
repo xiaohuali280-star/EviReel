@@ -9,6 +9,22 @@ class StrictSchemaModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class VideoAgentRequest(StrictSchemaModel):
+    type: Literal["text", "tool"]
+    video_id: str = Field(..., pattern=r"^v_[0-9a-f]{32}$")
+    text: Optional[str] = Field(None, max_length=4000)
+    name: Optional[Literal["retrieve", "summarize"]] = None
+    args: Dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _validate_request(self):
+        if self.type == "text" and not str(self.text or "").strip():
+            raise ValueError("text must not be empty")
+        if self.type == "tool" and self.name is None:
+            raise ValueError("tool name is required")
+        return self
+
+
 class RetrieveToolArgs(StrictSchemaModel):
     question: str = Field(..., min_length=1, description="Canonical retrieval question for memory search.")
 
