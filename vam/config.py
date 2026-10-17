@@ -1,4 +1,5 @@
 from typing import Optional
+from pydantic import Field
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -6,9 +7,23 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     """Application settings loaded from environment/.env."""
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore", allow_inf_nan=False)
 
-    app_name: str = "Visual Agentic Memory"
+    app_name: str = "EviReel"
+    data_root: str = "data/evireel"
+    max_upload_bytes: int = Field(1024 * 1024 * 1024, gt=0)
+    max_video_duration_s: float = Field(3 * 60 * 60, gt=0)
+    index_concurrency: int = Field(2, ge=1, le=8)
+    max_queued_jobs: int = Field(20, ge=1, le=1000)
+    probe_timeout_s: float = Field(30.0, gt=0)
+    media_timeout_s: float = Field(600.0, gt=0)
+    ffmpeg_path: str = "ffmpeg"
+    ffprobe_path: str = "ffprobe"
+    enable_event_finalize: bool = True
+    enable_legacy_http_api: bool = False
+    embedding_api_key_override: str = ""
+    embedding_base_url_override: str = ""
+    embedding_model_override: str = ""
     app_version: str = "0.1.0"
     websocket_path: str = "/ws/agent"
     
@@ -44,8 +59,8 @@ class Settings(BaseSettings):
     enable_retrieval: bool = True
 
     # Video Processing & Filtering Presets
-    video_fps: float = 0.5
-    video_max_frames: Optional[int] = None
+    video_fps: float = Field(0.5, gt=0, le=60)
+    video_max_frames: Optional[int] = Field(None, ge=1)
     video_laplacian_min: float = 20.0
     video_diff_threshold: float = 20.0
     video_ssim_threshold: float = 0.92
@@ -135,6 +150,8 @@ class Settings(BaseSettings):
 
     @property
     def embedding_model_id(self) -> str:
+        if self.embedding_model_override:
+            return self.embedding_model_override
         if self.provider_name == "dashscope":
             return self.dashscope_embedding_model or self.embedding_model
         if self.provider_name == "openrouter":

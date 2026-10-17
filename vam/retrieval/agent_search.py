@@ -18,7 +18,7 @@ from vam.config import get_settings
 from vam.protocol import PlannerActionAdapter, PlannerQuerySpec
 from vam.llm.openrouter import OpenRouterClient
 from vam import prompts
-from vam.retrieval.frame_store import store as default_store, FrameStore
+from vam.retrieval.frame_store import store as default_store, FrameStore, FrameRecord
 
 logger = logging.getLogger(__name__)
 
@@ -262,8 +262,6 @@ async def _resolve_visual_reference(
 
 
 def _frame_from_result(result: Dict[str, Any]) -> "FrameRecord":
-    from .frame_store import FrameRecord
-
     return FrameRecord(
         frame_id=str(result.get("frame_id") or "temp"),
         t=float(result.get("t", 0.0) or 0.0),
@@ -511,7 +509,7 @@ async def _frames_for_anchor_result(
         if frame_id:
             frame = await store.get_frame_by_id(frame_id)
             if frame is not None:
-                if _source_bucket(result) == "frame":
+                if str(result.get("source") or "") == "frame":
                     center = float(frame.absolute_t) if _normalize_time_mode(time_mode) == "absolute" and frame.absolute_t is not None else float(frame.t)
                     pad = 2.0
                     min_time = center - pad

@@ -48,8 +48,9 @@ async def stream_retrieve_tool_request(
     *,
     transcript: str,
     history: List[Dict[str, Any]],
+    store_instance=None,
 ) -> AsyncGenerator[Dict[str, Any], None]:
-    store = resolve_memory_store()
+    store = store_instance or resolve_memory_store()
     tool_args = RetrieveToolArgs(question=transcript)
     yield {"type": "tool_use", "tool": "retrieve", "input": tool_args.model_dump()}
 
@@ -89,8 +90,9 @@ async def stream_summarize_tool_request(
     *,
     args: SummarizeToolArgs,
     history: List[Dict[str, Any]],
+    store_instance=None,
 ) -> AsyncGenerator[Dict[str, Any], None]:
-    store = resolve_memory_store()
+    store = store_instance or resolve_memory_store()
     payload = args.model_dump()
     yield {"type": "tool_use", "tool": "summarize", "input": payload}
 
@@ -147,6 +149,7 @@ async def stream_agent_response(
     *,
     transcript: str,
     history: Optional[List[Dict[str, Any]]] = None,
+    store_instance=None,
 ) -> AsyncGenerator[Dict[str, Any], None]:
     session_history = history if history is not None else []
     clean_transcript = str(transcript or "").strip()
@@ -161,6 +164,7 @@ async def stream_agent_response(
         async for event in stream_retrieve_tool_request(
             transcript=clean_transcript,
             history=session_history,
+            store_instance=store_instance,
         ):
             yield event
         return
@@ -177,6 +181,7 @@ async def stream_agent_response(
         async for event in stream_retrieve_tool_request(
             transcript=routed_question,
             history=session_history,
+            store_instance=store_instance,
         ):
             yield event
         return
@@ -185,6 +190,7 @@ async def stream_agent_response(
         async for event in stream_summarize_tool_request(
             args=decision.args,
             history=session_history,
+            store_instance=store_instance,
         ):
             yield event
         return

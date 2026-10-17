@@ -13,6 +13,7 @@ import datetime
 from typing import Callable, List, Optional
 
 import anyio
+from vam.runtime import run_sync
 
 from vam.config import get_settings
 from vam.retrieval.frame_store import get_store, cosine_distance
@@ -66,7 +67,8 @@ def _parse_ffprobe_rate(raw: str | None) -> float:
         return 0.0
 
 def _require_binary(name: str) -> str:
-    path = shutil.which(name)
+    configured = getattr(get_settings(), f"{name}_path", name)
+    path = shutil.which(configured)
     if not path:
         raise RuntimeError(f"{name} is required but was not found in PATH")
     return path
@@ -82,11 +84,14 @@ def _probe_video_metadata(video_path: str) -> dict:
             "-show_streams",
             "-print_format",
             "json",
+            "-protocol_whitelist",
+            "file,pipe",
             video_path,
         ],
         capture_output=True,
         text=True,
         check=False,
+        timeout=get_settings().probe_timeout_s,
     )
     if proc.returncode != 0:
         raise RuntimeError((proc.stderr or proc.stdout or "ffprobe failed").strip())
@@ -143,6 +148,7 @@ def extract_data_uris_ffmpeg(
     hist_threshold: float,
     progress_cb: Optional[Callable[[int, int], None]] = None,
     debug: bool = False,
+    cache_root: Optional[str] = None,
 ) -> tuple[List[tuple[float, str]], float, bool, dict]:
     try:
         import cv2
@@ -169,7 +175,8 @@ def extract_data_uris_ffmpeg(
     prev_gray = None
     prev_frame = None
 
-    cache_root = tempfile.gettempdir()
+    cache_root = cache_root or tempfile.gettempdir()
+    os.makedirs(cache_root, exist_ok=True)
     cache_key = hashlib.sha1(
         f"{os.path.abspath(video_path)}|{os.path.getmtime(video_path)}|{os.path.getsize(video_path)}|{fps}".encode("utf-8")
     ).hexdigest()[:16]
@@ -188,13 +195,15 @@ def extract_data_uris_ffmpeg(
                 "-hide_banner",
                 "-loglevel",
                 "error",
+                "-protocol_whitelist",
+                "file,pipe",
                 "-i",
                 video_path,
                 "-map",
                 "0:v:0",
                 "-vf",
                 f"fps={fps}",
-                "-vsync",
+                "-fps_mode",
                 "vfr",
                 "-q:v",
                 "2",
@@ -203,6 +212,7 @@ def extract_data_uris_ffmpeg(
             capture_output=True,
             text=True,
             check=False,
+            timeout=get_settings().media_timeout_s,
         )
         if proc.returncode != 0:
             raise RuntimeError((proc.stderr or proc.stdout or "ffmpeg frame extraction failed").strip())
@@ -368,18 +378,24 @@ async def index_video_async(
     video_absolute_start_time: Optional[float],
     debug: bool,
     store_path: Optional[str] = None,
+    store_instance=None,
+    manager_instance=None,
+    existing_job_id: Optional[str] = None,
+    cache_root: Optional[str] = None,
+    run_inline: bool = False,
 ) -> str:
     if not os.path.isfile(tmp_path):
         raise FileNotFoundError(f"video not found: {tmp_path}")
 
-    job_id = job_manager.create(phase="queued")
+    job_manager = manager_instance or globals()["job_manager"]
+    job_id = existing_job_id or job_manager.create(phase="queued")
     job_manager.log(job_id, "queued")
 
     async def _run() -> None:
         try:
-            enable_event_finalize = str(os.getenv("VAM_ENABLE_EVENT_FINALIZE", "1")).strip() == "1"
+            enable_event_finalize = get_settings().enable_event_finalize and str(os.getenv("VAM_ENABLE_EVENT_FINALIZE", "1")).strip() == "1"
             event_finalize_timeout_s = float(os.getenv("VAM_EVENT_FINALIZE_TIMEOUT_S", "120"))
-            store = get_store(persist_path=store_path)
+            store = store_instance or get_store(persist_path=store_path)
             throttle = {"t": 0.0}
 
             def _prog(phase: str, current: int, total: int) -> None:
@@ -391,7 +407,7 @@ async def index_video_async(
             
             job_manager.progress(job_id, phase="extract", current=0, total=1)
             try:
-                frames, src_fps, truncated, report = await anyio.to_thread.run_sync(
+                frames, src_fps, truncated, report = await run_sync(
                     extract_data_uris_ffmpeg,
                     tmp_path,
                     float(fps),
@@ -402,6 +418,7 @@ async def index_video_async(
                     float(hist_threshold),
                     lambda current, total: _prog("extract", current, total),
                     debug,
+                    cache_root,
                 )
             except Exception as e:
                 job_manager.log(job_id, f"error in extract: {str(e)}")
@@ -409,6 +426,8 @@ async def index_video_async(
                 return
             
             job_manager.log(job_id, f"extracted={len(frames)} truncated={bool(truncated)}")
+            if not frames:
+                raise RuntimeError("no usable video frames; adjust filters and retry")
 
             added: List[dict] = []
             job_manager.progress(job_id, phase="embed", current=0, total=max(1, len(frames)))
@@ -454,6 +473,8 @@ async def index_video_async(
                     embed_error_callback=_embed_error_callback,
                 )
                 
+                if not recs:
+                    raise RuntimeError("all frame embeddings failed or no new frames were produced")
                 report["embed_failures"] = {
                     "count": int(len(failed_frame_ids)),
                     "batches": int(len(failed_batches)),
@@ -526,6 +547,9 @@ async def index_video_async(
                 except Exception:
                     pass
 
+    if run_inline:
+        await _run()
+        return job_id
     task = asyncio.create_task(_run())
     job_manager.attach_task(job_id, task)
     return job_id

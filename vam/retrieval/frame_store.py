@@ -8,13 +8,14 @@ import json
 import logging
 import os
 import math
+import re
 import sqlite3
 import subprocess
 import tempfile
 import uuid
 from dataclasses import dataclass
 from functools import partial
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 try:
     import fcntl
@@ -32,16 +33,25 @@ except Exception:
     torch = None
 
 import anyio
+from vam.runtime import run_sync
 import numpy as np
 
 from vam.llm.openrouter import OpenRouterClient, build_mm_user_content
 from vam import prompts
-from vam.vision.backends import VisionBackend, get_backend
+from vam.vision.backends import VisionBackend, get_backend, validate_embeddings
 from vam.config import get_settings
 
 
 logger = logging.getLogger(__name__)
-_DB_SCHEMA_VERSION = 1
+_DB_SCHEMA_VERSION = 2
+
+
+class ClosingConnection(sqlite3.Connection):
+    def __exit__(self, exc_type, exc_value, traceback):
+        try:
+            return super().__exit__(exc_type, exc_value, traceback)
+        finally:
+            self.close()
 
 
 @contextlib.contextmanager
@@ -341,12 +351,29 @@ class FrameStore:
             self._init_db()
             self._maybe_migrate_legacy_json()
             self._load_from_db()
+            self.validate_model_identity()
+
+    def model_fingerprint(self) -> str:
+        factory = getattr(self._backend, "fingerprint", None)
+        value = factory() if factory else {"backend": self.embedding_name(), "encoding_version": 1}
+        return json.dumps(value, sort_keys=True, separators=(",", ":"))
+
+    def validate_model_identity(self) -> None:
+        with self._connect_db() as conn:
+            row = conn.execute("SELECT model_fingerprint FROM store_meta WHERE store_key=1").fetchone()
+            count = conn.execute("SELECT COUNT(*) FROM frames").fetchone()[0]
+            count += conn.execute("SELECT COUNT(*) FROM memory_documents").fetchone()[0]
+        saved = row[0] if row else None
+        if count and not saved:
+            raise RuntimeError("legacy store has no model identity; back up and rebuild before use")
+        if saved and saved != self.model_fingerprint():
+            raise RuntimeError("embedding model identity mismatch; rebuild the index")
 
     def embedding_name(self) -> str:
         return getattr(self._backend, "name", "unknown")
 
     def _connect_db(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self._persist_path, timeout=30.0, isolation_level=None, check_same_thread=False)
+        conn = sqlite3.connect(self._persist_path, timeout=30.0, isolation_level=None, check_same_thread=False, factory=ClosingConnection)
         conn.row_factory = sqlite3.Row
         return conn
 
@@ -359,6 +386,14 @@ class FrameStore:
             conn.execute("PRAGMA journal_mode=WAL")
             conn.execute("PRAGMA synchronous=NORMAL")
             user_version = int(conn.execute("PRAGMA user_version").fetchone()[0])
+            if user_version == 1:
+                tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+                if {"store_meta", "frames", "memory_documents"} <= tables:
+                    columns = {row[1] for row in conn.execute("PRAGMA table_info(store_meta)")}
+                    saved = conn.execute("SELECT model_fingerprint FROM store_meta WHERE store_key=1").fetchone()[0] if "model_fingerprint" in columns else None
+                    populated = conn.execute("SELECT COUNT(*) FROM frames").fetchone()[0] or conn.execute("SELECT COUNT(*) FROM memory_documents").fetchone()[0]
+                    if populated and not saved:
+                        raise RuntimeError("legacy store has no model identity; back up and rebuild before migration")
             if user_version > _DB_SCHEMA_VERSION:
                 raise RuntimeError(
                     f"unsupported memory store schema version {user_version}; this build supports up to {_DB_SCHEMA_VERSION}"
@@ -413,6 +448,9 @@ class FrameStore:
                 CREATE INDEX IF NOT EXISTS idx_memory_documents_layer_kind_abs_start_end ON memory_documents(layer, kind, absolute_start_t, absolute_end_t);
                 """
             )
+            columns = {row[1] for row in conn.execute("PRAGMA table_info(store_meta)")}
+            if "model_fingerprint" not in columns:
+                conn.execute("ALTER TABLE store_meta ADD COLUMN model_fingerprint TEXT")
             if user_version < _DB_SCHEMA_VERSION:
                 conn.execute(f"PRAGMA user_version = {_DB_SCHEMA_VERSION}")
 
@@ -593,6 +631,8 @@ class FrameStore:
         if not self._db_is_empty():
             return
         frames, documents, dim, recent_event_doc_id, latest_dedup_filter, latest_event_filter, revision = self._load_legacy_json_state(legacy_path)
+        if frames or documents:
+            raise RuntimeError("legacy JSON has no verified model identity; back up and rebuild before use")
         self._dim = dim
         self._recent_event_doc_id = recent_event_doc_id
         self._latest_dedup_filter = dict(latest_dedup_filter or {}) or None
@@ -622,6 +662,10 @@ class FrameStore:
                 raise RuntimeError(
                     f"memory store changed in database (expected revision {expected_revision}, found {current_revision})"
                 )
+            saved_identity = conn.execute("SELECT model_fingerprint FROM store_meta WHERE store_key=1").fetchone()[0]
+            if saved_identity and saved_identity != self.model_fingerprint():
+                conn.execute("ROLLBACK")
+                raise RuntimeError("embedding model identity mismatch")
             next_revision = int(current_revision) + 1
             conn.execute("DELETE FROM frames")
             conn.executemany(
@@ -683,6 +727,7 @@ class FrameStore:
                     json.dumps(self._latest_event_filter or {}, ensure_ascii=False) if self._latest_event_filter else None,
                 ),
             )
+            conn.execute("UPDATE store_meta SET model_fingerprint=? WHERE store_key=1", (self.model_fingerprint(),))
             conn.commit()
             return next_revision
 
@@ -719,7 +764,7 @@ class FrameStore:
                 documents = list(self._memory_documents)
                 recent_event_doc_id = self._recent_event_doc_id
                 expected_revision = int(self._persist_revision)
-            written_revision = await anyio.to_thread.run_sync(
+            written_revision = await run_sync(
                 self._persist_to_db_sync,
                 snap,
                 documents,
@@ -732,7 +777,8 @@ class FrameStore:
     async def _reload_from_db(self) -> None:
         if not self._persist_path or torch is None:
             return
-        await anyio.to_thread.run_sync(self._load_from_db)
+        self.validate_model_identity()
+        await run_sync(self._load_from_db)
 
     def _frame_from_row(self, row: sqlite3.Row) -> Optional[FrameRecord]:
         emb = _blob_to_tensor(row["img_emb"])
@@ -1067,7 +1113,8 @@ class FrameStore:
         def _embed_sync(img: str) -> Tuple[List[float], int]:
             return self._backend.embed_image_base64(img, instruction=prompts.EMBED_INSTRUCTION_REPRESENT_USER_INPUT)
 
-        emb_list, _ = await anyio.to_thread.run_sync(_embed_sync, image_data_uri)
+        emb_list, _ = await run_sync(_embed_sync, image_data_uri)
+        validate_embeddings([emb_list], expected_count=1, expected_dim=self._dim)
         d = int(len(emb_list))
         if self._dim is None:
             self._dim = d
@@ -1186,7 +1233,7 @@ class FrameStore:
 
             chunk_imgs = [item[2] for item in chunk_items]
             try:
-                emb_list = await anyio.to_thread.run_sync(_embed_batch_sync, chunk_imgs)
+                emb_list = await run_sync(_embed_batch_sync, chunk_imgs)
             except Exception as exc:
                 processed_images += len(chunk_items)
                 if progress_callback is not None:
@@ -1207,6 +1254,7 @@ class FrameStore:
                 except Exception:
                     pass
 
+            validate_embeddings(emb_list, expected_count=len(chunk_items), expected_dim=self._dim)
             dims = {len(v) for v in emb_list}
             if len(dims) != 1:
                 raise RuntimeError(f"embedding dim mismatch in batch: dims={sorted(dims)}")
@@ -1283,7 +1331,7 @@ class FrameStore:
         return recs
 
     async def list_frames(self) -> List[FrameRecord]:
-        return await anyio.to_thread.run_sync(partial(self._fetch_frames_sync))
+        return await run_sync(partial(self._fetch_frames_sync))
 
     def _should_use_absolute_time_range(
         self,
@@ -1403,7 +1451,7 @@ class FrameStore:
         max_time: float = float("inf"),
         time_mode: str = "auto",
     ) -> List[FrameRecord]:
-        return await anyio.to_thread.run_sync(
+        return await run_sync(
             partial(
                 self._fetch_frames_sync,
                 min_time=float(min_time),
@@ -1416,7 +1464,7 @@ class FrameStore:
         normalized = [str(frame_id).strip() for frame_id in frame_ids if str(frame_id).strip()]
         if not normalized:
             return []
-        return await anyio.to_thread.run_sync(partial(self._fetch_frames_sync, frame_ids=normalized))
+        return await run_sync(partial(self._fetch_frames_sync, frame_ids=normalized))
 
     def _frame_time_value(self, frame: FrameRecord) -> Optional[float]:
         if frame.absolute_t is not None:
@@ -1427,7 +1475,7 @@ class FrameStore:
         return sum(1 for f in frames if f.absolute_t is not None) >= 2
 
     def _is_event_frame(self, frame: FrameRecord) -> bool:
-        return bool(frame.event_id) and str(frame.memory_tier or "") == "long"
+        return bool(frame.event_id) and any(d.kind == "event" and d.representative_frame_id == frame.frame_id for d in self._memory_documents)
 
     def _tier_for_age(self, age_s: float) -> str:
         cfg = get_settings()
@@ -1486,8 +1534,8 @@ class FrameStore:
         await self._reload_from_db()
         async with self._lock:
             frames = list(self._frames)
-        if len(frames) <= 2:
-            return {"removed": 0, "kept": len(frames), "compressed": 0}
+        if not frames:
+            return {"removed": 0, "kept": 0, "compressed": 0}
 
         use_absolute = self._use_absolute_time_axis(frames)
         keyed: List[Tuple[float, FrameRecord]] = []
@@ -1527,7 +1575,7 @@ class FrameStore:
 
         compressed_map: Dict[str, str] = {}
         for frame_id, image_data_uri, max_side, jpeg_quality in compressed_targets:
-            new_uri = await anyio.to_thread.run_sync(
+            new_uri = await run_sync(
                 partial(
                     self._compress_data_uri,
                     image_data_uri,
@@ -1542,10 +1590,13 @@ class FrameStore:
             before = len(self._frames)
             new_frames: List[FrameRecord] = []
             compressed = 0
+            tiers_changed = False
             for frame in self._frames:
                 if frame.frame_id not in keep_ids:
                     continue
-                frame.memory_tier = tier_by_id.get(frame.frame_id, "recent")
+                tier = tier_by_id.get(frame.frame_id, "recent")
+                tiers_changed |= frame.memory_tier != tier
+                frame.memory_tier = tier
                 if frame.frame_id in compressed_map:
                     frame.image_data_uri = compressed_map[frame.frame_id]
                     compressed += 1
@@ -1553,7 +1604,7 @@ class FrameStore:
             self._frames = new_frames
             after = len(self._frames)
 
-        if before != after or compressed:
+        if before != after or compressed or tiers_changed:
             await self._persist()
         return {
             "removed": int(before - after),
@@ -1565,7 +1616,7 @@ class FrameStore:
     async def get_frame_by_id(self, frame_id: str) -> Optional[FrameRecord]:
         if not frame_id:
             return None
-        frames = await anyio.to_thread.run_sync(partial(self._fetch_frames_sync, frame_ids=[str(frame_id)]))
+        frames = await run_sync(partial(self._fetch_frames_sync, frame_ids=[str(frame_id)]))
         return frames[0] if frames else None
 
     def _format_time_range_text(
@@ -1584,7 +1635,7 @@ class FrameStore:
     async def _embed_text_for_memory(self, text: str) -> Optional[torch.Tensor]:
         if not text:
             return None
-        emb = await self.embed_texts(texts=[text])
+        emb = await self.embed_texts(texts=[text], document=True)
         return emb[0]
 
     def _build_retrieval_fields(
@@ -1662,7 +1713,7 @@ class FrameStore:
                 unique_texts.append(field_text)
         if not unique_texts:
             return None
-        emb_tensor = await self.embed_texts(texts=unique_texts)
+        emb_tensor = await self.embed_texts(texts=unique_texts, document=True)
         serialized_embeddings = {
             text_value: _tensor_to_base64(emb_tensor[idx])
             for idx, text_value in enumerate(unique_texts)
@@ -1945,7 +1996,7 @@ class FrameStore:
         )
 
     async def list_memory_documents(self) -> List[MemoryDocument]:
-        return await anyio.to_thread.run_sync(partial(self._fetch_documents_sync))
+        return await run_sync(partial(self._fetch_documents_sync))
 
     async def list_memory_documents_in_time_range(
         self,
@@ -1957,7 +2008,7 @@ class FrameStore:
         kind: Optional[str] = None,
         summary_filter: Optional[Dict[str, Any]] = None,
     ) -> List[MemoryDocument]:
-        documents = await anyio.to_thread.run_sync(
+        documents = await run_sync(
             partial(
                 self._fetch_documents_sync,
                 layer=layer,
@@ -1981,13 +2032,13 @@ class FrameStore:
         frame_ids = [str(frame_id) for frame_id in (recent_doc.frame_ids or []) if str(frame_id).strip()]
         if not frame_ids:
             return []
-        return await anyio.to_thread.run_sync(partial(self._fetch_frames_sync, frame_ids=frame_ids))
+        return await run_sync(partial(self._fetch_frames_sync, frame_ids=frame_ids))
 
     async def get_recent_event_document(self) -> Optional[MemoryDocument]:
-        recent_doc_id = await anyio.to_thread.run_sync(partial(self._fetch_recent_event_doc_id_sync))
+        recent_doc_id = await run_sync(partial(self._fetch_recent_event_doc_id_sync))
         if not recent_doc_id:
             return None
-        documents = await anyio.to_thread.run_sync(partial(self._fetch_documents_sync, doc_id=recent_doc_id))
+        documents = await run_sync(partial(self._fetch_documents_sync, doc_id=recent_doc_id))
         return documents[0] if documents else None
 
     async def search_memory_documents(
@@ -2006,7 +2057,7 @@ class FrameStore:
             return []
         q_emb = await self.embed_texts(texts=[query])
         q_vec = q_emb[0]
-        documents = await anyio.to_thread.run_sync(
+        documents = await run_sync(
             partial(
                 self._fetch_documents_sync,
                 layer=layer,
@@ -2023,7 +2074,7 @@ class FrameStore:
             for doc in documents
             if doc.representative_frame_id
         ]
-        frames = await anyio.to_thread.run_sync(partial(self._fetch_frames_sync, frame_ids=representative_ids))
+        frames = await run_sync(partial(self._fetch_frames_sync, frame_ids=representative_ids))
         frame_lookup = {f.frame_id: f for f in frames}
         qd = int(q_vec.numel())
         results: List[Dict[str, Any]] = []
@@ -2219,7 +2270,6 @@ class FrameStore:
         event_id = frames[0].event_id or f"event-{uuid.uuid4().hex[:12]}"
         for frame in frames:
             frame.event_id = event_id
-            frame.memory_tier = "long" if frame is frames[-1] else "mid"
         frame_updates = {frame.frame_id: frame for frame in frames}
         async with self._lock:
             for cached_frame in self._frames:
@@ -2227,7 +2277,6 @@ class FrameStore:
                 if updated is None:
                     continue
                 cached_frame.event_id = updated.event_id
-                cached_frame.memory_tier = updated.memory_tier
         start_t = float(frames[0].t)
         end_t = float(frames[-1].t)
         absolute_start_t = frames[0].absolute_t
@@ -2316,7 +2365,7 @@ class FrameStore:
         image_uris = [f.image_data_uri for f in frames[: min(len(frames), 8)]]
         video_uris: List[str] = []
         if source_video_path and os.path.exists(source_video_path):
-            video_uri = self._build_event_video_clip_data_uri(source_video_path, start_t, end_t)
+            video_uri = await run_sync(self._build_event_video_clip_data_uri, source_video_path, start_t, end_t)
             if video_uri:
                 video_uris.append(video_uri)
                 print(
@@ -2482,12 +2531,14 @@ class FrameStore:
                 (0.40, 44),
             )
             cmd = [
-                "ffmpeg",
+                get_settings().ffmpeg_path,
                 "-y",
                 "-ss",
                 f"{clip_start:.3f}",
                 "-to",
                 f"{clip_end:.3f}",
+                "-protocol_whitelist",
+                "file,pipe",
                 "-i",
                 path,
                 "-map",
@@ -2519,7 +2570,7 @@ class FrameStore:
                 if scale < 1.0:
                     insert_at = current.index("-c:v")
                     current[insert_at:insert_at] = ["-vf", f"scale=trunc(iw*{scale}/2)*2:trunc(ih*{scale}/2)*2"]
-                proc = subprocess.run(current, capture_output=True, text=True, check=False)
+                proc = subprocess.run(current, capture_output=True, text=True, check=False, timeout=get_settings().media_timeout_s)
                 if proc.returncode == 0 and os.path.exists(clip_path) and os.path.getsize(clip_path) > 0:
                     with open(clip_path, "rb") as encoded_file:
                         payload_size = len(base64.b64encode(encoded_file.read()))
@@ -2566,6 +2617,8 @@ class FrameStore:
                 pass
 
     def _latest_segment_video_path(self) -> str:
+        if getattr(self, "asset_root", None):
+            return os.path.join(self.asset_root, "latest_segment.mp4")
         configured = str(get_settings().query_latest_segment_video_path or "").strip()
         if configured:
             return os.path.abspath(os.path.expanduser(configured))
@@ -2762,17 +2815,20 @@ class FrameStore:
             out.append(pairs)
         return out
 
-    async def embed_texts(self, *, texts: List[str], batch_size: int = 8) -> torch.Tensor:
+    async def embed_texts(self, *, texts: List[str], batch_size: int = 8, document: bool = False) -> torch.Tensor:
         if torch is None:
             raise RuntimeError("torch is required for embeddings")
         def _embed_sync(ts: List[str]) -> Tuple[List[List[float]], int]:
             return self._backend.embed_texts_batch(
                 ts,
-                instruction=prompts.EMBED_INSTRUCTION_RETRIEVE_RELEVANT,
+                instruction="Represent this document." if document else prompts.EMBED_INSTRUCTION_RETRIEVE_RELEVANT,
                 batch_size=int(batch_size),
             )
 
-        emb_list, _ = await anyio.to_thread.run_sync(_embed_sync, texts)
+        emb_list, _ = await run_sync(_embed_sync, texts)
+        validate_embeddings(emb_list, expected_count=len(texts), expected_dim=self._dim)
+        if self._dim is None and emb_list:
+            self._dim = len(emb_list[0])
         return torch.tensor(emb_list, dtype=torch.float32)
 
 def _resolve_persist_path(base_path: str) -> str:
@@ -2812,4 +2868,10 @@ def resolve_memory_store(*, persist_path: Optional[str] = None) -> FrameStore:
     return get_store(persist_path=persist_path)
 
 
-store = get_store()
+class _DefaultStore:
+    """Keep optional legacy storage lazy so it cannot prevent the managed API from starting."""
+    def __getattr__(self, name):
+        return getattr(get_store(), name)
+
+
+store = _DefaultStore()

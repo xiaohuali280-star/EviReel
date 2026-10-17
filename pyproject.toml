@@ -36,3 +36,9 @@ vam-server = "vam.cli:run_server"
 [tool.setuptools.packages.find]
 namespaces = false
 include = ["vam*"]
+
+[tool.setuptools.package-data]
+"vam.storage" = ["migrations/*.sql"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]

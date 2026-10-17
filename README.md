@@ -4,6 +4,14 @@
 
 <h1 align="center">Visual Agentic Memory (VAM)</h1>
 
+## EviReel P1
+
+This repository now includes persistent multi-video management, isolated visual indexes,
+durable indexing jobs, browser playback and video-bound HTTP/WebSocket requests.
+See [P1 API and deployment guide](docs/P1_VIDEO_API.md) for configuration and examples.
+The original VAM framework and TUI remain available. ASR, persistent conversations,
+hybrid RRF/reranking and the React UI belong to later stages.
+
 <p align="center">
   Transforms unconstrained video streams into hierarchical visual memory, supports query-driven agentic retrieval, and grounds answers through visual inspection.
 </p>
