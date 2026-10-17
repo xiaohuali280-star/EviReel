@@ -64,13 +64,13 @@ ASR 失败不覆盖旧字幕；Embedding 失败发布新可读文本但保留旧
 
 ### 自动回归与构建
 
-自动测试最终结果以本次 JUnit 与 GitHub Actions 日志为准。当前覆盖原 63 项和新增 39 项，共 102 项：真实 SQLite、FFmpeg 音视频、HTTP/WS；自动回归中的模型调用为显式 Mock，不隐式下载模型。唯一测试 warning 为 Starlette/httpx 的依赖弃用提示。
+最终本地回归为 **102 passed，0 failures/errors/skipped，1 warning，65.25 秒**；原 63 项加新增 39 项。GitHub main 的 [Linux CI](https://github.com/xiaohuali280-star/EviReel/actions/runs/39044288134)实际为 **102 passed, 1 warning in 39.86s**，对应代码提交 365b6b6a77d52aad19e0abe57d5aa2ad612a017a。测试使用真实 SQLite、FFmpeg 音视频、HTTP/WS，模型为显式 Mock，不隐式下载模型。唯一测试 warning 为 Starlette/httpx 的依赖弃用提示。
 
 覆盖：中文/英文/混合文本、空转写、无音轨、长句、无标点、小数句界、重叠、非法时间/非有限值、偏移/裁剪、原始文本保留、分页与时间过滤、同名视频隔离、向量异常、document/query 用途、同维不同模型拒绝、重复索引与视觉重建、旧字幕/搜索保留、嵌入重试复用文本、独立通道 partial、读取旧版本、删除/重复任务冲突、重启恢复、schema=1 迁移，以及可选依赖/模型错误、子进程超时和无隐式联网的适配器合约。
 
 全库 compileall、未定义名/语法检查及新增模块完整 F 类静态检查通过。构建 wheel 后确认两套 SQL 迁移和 ASR worker 随包分发，再从 wheel 解包导入并实际初始化 registry schema=2 与字幕 schema=1。
 
-本机测试环境为 Windows、Python 3.12.14、CPU PyTorch、FFmpeg 9.0.2；异步 HTTP/WS 测试按 P1 已确认的环境要求使用本机回环。GitHub main 的 Linux CPU 流程不下载 ASR 模型，上传后检查对应 Actions 运行结果。
+本机测试环境为 Windows、Python 3.12.14、CPU PyTorch、FFmpeg 9.0.2；异步 HTTP/WS 测试按 P1 已确认的环境要求使用本机回环。GitHub main 的 Ubuntu/Python 3.11 CPU 流程使用 FFmpeg 6.1.1，不下载 ASR 模型，依赖安装、compileall 和完整回归均实际通过。
 
 ### 真实 CPU ASR
 
@@ -83,10 +83,10 @@ ASR 失败不覆盖旧字幕；Embedding 失败发布新可读文本但保留旧
 | 完成状态 | 结论 |
 | --- | --- |
 | 代码实现 | P2-A 至 P2-E 完成 |
-| 自动验证 | 102 项覆盖；模型为显式 Mock，实际结果见 JUnit/Actions |
+| 自动验证 | 本地及 Linux CI 的 102 项全部通过；模型为显式 Mock |
 | 真实 ASR | tiny.en 英文合成短视频实际运行成功；时间误差如上 |
 | 真实 Embedding/课程问答 | 未验证，未使用付费模型密钥 |
-| Linux 云端 CI | 直接上传 main 后核对 Actions；不把本机测试等同于云端运行 |
+| Linux 云端 CI | [main 检查成功](https://github.com/xiaohuali280-star/EviReel/actions/runs/39044288134)，102 项通过 |
 
 ## 5. 未解决问题与限制
 
@@ -101,6 +101,8 @@ ASR 失败不覆盖旧字幕；Embedding 失败发布新可读文本但保留旧
 ## 6. GitHub 交付
 
 所有实现、配置、测试和报告直接提交至 [main](https://github.com/xiaohuali280-star/EviReel/tree/main)，未创建分支或 PR。上传前核对远程 main 未被其他提交移动；普通更新保留历史，不强制覆盖。提交号和实际云端测试链接在本次交付消息/结果清单中记录，避免报告自引用提交号。
+
+代码提交后的本次收尾仅更新本报告以记录已完成的 CI，没有修改已测试的运行代码、配置或测试。
 
 ## 7. 下一阶段（未执行）
 
