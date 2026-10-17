@@ -90,6 +90,6 @@ python -m compileall -q vam tests
 python -m pytest tests -q
 ```
 
-自动测试使用真实 SQLite、合成音视频与 FFmpeg；模型调用被 Mock。不能由这些结果推断付费模型输入兼容性、课程问答准确率、费用或 ASR 效果。Linux CI 文件已准备，但 P1 代码经审核上传后才能运行；本阶段不提前发布实现。
+自动测试使用真实 SQLite、合成音视频与 FFmpeg；模型调用被 Mock。不能由这些结果推断付费模型输入兼容性、课程问答准确率、费用或 ASR 效果。P1 已上传为草稿 PR #2；GitHub Ubuntu/Python 3.11 CPU 回归的 63 项测试全部通过，合并仍待审查。
 
 保留原 MIT LICENSE、原 VAM 说明与 TUI。P2 再扩展字幕表与 ASR，P3 再扩展统一证据与检索融合，P4/P5 按 plan.md 执行。

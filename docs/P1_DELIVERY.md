@@ -3,8 +3,8 @@
 日期：2026-10-17（Asia/Shanghai）
 仓库：[xiaohuali280-star/EviReel](https://github.com/xiaohuali280-star/EviReel)
 起始提交：`daef28828893879251309c93be20fe7fe6a00841`
-本地分支：`codex/p1-video-management`
-状态：**P1 实现与自动验证完成，代码仅在独立工作副本，尚未上传 GitHub。**
+开发分支：`codex/p1-video-management`
+状态：**P1 实现完成，已上传 [草稿 PR #2](https://github.com/xiaohuali280-star/EviReel/pull/2)；本地与 GitHub Linux 回归均通过，尚未合并 main。**
 
 ## 1. 本阶段目标
 
@@ -12,7 +12,7 @@
 
 按用户新的指令，开发仓库由 VAM 改为 EviReel。EviReel 起始 main 已包含 P0 报告和测试，无需等待原 VAM PR 合并。计划已单独上传为 [EviReel 计划草稿 PR #1](https://github.com/xiaohuali280-star/EviReel/pull/1)，该 PR 只有 plan.md，不包含 P1 实现。
 
-本会话没有 Codex Cloud 交互式终端。为满足“阶段一待审核后上传代码”，本阶段在 agent 创建的独立工作副本和隔离 Python 依赖中实现与测试，没有要求用户自己下载仓库或安装依赖，也未修改项目 sources/ 参考材料。实际验证位置为本机 agent 工作环境，不能描述为已通过 Linux 云端 CI。
+本阶段在 agent 创建的独立工作副本和隔离 Python 依赖中实现与测试，未修改项目 sources/ 参考材料。随后用户明确授权“继续执行完阶段一并将代码上传至 github”，因此上传 P1 分支并创建草稿 PR，保留合并审查。GitHub Actions 另外完成 Ubuntu/Python 3.11 云端验证。
 
 ## 2. 修改文件
 
@@ -44,7 +44,7 @@
 | vam/cli.py | EviReel 启动提示与 WS 消息体上限 |
 | tests/test_p0_baseline.py | 移除临时 re 注入，按新 video_id 要求更新 WS 基线 |
 | tests/test_p1_video_management.py | 48 项 P1 参数化/集成回归 |
-| .github/workflows/p0-baseline.yml | 准备 Ubuntu/Python 3.11 CPU 回归；审核上传后才会实际运行 |
+| .github/workflows/p0-baseline.yml | Ubuntu/Python 3.11 CPU 回归；已实际运行通过 |
 | pyproject.toml、setup.cfg | 同步 dev 测试依赖、SQL 迁移打包规则 |
 | .env.example | P1 可配置项示例，不含真实密钥 |
 | README.md | EviReel P1 入口说明，保留原 VAM/许可证与 TUI 说明 |
@@ -128,6 +128,8 @@ python -m compileall -q vam tests
 
 ### 4.2 实际环境与浏览器
 
+GitHub Actions：[PR 检查](https://github.com/xiaohuali280-star/EviReel/actions/runs/39038683393)和 [push 检查](https://github.com/xiaohuali280-star/EviReel/actions/runs/39038666519)均成功。PR job 的实际日志为 **63 passed, 1 warning in 22.83s**，环境为 Ubuntu 24.04、Python 3.11.17、CPU PyTorch、FFmpeg 6.1.1；compileall 同步通过。验证的源码提交为 d5ba672370a0f8d27e77976c6a476244627e0514。其后仅更新两份交付/接口文档，没有更改已测试的运行代码。
+
 Windows agent 隔离环境：Python 3.12.14，SQLite 3.53.1，torch 2.14.1+cpu，CUDA=False；FastAPI 0.143.3，NumPy 1.26.4，OpenCV 4.10.0，pytest 9.1.1，FFmpeg/FFprobe 9.0.2。
 
 本机异步事件循环需要回环连接，沙箱中最初卡在 socketpair 初始化；授权测试进程使用回环后完成。该环境问题没有被算作源码失败或测试通过。
@@ -146,7 +148,7 @@ Windows agent 隔离环境：Python 3.12.14，SQLite 3.53.1，torch 2.14.1+cpu�
 | 代码已实现 | P1 视频资产、隔离、持久任务、播放、重试/删除、受控 HTTP/WS 及基础修复完成 |
 | 自动测试通过 | 63 项；真实 SQLite/FFmpeg/HTTP/WS，模型为非零确定性 Mock/Mock HTTP/Mock VLM |
 | 真实 API 已验证 | **没有**；未使用付费 Embedding/VLM/LLM 密钥，未验证真实课程问答质量 |
-| 云端 Linux CI | 流程已准备，**尚未执行 P1**，因为用户要求审核前不上传代码 |
+| 云端 Linux CI | **63 项全部通过**；Ubuntu/Python 3.11 CPU，[PR 检查记录](https://github.com/xiaohuali280-star/EviReel/actions/runs/39038683393) |
 | 浏览器媒体验证 | 真实播放与时间跳转通过；不是完整 React 流程验收 |
 
 此前 60/61 项的回归是中间结果；最终以 63 项和对应 JUnit 文件为准。
@@ -154,7 +156,7 @@ Windows agent 隔离环境：Python 3.12.14，SQLite 3.53.1，torch 2.14.1+cpu�
 ## 5. 当前问题、风险与限制
 
 1. 真实模型 API、图文向量空间兼容性和课程视频问答仍待有凭据/样本时验证；本阶段未编造效果指标或费用。
-2. P1 Linux CI 尚未运行。工作流已备好；审核上传后应首先检查云端回归再审查合并。
+2. 云端 CI 使用合成视频和 Mock 模型；其通过仅证明自动回归范围内的行为，不代表真实课程效果或生产规模验收。
 3. 原 FrameStore 仍使用全量快照持久化、内存候选检索；长课程的内存/延迟/磁盘占用尚未基准测试，不宣称大规模并发能力。
 4. 成功旧索引版本暂不自动回收，保留到删除视频；高频重建会增加磁盘占用。
 5. 没有登录系统、分布式任务队列、自动模型重试或跨进程 worker；同 DATA_ROOT 只支持一个服务进程。
@@ -165,10 +167,10 @@ Windows agent 隔离环境：Python 3.12.14，SQLite 3.53.1，torch 2.14.1+cpu�
 
 ## 6. GitHub 与审查交付
 
-- 唯一已上传的新变更：[EviReel 计划草稿 PR #1](https://github.com/xiaohuali280-star/EviReel/pull/1)，分支 codex/plan-p1-p5，仅包含 plan.md。
-- P1 在本地独立分支 codex/p1-video-management 保存提交，供审查与恢复；**未 push、未创建 P1 GitHub PR、未合并 main**。
+- 计划：[EviReel 计划草稿 PR #1](https://github.com/xiaohuali280-star/EviReel/pull/1)，分支 codex/plan-p1-p5，仅包含 plan.md。
+- 阶段一：[EviReel P1 草稿 PR #2](https://github.com/xiaohuali280-star/EviReel/pull/2)，分支 codex/p1-video-management；**代码已上传，未合并 main**。直接 Git 网络连接超时后使用已连接的 GitHub 接口创建提交；源码树 SHA 与本地测试版本完全一致（86ba2dfa9060e162ed14e1fe494343df7ff28151，报告更新前）。
 - 交付审查报告、完整源码 zip、差异 patch、JUnit 结果、浏览器截图；运行数据/模型依赖/真实密钥不进入源码包。
-- 用户审核通过后才上传 P1 分支并创建草稿 PR。主分支保持原状，后续也只使用 EviReel，不再修改原 VAM 仓库。
+- 最新用户指令已授权上传 P1；草稿 PR 保留供审查。主分支保持原状，后续也只使用 EviReel，不再修改原 VAM 仓库。
 
 ## 7. 下一阶段计划（未执行）
 
