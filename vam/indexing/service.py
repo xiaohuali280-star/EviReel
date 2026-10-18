@@ -45,12 +45,13 @@ class PersistentProgress:
         self.registry.update_job(job_id, status="running", phase="vision_failed", error_code="index_failed", error=str(error)[:800])
 
 class IndexingService:
-    def __init__(self, settings, *, backend=None, indexer=None, transcriber=None):
+    def __init__(self, settings, *, backend=None, indexer=None, transcriber=None, reranker=None):
         self.settings = settings
         self.registry = VideoRegistry(settings.data_root)
         self.backend = backend
         self.indexer = indexer or index_video_async
         self.transcriber = transcriber or FasterWhisperTranscriber(settings)
+        self.reranker = reranker
         self.progress = PersistentProgress(self.registry)
         self.owner = OwnerLock(self.registry.root)
         self.semaphore = asyncio.Semaphore(settings.index_concurrency)
@@ -301,6 +302,30 @@ class IndexingService:
         release = self._retain(video_id)
         try:
             yield self._transcript_store(video_id)
+        finally:
+            release()
+
+    @asynccontextmanager
+    async def retrieval_context(self, video_id):
+        from vam.retrieval.pipeline import SearchContext
+        row = self._usable_video(video_id)
+        release = self._retain(video_id)
+        lock = self.memory_locks.setdefault(video_id, asyncio.Lock())
+        try:
+            async with lock:
+                row = self._usable_video(video_id)
+                visual, transcript, warnings = None, None, []
+                if row['active_generation']:
+                    try:
+                        visual = self._store(video_id, row['active_generation'])
+                    except DomainError as exc:
+                        warnings.append({'code': exc.code, 'source': 'vision'})
+                if row['transcript_generation']:
+                    transcript = self._transcript_store(video_id)
+                if visual is None and not (transcript and transcript.state()['searchable']):
+                    raise DomainError(409, 'index_not_ready', 'Video has no compatible searchable visual/transcript index')
+                yield SearchContext(row=row, visual=visual, transcript=transcript, backend=self.backend or get_backend(),
+                                    settings=self.settings, reranker=self.reranker, warnings=warnings)
         finally:
             release()
 

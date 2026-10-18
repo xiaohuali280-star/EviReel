@@ -38,6 +38,21 @@ class Settings(BaseSettings):
     transcript_chunk_max_chars: int = Field(500, ge=16, le=4000)
     transcript_chunk_max_duration_s: float = Field(30, gt=0, le=300)
     transcript_chunk_pause_s: float = Field(1.5, ge=0, le=30)
+    retrieval_fusion: str = Field('rrf', pattern='^(rrf|legacy)$')
+    retrieval_rrf_k: int = Field(60, ge=1, le=1000)
+    retrieval_candidates_per_source: int = Field(20, ge=1, le=100)
+    retrieval_min_similarity: float = Field(0.05, ge=-1, le=1)
+    retrieval_max_evidence: int = Field(24, ge=4, le=50)
+    retrieval_neighbor_s: float = Field(2, ge=0, le=30)
+    retrieval_inspect_frames: int = Field(6, ge=1, le=16)
+    retrieval_max_turns: int = Field(4, ge=1, le=20)
+    retrieval_answer_text_chars: int = Field(800, ge=100, le=4000)
+    rerank_enabled: bool = False
+    rerank_api_key: str = ''
+    rerank_model: str = 'rerank-v4.0-pro'
+    rerank_timeout_s: float = Field(10, gt=0, le=60)
+    rerank_candidates: int = Field(20, ge=1, le=100)
+    rerank_text_chars: int = Field(2000, ge=100, le=8000)
     embedding_api_key_override: str = ""
     embedding_base_url_override: str = ""
     embedding_model_override: str = ""

@@ -2642,7 +2642,7 @@ class FrameStore:
             return None
         return _video_file_to_data_uri(path)
 
-    async def inspect_frames(self, frames: List[FrameRecord], query: str) -> str:
+    async def inspect_frames(self, frames: List[FrameRecord], query: str, *, include_latest_video=True) -> str:
         """
         Perform Visual Inspection over multiple frames to answer a specific query.
         Uses the internal Multimodal Inspector client.
@@ -2660,7 +2660,7 @@ class FrameStore:
         image_uris = [f.image_data_uri for f in frames]
         user_prompt = f"User Query: {query}\n\nPlease examine these {len(frames)} frames and answer the query."
 
-        latest_video = self._latest_segment_video_data_uri()
+        latest_video = self._latest_segment_video_data_uri() if include_latest_video else None
         video_uris = [latest_video] if latest_video else []
         messages = [
             {"role": "system", "content": system_prompt},

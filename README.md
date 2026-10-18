@@ -4,7 +4,7 @@
 
 <h1 align="center">Visual Agentic Memory (VAM)</h1>
 
-## EviReel P2
+## EviReel P3
 
 This repository now includes persistent multi-video management, isolated visual indexes,
 durable indexing jobs, browser playback and video-bound HTTP/WebSocket requests.
@@ -13,8 +13,11 @@ P2 adds optional CPU speech transcription, timestamped segments/chunks, independ
 text and semantic readiness, idempotent transcript jobs and video-scoped subtitle search.
 See [P2 transcript guide](docs/P2_TRANSCRIPT_API.md). Install optional models with
 `pip install -e ".[asr]"`; model downloads are disabled by default.
-The original VAM framework and TUI remain available. Persistent conversations,
-hybrid RRF/reranking and the React UI belong to later stages. Development uses `main` directly.
+P3 adds unified frame/event/summary/transcript evidence, ranked RRF fusion, optional
+text reranking, scoped visual checks and validated answer citations. See the
+[P3 search and evidence guide](docs/P3_SEARCH_API.md).
+The original VAM framework and TUI remain available. Persistent conversations and
+the React UI belong to later stages. Development uses `main` directly.
 
 <p align="center">
   Transforms unconstrained video streams into hierarchical visual memory, supports query-driven agentic retrieval, and grounds answers through visual inspection.

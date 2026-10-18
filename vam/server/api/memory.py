@@ -4,7 +4,6 @@ import base64
 
 from fastapi import APIRouter, Request, Query, Response
 from pydantic import BaseModel, ConfigDict, Field, model_validator
-from vam.retrieval.agent_search import hybrid_event_frame_search
 
 from vam.video_registry import DomainError
 
@@ -24,19 +23,6 @@ class VisualSearchRequest(BaseModel):
         if self.max_time is not None and self.max_time < self.min_time:
             raise ValueError("max_time must be >= min_time")
         return self
-
-@router.post("/{video_id}/search")
-async def visual_search(video_id: str, body: VisualSearchRequest, request: Request):
-    async with request.app.state.indexing.memory_context(video_id) as (row, store):
-        hits = await hybrid_event_frame_search(body.query, top_k=body.top_k, store_instance=store,
-                    min_time=body.min_time, max_time=body.max_time if body.max_time is not None else float("inf"),
-                    time_mode="relative")
-        for hit in hits:
-            hit.pop("image", None)
-            hit["video_id"] = video_id
-            if hit.get("frame_id"):
-                hit["image_url"] = f"/api/videos/{video_id}/frames/{hit['frame_id']}/image?index_version={row['active_generation']}"
-        return {"video_id": video_id, "index_version": row["active_generation"], "results": hits}
 
 @router.get("/{video_id}/frames")
 async def list_frames(video_id: str, request: Request, offset: int = Query(0, ge=0),

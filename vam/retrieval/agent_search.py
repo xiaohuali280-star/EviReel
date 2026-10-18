@@ -14,6 +14,7 @@ try:
 except Exception:
     torch = None
 
+from vam.retrieval.pipeline import active_search
 from vam.config import get_settings
 from vam.protocol import PlannerActionAdapter, PlannerQuerySpec
 from vam.llm.openrouter import OpenRouterClient
@@ -149,7 +150,7 @@ def _build_context_string(context: List[Dict[str, Any]], frames: List[Any]) -> s
             kind = str(result.get("kind") or "-")
             time_bits = _format_result_time_range(result)
             ref_bits = f"ref=({i},{ridx})"
-            identity_bits = []
+            identity_bits = ["evidence_id=" + result["evidence_id"]] if result.get("evidence_id") else []
             if result.get("doc_id"):
                 identity_bits.append(f"doc_id={result.get('doc_id')}")
             if result.get("frame_id"):
@@ -222,6 +223,8 @@ def _best_hit(context: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
 
 
 def _has_evidence(context: List[Dict[str, Any]], *, min_score: float = 0.12) -> bool:
+    if any(hit.get("evidence_id") for hit in _collect_hits(context)):
+        return True
     best = _best_hit(context)
     if not best:
         return False
@@ -432,7 +435,7 @@ def _format_ordered_candidate_refs(
     seen: set[Tuple[str, str]] = set()
     for ridx, result in ordered_pairs:
         label = _format_result_time_range(result)
-        identity = str(result.get("doc_id") or result.get("frame_id") or "")
+        identity = str(result.get("evidence_id") or result.get("doc_id") or result.get("frame_id") or "")
         key = (label, identity)
         if key in seen:
             continue
@@ -560,6 +563,11 @@ async def _adjudicate_anchor_candidates(
     inspect_k = len(review_candidates)
 
     async def _review_one(candidate: Dict[str, Any]) -> Dict[str, Any]:
+        if active_search.get() is not None and candidate.get('source') == 'transcript':
+            active_search.get().warn('transcript_anchor_is_text_only', 'transcript')
+            return dict(candidate, anchor_review={'match': True, 'confidence': 0.,
+                        'observed_event': candidate.get('caption', ''),
+                        'reason': 'Matched ASR text; not visual verification of speech or action'})
         frames = await _frames_for_anchor_result(
             store=store,
             result=candidate,
@@ -621,6 +629,9 @@ async def _inspect_results(
     prompt: str,
     joint: bool,
 ) -> List[Dict[str, Any]]:
+    scoped = active_search.get()
+    if scoped is not None:
+        return await scoped.inspect(results, inspect_k=inspect_k, prompt=prompt, joint=joint)
     inspect_n = max(0, min(len(results), int(inspect_k)))
     if inspect_n == 0:
         return list(results)
@@ -643,7 +654,7 @@ async def _inspect_results(
     return inspected + untouched
 
 
-async def hybrid_event_frame_search(
+async def _visual_hybrid_search(
     query: str,
     top_k: int = 5,
     threshold: float = 0.65,
@@ -779,7 +790,7 @@ async def hybrid_event_frame_search(
     return merged[:top_k]
 
 
-async def search_generator(
+async def _legacy_search_generator(
     semantic: str,
     store_instance: Optional[FrameStore] = None,
     chat_history: Optional[List[Dict[str, Any]]] = None,
@@ -810,6 +821,8 @@ async def search_generator(
         max_turns = max(1, int(os.getenv("VAM_AGENT_MAX_TURNS", "20")))
     except Exception:
         max_turns = 20
+    if active_search.get() is not None:
+        max_turns = min(max_turns, cfg.retrieval_max_turns)
     final_response = ""
     prev_unique_hits = 0
     stagnant_turns = 0
@@ -1355,7 +1368,7 @@ async def search_generator(
         t_plan_start = time.time()
 
         messages = [
-            {"role": "system", "content": prompts.agent_planner_system()},
+            {"role": "system", "content": prompts.agent_planner_system(include_transcripts=active_search.get() is not None)},
             {
                 "role": "user",
                 "content": prompts.agent_planner_user(
@@ -1469,6 +1482,9 @@ async def search_generator(
             return
 
         elif action == "summarize":
+            if active_search.get() is not None:
+                active_search.get().warn('summary_creation_disabled_during_retrieval')
+                continue
             time_range = plan.get("time_range", {})
             min_t, max_t, t_mode, anchor_summary, anchor_events, anchor_failed = await _resolve_requested_time_range(time_range)
             for event in anchor_events:
@@ -1605,7 +1621,10 @@ async def search_generator(
                 "joint": True,
             }
             t_insp_start = time.time()
-            inspection_text = await store.inspect_frames(frames_to_inspect, inspect_prompt)
+            if active_search.get() is not None:
+                inspection_text = await active_search.get().inspect_direct(frames_to_inspect, inspect_prompt)
+            else:
+                inspection_text = await store.inspect_frames(frames_to_inspect, inspect_prompt)
             dur = time.time() - t_insp_start
             yield {"type": "inspection_done", "duration": dur}
 
@@ -1828,7 +1847,7 @@ async def search_generator(
             unique_keys: set[str] = set()
             for turn_item in context:
                 for r in (turn_item.get("results") or []):
-                    key = str(r.get("doc_id") or r.get("frame_id") or "")
+                    key = str(r.get("evidence_id") or r.get("doc_id") or r.get("frame_id") or "")
                     if key:
                         unique_keys.add(key)
             current_unique_hits = len(unique_keys)
@@ -1902,3 +1921,36 @@ async def search(
         if event["type"] == "final":
             final_res = event["result"]
     return final_res
+
+
+async def hybrid_event_frame_search(query, top_k=5, threshold=.65, store_instance=None,
+                                  min_time=0., max_time=float('inf'), time_mode='auto',
+                                  image_query_emb=None, sources=None, summary_filter=None):
+    scoped = active_search.get()
+    if scoped is not None:
+        return await scoped.search(query, top_k=top_k, threshold=threshold, min_time=min_time,
+                                   max_time=max_time, time_mode=time_mode, image_query_emb=image_query_emb,
+                                   sources=sources, summary_filter=summary_filter)
+    return await _visual_hybrid_search(query, top_k, threshold, store_instance, min_time, max_time,
+                                      time_mode, image_query_emb, sources, summary_filter)
+
+
+async def search_generator(semantic, store_instance=None, chat_history=None, retrieval_context=None):
+    if retrieval_context is None:
+        async for event in _legacy_search_generator(semantic, store_instance, chat_history):
+            yield event
+        return
+    token = active_search.set(retrieval_context)
+    try:
+        async for event in _legacy_search_generator(semantic, store_instance, chat_history):
+            if event.get('type') == 'answer':
+                # Unvalidated planner prose must not be exposed as an answer event.
+                continue
+            if event.get('type') == 'final':
+                result = await retrieval_context.answer(semantic, event.get('result'))
+                yield {'type': 'answer', 'content': result['answer']}
+                yield {'type': 'final', 'result': result}
+            else:
+                yield event
+    finally:
+        active_search.reset(token)

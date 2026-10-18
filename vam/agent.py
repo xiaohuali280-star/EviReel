@@ -49,6 +49,7 @@ async def stream_retrieve_tool_request(
     transcript: str,
     history: List[Dict[str, Any]],
     store_instance=None,
+    retrieval_context=None,
 ) -> AsyncGenerator[Dict[str, Any], None]:
     store = store_instance or resolve_memory_store()
     tool_args = RetrieveToolArgs(question=transcript)
@@ -59,6 +60,7 @@ async def stream_retrieve_tool_request(
         semantic=tool_args.question,
         store_instance=store,
         chat_history=history,
+        **({"retrieval_context": retrieval_context} if retrieval_context is not None else {}),
     ):
         if str(event.get("type") or "") == "final":
             maybe_result = event.get("result")
@@ -91,7 +93,11 @@ async def stream_summarize_tool_request(
     args: SummarizeToolArgs,
     history: List[Dict[str, Any]],
     store_instance=None,
+    retrieval_context=None,
 ) -> AsyncGenerator[Dict[str, Any], None]:
+    if retrieval_context is not None and retrieval_context.visual is None:
+        from vam.video_registry import DomainError
+        raise DomainError(409, 'index_not_ready', 'Summarizing visual memory requires a usable visual index')
     store = store_instance or resolve_memory_store()
     payload = args.model_dump()
     yield {"type": "tool_use", "tool": "summarize", "input": payload}
@@ -128,12 +134,22 @@ async def stream_summarize_tool_request(
             }
         )
 
+    evidence = []
+    if retrieval_context is not None:
+        from vam.retrieval.evidence import adapt_hit
+        for doc in created_docs:
+            evidence.append(adapt_hit({'doc_id': doc.doc_id, 'frame_id': doc.representative_frame_id,
+                                      'frame_ids': doc.frame_ids, 'text': doc.text, 'start_t': doc.start_t,
+                                      'end_t': doc.end_t, 'score': 1}, video_id=retrieval_context.row['video_id'],
+                                      source='summary', version=retrieval_context.versions['visual'],
+                                      duration=retrieval_context.row['duration']))
     answer = f"Created {len(results)} summary documents in Hierarchical Memory."
     yield {
         "type": "final",
         "text": answer,
         "result": {
             "created": len(results),
+            "evidence": evidence, "warnings": [], "citations": [{k: e[k] for k in ("evidence_id", "video_id", "source", "index_version", "start_t", "end_t")} for e in evidence],
             "documents": results,
             "answer": answer,
         },
@@ -150,6 +166,7 @@ async def stream_agent_response(
     transcript: str,
     history: Optional[List[Dict[str, Any]]] = None,
     store_instance=None,
+    retrieval_context=None,
 ) -> AsyncGenerator[Dict[str, Any], None]:
     session_history = history if history is not None else []
     clean_transcript = str(transcript or "").strip()
@@ -165,7 +182,14 @@ async def stream_agent_response(
             transcript=clean_transcript,
             history=session_history,
             store_instance=store_instance,
+            retrieval_context=retrieval_context,
         ):
+            yield event
+        return
+
+    if decision.type == "final" and retrieval_context is not None:
+        async for event in stream_retrieve_tool_request(transcript=clean_transcript, history=session_history,
+                                                        store_instance=store_instance, retrieval_context=retrieval_context):
             yield event
         return
 
@@ -182,6 +206,7 @@ async def stream_agent_response(
             transcript=routed_question,
             history=session_history,
             store_instance=store_instance,
+            retrieval_context=retrieval_context,
         ):
             yield event
         return
@@ -191,6 +216,7 @@ async def stream_agent_response(
             args=decision.args,
             history=session_history,
             store_instance=store_instance,
+            retrieval_context=retrieval_context,
         ):
             yield event
         return

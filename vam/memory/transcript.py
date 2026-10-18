@@ -143,8 +143,11 @@ class TranscriptStore:
                 row[key] = json.loads(row[key])
         return row
 
-    def search(self, query_vector, *, fingerprint, dim, top_k=5, min_time=0., max_time=None):
+    def search(self, query_vector, *, fingerprint, dim, top_k=5, min_time=0., max_time=None, version_id=None):
         state = self.state()
+        if version_id is not None:
+            state['search_version'] = version_id
+            state['search_uses_older_text'] = state['text_version'] != version_id
         version = self.version(state['search_version']) if state['search_version'] else None
         if not version:
             raise DomainError(409, 'transcript_search_not_ready', 'Transcript text may be readable, but semantic search is not ready')
@@ -166,6 +169,13 @@ class TranscriptStore:
                 if length <= 0 or not math.isfinite(length):
                     raise DomainError(409, 'corrupt_transcript_index', 'Transcript vector is invalid; rebuild the index')
                 row['score'] = sum(a*b for a, b in zip(vector, query_vector)) / (norm*length)
+                row['quality_warnings'] = ['transcript_time_clipped'] if json.loads(version['metadata']).get('clipped_segments') else []
+                for sid in json.loads(row['segment_ids']):
+                    segment = conn.execute('SELECT quality FROM transcript_segments WHERE version=? AND segment_id=?', (version['version'], sid)).fetchone()
+                    quality = json.loads(segment['quality']) if segment else {}
+                    if quality.get('no_speech_prob', 0) > .6 or quality.get('avg_logprob', 0) < -1:
+                        row['quality_warnings'].append('possible_asr_error')
+                        break
                 hits.append(self.public_item(row))
         hits.sort(key=lambda h: (-h['score'], h['start_t'], h['doc_id']))
         return {'video_id': self.video_id, **state, 'results': hits[:top_k]}

@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field, ConfigDict, field_validator, model_valida
 
 
 class StrictSchemaModel(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
 
 
 class VideoAgentRequest(StrictSchemaModel):
@@ -135,8 +135,8 @@ class PlannerTimeAnchor(StrictSchemaModel):
     ref: Optional[PlannerBestRef] = None
     before_seconds: float = Field(0.0, ge=0.0, le=604800.0)
     after_seconds: float = Field(0.0, ge=0.0, le=604800.0)
-    sources: Optional[List[Literal["frame", "event", "summary"]]] = None
-    candidate_source_groups: Optional[List[List[Literal["frame", "event", "summary"]]]] = None
+    sources: Optional[List[Literal["frame", "event", "summary", "transcript"]]] = None
+    candidate_source_groups: Optional[List[List[Literal["frame", "event", "summary", "transcript"]]]] = None
     top_k: int = Field(5, ge=1, le=50)
     inspect_k: int = Field(3, ge=0, le=20)
     threshold: float = Field(0.0, ge=0.0)
@@ -177,11 +177,11 @@ class PlannerTimeAnchor(StrictSchemaModel):
     @classmethod
     def _normalize_candidate_source_groups(
         cls,
-        value: Optional[List[List[Literal["frame", "event", "summary"]]]],
-    ) -> Optional[List[List[Literal["frame", "event", "summary"]]]]:
+        value: Optional[List[List[Literal["frame", "event", "summary", "transcript"]]]],
+    ) -> Optional[List[List[Literal["frame", "event", "summary", "transcript"]]]]:
         if value is None:
             return None
-        normalized: List[List[Literal["frame", "event", "summary"]]] = []
+        normalized: List[List[Literal["frame", "event", "summary", "transcript"]]] = []
         seen: set[tuple[str, ...]] = set()
         for group in value:
             cleaned = [str(item).strip().lower() for item in (group or []) if str(item).strip()]
@@ -270,9 +270,9 @@ class PlannerAnswerAction(StrictSchemaModel):
 
 class PlannerSearchAction(StrictSchemaModel):
     action: Literal["search"]
-    queries: List[PlannerQuerySpec] = Field(..., min_length=1)
+    queries: List[PlannerQuerySpec] = Field(..., min_length=1, max_length=4)
     time_range: Optional[PlannerTimeRange] = None
-    sources: Optional[List[Literal["frame", "event", "summary"]]] = None
+    sources: Optional[List[Literal["frame", "event", "summary", "transcript"]]] = None
     summary_filter: Optional[PlannerSummaryFilter] = None
     visual_ref: Optional[PlannerVisualRef] = None
     joint_inspection: bool = False

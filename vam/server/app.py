@@ -9,16 +9,17 @@ from vam.server.api.frames import router as frames_router
 from vam.server.api.videos import router as videos_router
 from vam.server.api.memory import router as memory_router
 from vam.server.api.transcripts import router as transcripts_router
+from vam.server.api.search import router as search_router
 from vam.server.ws.agent_chat import router as agent_chat_router
 from vam.video_registry import DomainError
 from vam.server.upload_limit import UploadLimitMiddleware
 
-def create_app(*, settings=None, backend=None, indexer=None, transcriber=None) -> FastAPI:
+def create_app(*, settings=None, backend=None, indexer=None, transcriber=None, reranker=None) -> FastAPI:
     settings = settings or get_settings()
 
     @asynccontextmanager
     async def lifespan(app):
-        service = IndexingService(settings, backend=backend, indexer=indexer, transcriber=transcriber)
+        service = IndexingService(settings, backend=backend, indexer=indexer, transcriber=transcriber, reranker=reranker)
         app.state.indexing = service
         await service.start()
         try:
@@ -29,6 +30,7 @@ def create_app(*, settings=None, backend=None, indexer=None, transcriber=None) -
     app = FastAPI(title=settings.app_name, version=settings.app_version, lifespan=lifespan)
     app.add_middleware(UploadLimitMiddleware, max_bytes=settings.max_upload_bytes)
     app.include_router(videos_router)
+    app.include_router(search_router)
     app.include_router(memory_router)
     app.include_router(transcripts_router)
     if settings.enable_legacy_http_api:

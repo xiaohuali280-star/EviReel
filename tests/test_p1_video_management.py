@@ -418,7 +418,7 @@ def test_ws_video_binding_and_history_switch(client, media):
     a, _ = upload(client, media)
     b, _ = upload(client, media, "blue")
     observed = []
-    async def retrieval(*, semantic, store_instance, chat_history):
+    async def retrieval(*, semantic, store_instance, chat_history, retrieval_context=None):
         frames = await store_instance.list_frames()
         observed.append((store_instance._persist_path, len(chat_history)))
         yield {"type": "final", "result": {"answer": "mock answer", "found": True,
@@ -434,13 +434,17 @@ def test_ws_video_binding_and_history_switch(client, media):
                 events = []
                 while not events or events[-1]["type"] != "final":
                     events.append(ws.receive_json())
+                    assert events[-1]["type"] != "error", events[-1]
                 assert all(e["video_id"] == vid for e in events)
                 assert events[-1]["result"]["best"]["video_id"] == vid
         with client.websocket_connect("/ws/agent") as ws:
             ws.receive_json()
             ws.send_json({"type":"text","video_id":b,"text":"reconnect"})
-            while ws.receive_json()["type"] != "final":
-                pass
+            while True:
+                event = ws.receive_json()
+                assert event["type"] != "error", event
+                if event["type"] == "final":
+                    break
     assert [n for _, n in observed] == [0,0,2,0]
     assert a in observed[0][0] and all(b in p for p, _ in observed[1:])
 

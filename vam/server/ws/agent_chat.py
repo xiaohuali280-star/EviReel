@@ -25,7 +25,7 @@ def scope_event(event, video_id, version):
         if isinstance(value, list):
             return [bind(item) for item in value]
         if isinstance(value, dict):
-            result = {key: bind(item) for key, item in value.items()}
+            result = {key: bind(item) for key, item in value.items() if key != "image"}
             if any(key in value for key in ("frame_id", "doc_id", "time_range")):
                 result["video_id"] = video_id
             return result
@@ -75,18 +75,23 @@ async def agent_chat(websocket: WebSocket):
                     continue
                 request = VideoAgentRequest.model_validate(payload)
                 service = websocket.app.state.indexing
-                async with service.memory_context(request.video_id) as (row, store):
+                async with service.retrieval_context(request.video_id) as scope:
+                    row = scope.row
+                    # Empty visual adapter preserves planner/time-anchor behavior on
+                    # transcript-only videos without resolving an unrelated default DB.
+                    from vam.retrieval.frame_store import FrameStore
+                    store = scope.visual if scope.visual is not None else FrameStore(backend=scope.backend)
                     if bound_video != request.video_id:
                         history.clear()
                         bound_video = request.video_id
                     if request.type == "text":
-                        events = stream_agent_response(transcript=request.text, history=history, store_instance=store)
+                        events = stream_agent_response(transcript=request.text, history=history, store_instance=store, retrieval_context=scope)
                     elif request.name == "retrieve":
                         args = RetrieveToolArgs.model_validate(request.args)
-                        events = stream_retrieve_tool_request(transcript=args.question, history=history, store_instance=store)
+                        events = stream_retrieve_tool_request(transcript=args.question, history=history, store_instance=store, retrieval_context=scope)
                     else:
                         args = SummarizeToolArgs.model_validate(request.args)
-                        events = stream_summarize_tool_request(args=args, history=history, store_instance=store)
+                        events = stream_summarize_tool_request(args=args, history=history, store_instance=store, retrieval_context=scope)
                     async for event in events:
                         if not await send(scope_event(event, request.video_id, row["active_generation"])):
                             return
