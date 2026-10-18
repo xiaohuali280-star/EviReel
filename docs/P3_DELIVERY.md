@@ -70,12 +70,14 @@ RRF 同分时按问题的来源优先级、时间及稳定 ID 排序；Frame+Eve
 - 实际生成含 Attention/softmax 公式的幻灯片视频，Mock 教师口述，经过真实 SQLite/FFmpeg/HTTP 与 Mock Embedding/VLM/LLM 的组合证据链；检查字幕、画面、可读取图片链接与最终引用。
 - WS final 的统一证据、受控事件、语音/画面冲突提示，以及检索不能偷偷创建 Summary。
 
-本地环境为 Windows、Python 3.12.14、CPU PyTorch、FFmpeg 9.0.2。测试模型均为显式 Mock；HTTP/WS 和 SQLite/FFmpeg 确实运行。按 P1 环境要求允许测试使用本机回环。全库编译、未定义名/语法检查及新增模块 F 类静态检查通过，wheel 构建与迁移资源加载验证通过。上传 main 后核对 Linux Actions，不把本地结果等同于云端验证。
+本地环境为 Windows、Python 3.12.14、CPU PyTorch、FFmpeg 9.0.2。测试模型均为显式 Mock；HTTP/WS 和 SQLite/FFmpeg 确实运行。按 P1 环境要求允许测试使用本机回环。全库编译、未定义名/语法检查及新增模块 F 类静态检查通过，wheel 构建与迁移资源加载验证通过。
+
+上传 main 后，[GitHub Actions #39088457590](https://github.com/xiaohuali280-star/EviReel/actions/runs/39088457590) 在 Ubuntu / Python 3.11 上验证代码提交 `2ca9118434fb6f984e90f41b841070914bd48de4`：**149 passed，1 warning，43.53 秒**，工作流结论为 success。本次收尾提交仅补充交付报告，运行代码与该次云端检查一致。
 
 | 完成状态 | 结论 |
 | --- | --- |
 | P3-A 至 P3-E 实现 | 已完成 |
-| 自动回归 | 本地 149 项通过；Mock 模型与实际媒体/存储/HTTP/WS，云端结果见对应 Actions |
+| 自动回归 | 本地和 Linux Actions 均 149 项通过；Mock 模型与实际媒体/存储/HTTP/WS |
 | 服务适配器格式核对 | 依据 [Cohere 官方文档](https://docs.cohere.com/v2/reference/rerank)，HTTP 合约测试通过 |
 | 真实付费 Rerank / Embedding / VLM / LLM | 未验证，未使用真实密钥 |
 | 真实课程组合问答准确率 | 未验证，不报告虚构效果或费用 |
@@ -92,7 +94,7 @@ RRF 同分时按问题的来源优先级、时间及稳定 ID 排序；Frame+Eve
 
 ## 6. GitHub 交付
 
-代码、测试和说明直接上传 [main](https://github.com/xiaohuali280-star/EviReel/tree/main)，不创建分支/PR。更新前核对远程 main，使用普通提交与分支头校验，不强制覆盖其他改动。实际提交和云端检查链接在最终交付消息及结果清单记录。
+代码、测试和说明直接上传 [main](https://github.com/xiaohuali280-star/EviReel/tree/main)，不创建分支/PR。更新前核对远程 main，使用普通提交与分支头校验，不强制覆盖其他改动。代码提交为 [2ca9118](https://github.com/xiaohuali280-star/EviReel/commit/2ca9118434fb6f984e90f41b841070914bd48de4)，[对应云端检查](https://github.com/xiaohuali280-star/EviReel/actions/runs/39088457590) 已成功；随后仅更新本报告记录结果。
 
 ## 7. 下一阶段（未执行）
 
