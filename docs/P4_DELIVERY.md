@@ -59,7 +59,9 @@ video_id + conversation_id + request_id + 原问题
 - 索引版本改变后仍展示旧快照并标记 stale_evidence，不把旧 ID 解析为新记录；澄清后保留最近相关锚点。
 - 输入长度/ID 限制、reset 新会话、完成后订阅释放及旧 P1–P3 回归。
 
-本地 P0–P4 全套回归 **172 passed，1 warning，101.07 秒**；收尾增加发送失败用例并收紧规范改写接线后，P4 专项 **24 passed，1 warning，11.34 秒**。warning 为 Starlette/httpx 弃用提示，未出现失败或跳过。静态未定义名/语法检查、新模块 F 类检查、全库编译与 wheel 验证均通过。上传后的 Linux Actions 将验证完整最终代码，并在交付时记录。
+本地最终 P0–P4 全套回归 **173 passed，0 failures/errors/skipped，1 warning，105.29 秒**（原 149 项 + P4 新增 24 项）；P4 专项另有 **24 passed，1 warning，11.34 秒**。warning 为 Starlette/httpx 弃用提示。本地环境为 Windows、Python 3.12.14、CPU PyTorch、FFmpeg 9.0.2，测试按既有环境约束使用本机回环。静态未定义名/语法检查、新模块 F 类检查、全库编译与 wheel 验证均通过。
+
+上传 main 后，[GitHub Actions #39105725168](https://github.com/xiaohuali280-star/EviReel/actions/runs/39105725168) 在 Ubuntu / Python 3.11 上验证代码提交 `797cc042202bfc20403979f26bcba5dfeb0973e5`：**173 passed，1 warning，54.74 秒**，结论 success。后续收尾提交仅更新交付报告，运行代码与本次云端验证一致。
 
 ## 5. 限制与风险
 
@@ -73,7 +75,7 @@ video_id + conversation_id + request_id + 原问题
 
 ## 6. GitHub 交付
 
-代码、测试和说明直接上传 [main](https://github.com/xiaohuali280-star/EviReel/tree/main)。提交前核对最新分支头，使用非强制更新，不覆盖并发改动。交付提交与对应云端检查在完成后记录。
+代码、测试和说明直接上传 [main](https://github.com/xiaohuali280-star/EviReel/tree/main)。提交前核对最新分支头，使用非强制更新，不覆盖并发改动。代码提交为 [797cc04](https://github.com/xiaohuali280-star/EviReel/commit/797cc042202bfc20403979f26bcba5dfeb0973e5)，[对应云端检查](https://github.com/xiaohuali280-star/EviReel/actions/runs/39105725168) 已成功；随后仅更新本报告记录结果。
 
 ## 7. 下一阶段（未执行）
 
