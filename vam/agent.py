@@ -23,11 +23,13 @@ def append_history(history: List[Dict[str, Any]], *, user_text: str, assistant_t
     history.append({"role": "assistant", "content": assistant_text})
 
 
-async def route_text_request(*, transcript: str) -> WsAgentDecision:
+async def route_text_request(*, transcript: str, conversation_context=None) -> WsAgentDecision:
     cfg = get_settings()
     router_client = OpenRouterClient(model_id=cfg.model_id)
     messages = [
         {"role": "system", "content": prompts.ws_agent_system()},
+        *([{"role": "system", "content": prompts.conversation_context_system() + '\n' + conversation_context.text}]
+          if conversation_context is not None else []),
         {"role": "user", "content": transcript},
     ]
     text, _ = await router_client.chat(messages, temperature=0.0, max_tokens=300)
@@ -167,6 +169,7 @@ async def stream_agent_response(
     history: Optional[List[Dict[str, Any]]] = None,
     store_instance=None,
     retrieval_context=None,
+    conversation_context=None,
 ) -> AsyncGenerator[Dict[str, Any], None]:
     session_history = history if history is not None else []
     clean_transcript = str(transcript or "").strip()
@@ -174,7 +177,8 @@ async def stream_agent_response(
         return
 
     try:
-        decision = await route_text_request(transcript=clean_transcript)
+        decision = await route_text_request(transcript=clean_transcript,
+                                            **({'conversation_context': conversation_context} if conversation_context is not None else {}))
     except Exception as exc:
         logger.warning("top_level_router_failed; falling back to direct Agentic Retrieval: %s", exc)
         yield {"type": "user_text", "text": clean_transcript}
@@ -200,7 +204,8 @@ async def stream_agent_response(
         return
 
     if decision.name == "retrieve":
-        routed_question = decision.args.question
+        # P4 has already persisted and budget-checked the canonical rewrite.
+        routed_question = clean_transcript if conversation_context is not None else decision.args.question
         yield {"type": "user_text", "text": routed_question}
         async for event in stream_retrieve_tool_request(
             transcript=routed_question,

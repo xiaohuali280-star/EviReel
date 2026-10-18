@@ -12,12 +12,16 @@ class StrictSchemaModel(BaseModel):
 class VideoAgentRequest(StrictSchemaModel):
     type: Literal["text", "tool"]
     video_id: str = Field(..., pattern=r"^v_[0-9a-f]{32}$")
+    conversation_id: Optional[str] = Field(None, pattern=r"^c_[0-9a-f]{32}$")
+    request_id: Optional[str] = Field(None, pattern=r"^r_[0-9a-f]{32}$")
     text: Optional[str] = Field(None, max_length=4000)
     name: Optional[Literal["retrieve", "summarize"]] = None
     args: Dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def _validate_request(self):
+        if (self.conversation_id is None) != (self.request_id is None):
+            raise ValueError("conversation_id and request_id must be supplied together")
         if self.type == "text" and not str(self.text or "").strip():
             raise ValueError("text must not be empty")
         if self.type == "tool" and self.name is None:

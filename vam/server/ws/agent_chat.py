@@ -1,17 +1,19 @@
 from __future__ import annotations
+
 import asyncio
 import contextlib
 import json
-import logging
+import re
+import uuid
+
 from fastapi import APIRouter, WebSocket
 from pydantic import ValidationError
 
-from vam.protocol import RetrieveToolArgs, SummarizeToolArgs, VideoAgentRequest
-from vam.agent import stream_agent_response, stream_retrieve_tool_request, stream_summarize_tool_request
+from vam.protocol import VideoAgentRequest
 from vam.video_registry import DomainError
 
 router = APIRouter()
-logger = logging.getLogger(__name__)
+
 
 async def _safe_send_text(websocket, payload):
     try:
@@ -20,91 +22,99 @@ async def _safe_send_text(websocket, payload):
     except Exception:
         return False
 
+
 def scope_event(event, video_id, version):
     def bind(value):
         if isinstance(value, list):
             return [bind(item) for item in value]
         if isinstance(value, dict):
-            result = {key: bind(item) for key, item in value.items() if key != "image"}
-            if any(key in value for key in ("frame_id", "doc_id", "time_range")):
-                result["video_id"] = video_id
+            result = {key: bind(item) for key, item in value.items() if key != 'image'}
+            if any(key in value for key in ('frame_id', 'doc_id', 'time_range')):
+                result['video_id'] = video_id
             return result
         return value
-    return bind(event) | {"video_id": video_id, "index_version": version}
+    return bind(event) | {'video_id': video_id, 'index_version': version}
 
-@router.websocket("/ws/agent")
+
+@router.websocket('/ws/agent')
 async def agent_chat(websocket: WebSocket):
     await websocket.accept()
-    history = []
-    bound_video = None
-    send_lock = asyncio.Lock()
-
-    async def send(event):
-        async with send_lock:
-            return await _safe_send_text(websocket, event)
-
-    async def keep_alive():
-        while True:
-            await asyncio.sleep(20)
-            if not await send({"type": "ping"}):
-                return
-
-    ping = asyncio.create_task(keep_alive())
+    service = websocket.app.state.conversations
+    queue = asyncio.Queue(maxsize=64)
+    legacy_conversations = {}
+    receive_task = event_task = None
+    scope = {}
     try:
-        await send({"type": "info", "message": "EviReel endpoint ready; video_id is required"})
+        await _safe_send_text(websocket, {'type': 'info', 'protocol_version': 2,
+                                         'message': 'EviReel ready; persistent conversation_id/request_id supported'})
+        receive_task = asyncio.create_task(websocket.receive())
+        event_task = asyncio.create_task(queue.get())
         while True:
-            message = await websocket.receive()
-            if message["type"] == "websocket.disconnect":
+            done, _ = await asyncio.wait([receive_task, event_task], timeout=20, return_when=asyncio.FIRST_COMPLETED)
+            if not done:
+                if not await _safe_send_text(websocket, {'type': 'ping', 'protocol_version': 2}):
+                    break
+                continue
+            if event_task in done:
+                if not await _safe_send_text(websocket, event_task.result()):
+                    break
+                event_task = asyncio.create_task(queue.get())
+            if receive_task not in done:
+                continue
+            message = receive_task.result()
+            if message['type'] == 'websocket.disconnect':
                 break
-            text = message.get("text")
+            receive_task = asyncio.create_task(websocket.receive())
+            text = message.get('text')
             if text is None:
                 continue
-            if len(text) > 16_000:
-                await send({"type": "error", "code": "message_too_large", "message": "Message exceeds limit"})
-                continue
+            scope = {}
             try:
+                if len(text) > 16000:
+                    raise DomainError(413, 'message_too_large', 'Message exceeds limit')
                 payload = json.loads(text)
                 if not isinstance(payload, dict):
-                    raise ValueError("Expected a JSON object")
-                if payload.get("type") == "pong":
+                    raise ValueError('Expected object')
+                if payload.get('type') == 'pong':
                     continue
-                if payload.get("type") == "reset":
-                    history.clear()
-                    bound_video = None
-                    await send({"type": "info", "message": "chat reset"})
+                for key, prefix in (('video_id', 'v'), ('conversation_id', 'c'), ('request_id', 'r')):
+                    if re.fullmatch(prefix + r'_[0-9a-f]{32}', str(payload.get(key, ''))):
+                        scope[key] = payload[key]
+                if payload.get('type') == 'reset':
+                    video_id = payload.get('video_id')
+                    conversation = service.store.create(video_id)
+                    legacy_conversations[video_id] = conversation['conversation_id']
+                    await _safe_send_text(websocket, {'type': 'conversation_created', 'protocol_version': 2, **conversation})
                     continue
                 request = VideoAgentRequest.model_validate(payload)
-                service = websocket.app.state.indexing
-                async with service.retrieval_context(request.video_id) as scope:
-                    row = scope.row
-                    # Empty visual adapter preserves planner/time-anchor behavior on
-                    # transcript-only videos without resolving an unrelated default DB.
-                    from vam.retrieval.frame_store import FrameStore
-                    store = scope.visual if scope.visual is not None else FrameStore(backend=scope.backend)
-                    if bound_video != request.video_id:
-                        history.clear()
-                        bound_video = request.video_id
-                    if request.type == "text":
-                        events = stream_agent_response(transcript=request.text, history=history, store_instance=store, retrieval_context=scope)
-                    elif request.name == "retrieve":
-                        args = RetrieveToolArgs.model_validate(request.args)
-                        events = stream_retrieve_tool_request(transcript=args.question, history=history, store_instance=store, retrieval_context=scope)
-                    else:
-                        args = SummarizeToolArgs.model_validate(request.args)
-                        events = stream_summarize_tool_request(args=args, history=history, store_instance=store, retrieval_context=scope)
-                    async for event in events:
-                        if not await send(scope_event(event, request.video_id, row["active_generation"])):
-                            return
+                if request.conversation_id is None:
+                    # Compatibility is private to this socket and video, never a shared default.
+                    if request.video_id not in legacy_conversations:
+                        legacy_conversations[request.video_id] = service.store.create(request.video_id)['conversation_id']
+                    request.conversation_id = legacy_conversations[request.video_id]
+                    request.request_id = 'r_' + uuid.uuid4().hex
+                service.store.get(request.conversation_id, request.video_id)
+                row, fresh = service.submit(request)
+                if row['status'] in {'accepted', 'running'}:
+                    service.subscribe(request.conversation_id, request.request_id, queue)
+                accepted = service.envelope({'type': 'accepted', 'status': row['status'], 'replayed': not fresh},
+                                             request.conversation_id, request.request_id)
+                if not await _safe_send_text(websocket, accepted):
+                    break
+                terminal = service.terminal(row)
+                if terminal and not await _safe_send_text(websocket, terminal):
+                    break
             except DomainError as exc:
-                await send({"type": "error", "code": exc.code, "message": exc.message})
+                await _safe_send_text(websocket, {'type': 'error', 'protocol_version': 2, **scope, 'code': exc.code, 'message': exc.message})
             except (ValueError, ValidationError):
-                await send({"type": "error", "code": "invalid_request", "message": "Invalid request; include a valid video_id and text/tool arguments"})
-            except Exception as exc:
-                logger.warning("agent_failed video_id=%s error_type=%s", bound_video, type(exc).__name__)
-                await send({"type": "error", "code": "agent_failed", "message": "Agent/model request failed; retry is available"})
+                await _safe_send_text(websocket, {'type': 'error', 'protocol_version': 2, **scope,
+                                                 'code': 'invalid_request', 'message': 'Invalid video, conversation, request or tool arguments'})
     finally:
-        ping.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await ping
+        service.unsubscribe(queue)
+        for task in (receive_task, event_task):
+            if task is not None:
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
         with contextlib.suppress(Exception):
             await websocket.close()

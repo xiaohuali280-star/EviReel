@@ -420,7 +420,7 @@ def test_ws_video_binding_and_history_switch(client, media):
     observed = []
     async def retrieval(*, semantic, store_instance, chat_history, retrieval_context=None):
         frames = await store_instance.list_frames()
-        observed.append((store_instance._persist_path, len(chat_history)))
+        observed.append((store_instance._persist_path, len(json.loads(chat_history[0]['content'])['turns'])))
         yield {"type": "final", "result": {"answer": "mock answer", "found": True,
                  "best": {"frame_id": frames[0].frame_id, "t": frames[0].t}, "turns": []}}
     decision = RetrieveToolCall(type="tool", name="retrieve", args=RetrieveToolArgs(question="red"))
@@ -445,7 +445,7 @@ def test_ws_video_binding_and_history_switch(client, media):
                 assert event["type"] != "error", event
                 if event["type"] == "final":
                     break
-    assert [n for _, n in observed] == [0,0,2,0]
+    assert [n for _, n in observed] == [0,0,1,0]
     assert a in observed[0][0] and all(b in p for p, _ in observed[1:])
 
 def test_ws_summary_writes_only_bound_video(client, media):

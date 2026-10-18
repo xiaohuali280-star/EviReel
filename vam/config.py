@@ -53,6 +53,15 @@ class Settings(BaseSettings):
     rerank_timeout_s: float = Field(10, gt=0, le=60)
     rerank_candidates: int = Field(20, ge=1, le=100)
     rerank_text_chars: int = Field(2000, ge=100, le=8000)
+    conversation_recent_turns: int = Field(6, ge=1, le=30)
+    conversation_context_chars: int = Field(16000, ge=1000, le=64000)
+    conversation_context_tokens: int = Field(8000, ge=500, le=32000)
+    conversation_message_chars: int = Field(2000, ge=100, le=4000)
+    conversation_summary_chars: int = Field(2000, ge=100, le=8000)
+    conversation_summary_batch_turns: int = Field(12, ge=1, le=50)
+    conversation_model_timeout_s: float = Field(30, gt=0, le=120)
+    conversation_request_timeout_s: float = Field(180, gt=0, le=900)
+    conversation_max_running: int = Field(4, ge=1, le=32)
     embedding_api_key_override: str = ""
     embedding_base_url_override: str = ""
     embedding_model_override: str = ""
