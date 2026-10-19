@@ -46,7 +46,18 @@ Python warning 为既有 Starlette/httpx 弃用提示。Vite 对 lucide-react �
 
 ## GitHub
 
-按用户长期约定直接提交 main，不创建分支或 PR，上传前检查远程头并使用非强制更新。代码提交和 Linux Actions 的最终结果在上传后补充。
+按用户长期约定直接提交 main，不创建分支或 PR，上传前检查远程头并使用非强制更新。
+
+代码提交：[fd74849](https://github.com/xiaohuali280-star/EviReel/commit/fd748491da426642962134c94986a54f34c1b41e)。远程 Git tree 与本地验证版本一致：`aabdf1b4c2d30441a6bd6bd0c34415aa703f77b5`。
+
+[GitHub Actions #39182093895](https://github.com/xiaohuali280-star/EviReel/actions/runs/39182093895) 在 Ubuntu / Python 3.11 / Node 24 / Chromium 完成验证，结论 **success**：
+
+- Python：**182 passed，1 warning，65.00 秒**。
+- 前端契约：**3 passed**，类型检查与生产构建通过。
+- 浏览器：**3 passed，34.6 秒**，包括最终下载错误提示、多视频切换与断网恢复。
+- wheel 构建与网页/迁移资源检查通过；报告、截图和 wheel 已归档为 P5-validation-and-wheel（artifact 12156531774）。
+
+之后的收尾提交仅更新本报告与执行清单，运行代码与上述云端验证保持一致。
 
 ## 页面截图
 
