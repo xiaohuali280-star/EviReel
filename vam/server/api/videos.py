@@ -21,8 +21,17 @@ async def upload_video(request: Request, video: UploadFile = File(...)):
     return await request.app.state.indexing.ingest(video)
 
 @router.get("/videos")
-async def list_videos(request: Request, offset: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=200)):
-    return request.app.state.indexing.registry.list(offset, limit)
+async def list_videos(request: Request, offset: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=200),
+                      q: str = Query('', max_length=200), trash: bool = False):
+    return request.app.state.indexing.registry.list(offset, limit, q=q.strip(), trash=trash)
+
+@router.post('/videos/{video_id}/trash')
+async def trash_video(video_id: str, request: Request):
+    return request.app.state.indexing.trash(video_id)
+
+@router.post('/videos/{video_id}/restore')
+async def restore_video(video_id: str, request: Request):
+    return request.app.state.indexing.trash(video_id, restore=True)
 
 @router.get("/videos/{video_id}")
 async def video_detail(video_id: str, request: Request):

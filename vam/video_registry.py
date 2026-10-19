@@ -54,7 +54,10 @@ class VideoRegistry:
     def public(self, row):
         ready = bool(row["active_generation"])
         transcript = self.transcript_state(row)
-        return {key: row[key] for key in ("video_id", "original_name", "size_bytes", "duration", "created_at", "status", "active_generation", "last_error")} | {
+        with self.db.connect() as conn:
+            job = conn.execute("SELECT job_id FROM index_jobs WHERE video_id=? ORDER BY started_at DESC,attempt DESC LIMIT 1", (row['video_id'],)).fetchone()
+        return {key: row[key] for key in ("video_id", "original_name", "size_bytes", "duration", "created_at", "status", "active_generation", "last_error", "trashed_at")} | {
+            "latest_job_id": job[0] if job else None,
             "capabilities": {"playback": bool(row["playback_path"]), "vision": ready,
                              "transcript": transcript["readable"], "transcript_search": transcript["searchable"]},
             "transcript": {"status": row["transcript_status"], "error": row["transcript_error"], **transcript},
@@ -73,10 +76,13 @@ class VideoRegistry:
         return {"text_version": None, "search_version": None, "readable": False, "searchable": False,
                 "text_status": "not_ready", "language": None, "search_uses_older_text": False}
 
-    def list(self, offset=0, limit=50):
+    def list(self, offset=0, limit=50, *, q='', trash=False):
+        # Literal substring search: user '%'/'_' are not SQL wildcard operators.
+        where = "trashed_at IS NOT NULL" if trash else "trashed_at IS NULL"
+        where += " AND instr(lower(original_name),lower(?))>0"
         with self.db.connect() as conn:
-            total = conn.execute("SELECT COUNT(*) FROM videos").fetchone()[0]
-            rows = conn.execute("SELECT * FROM videos ORDER BY created_at DESC,video_id LIMIT ? OFFSET ?", (limit, offset)).fetchall()
+            total = conn.execute("SELECT COUNT(*) FROM videos WHERE " + where, (q,)).fetchone()[0]
+            rows = conn.execute("SELECT * FROM videos WHERE " + where + " ORDER BY created_at DESC,video_id LIMIT ? OFFSET ?", (q, limit, offset)).fetchall()
         return {"items": [self.public(dict(row)) for row in rows], "total": total, "offset": offset, "limit": limit}
 
     def register(self, video_id, original_name, source_path, size, duration):
@@ -87,7 +93,7 @@ class VideoRegistry:
 
     def update_video(self, video_id, **fields):
         allowed = {"status", "playback_path", "active_generation", "model_fingerprint", "last_error",
-                   "source_sha256", "transcript_generation", "transcript_status", "transcript_error"}
+                   "source_sha256", "transcript_generation", "transcript_status", "transcript_error", "trashed_at"}
         if not fields or not fields.keys() <= allowed:
             raise ValueError("invalid registry update")
         with self.db.connect(write=True) as conn:
@@ -97,6 +103,8 @@ class VideoRegistry:
         if kind not in {"video", "transcript"}:
             raise ValueError("unsupported indexing job kind")
         row = self.get(video_id)
+        if row['trashed_at'] is not None:
+            raise DomainError(409, 'video_trashed', 'Restore the video before indexing')
         if row["status"] in {"deleting", "delete_failed"}:
             raise DomainError(409, "video_deleting", "Video deletion must finish before indexing")
         jid = uuid.uuid4().hex

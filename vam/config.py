@@ -62,6 +62,14 @@ class Settings(BaseSettings):
     conversation_model_timeout_s: float = Field(30, gt=0, le=120)
     conversation_request_timeout_s: float = Field(180, gt=0, le=900)
     conversation_max_running: int = Field(4, ge=1, le=32)
+    frontend_dist: str = ''
+    study_auto_generate: bool = True
+    study_max_running: int = Field(2, ge=1, le=8)
+    study_max_batches: int = Field(80, ge=1, le=300)
+    study_batch_chars: int = Field(10000, ge=1000, le=30000)
+    study_timeout_s: float = Field(600, gt=0, le=3600)
+    study_model_timeout_s: float = Field(60, gt=0, le=180)
+    study_max_export_pages: int = Field(500, ge=1, le=2000)
     embedding_api_key_override: str = ""
     embedding_base_url_override: str = ""
     embedding_model_override: str = ""

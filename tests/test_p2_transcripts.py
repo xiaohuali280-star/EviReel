@@ -272,7 +272,7 @@ def test_restart_and_registry_v1_migration(settings, audio_media, transcriber, t
         conn.execute('PRAGMA user_version=1')
     database = Database(legacy)
     with database.connect() as conn:
-        assert conn.execute('PRAGMA user_version').fetchone()[0] == 3
+        assert conn.execute('PRAGMA user_version').fetchone()[0] == 4
         assert conn.execute('SELECT original_name,transcript_status FROM videos').fetchone()[1] == 'not_started'
 
 

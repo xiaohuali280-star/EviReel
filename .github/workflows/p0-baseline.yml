@@ -2,9 +2,9 @@ name: EviReel CPU tests
 on:
   push:
     branches: ["main"]
-    paths: ["vam/**", "tests/**", "pyproject.toml", "setup.cfg", ".github/workflows/p0-baseline.yml"]
+    paths: ["vam/**", "tests/**", "frontend/**", "pyproject.toml", "setup.cfg", ".github/workflows/p0-baseline.yml"]
   pull_request:
-    paths: ["vam/**", "tests/**", "pyproject.toml", "setup.cfg", ".github/workflows/p0-baseline.yml"]
+    paths: ["vam/**", "tests/**", "frontend/**", "pyproject.toml", "setup.cfg", ".github/workflows/p0-baseline.yml"]
 permissions:
   contents: read
 jobs:
@@ -24,14 +24,54 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - uses: pnpm/action-setup@v4
+        with:
+          version: "11.25.0"
       - name: Dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg
           python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
           python -m pip install -e ".[dev]"
+      - name: Frontend contracts and production build
+        working-directory: frontend
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm run typecheck
+          pnpm test
+          pnpm run build
+          pnpm exec playwright install --with-deps chromium
       - name: Syntax and contracts
         run: |
           ffmpeg -version
           python -m compileall -q vam tests
           python -m pytest tests -q --junitxml=test-results.xml
+      - name: Browser workflows (explicit mock providers, real storage and media)
+        run: |
+          python tests/p5_browser_server.py --port 8875 > browser-server.log 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:8875/__test__/health >/dev/null; then break; fi
+            sleep 1
+          done
+          cd frontend
+          pnpm e2e
+      - name: Build installable package with web assets
+        run: |
+          python -m pip install build
+          python -m build --wheel
+          python -c "import glob,zipfile; z=zipfile.ZipFile(glob.glob('dist/*.whl')[0]); assert 'vam/server/static/index.html' in z.namelist(); assert any(n.startswith('vam/server/static/assets/') and n.endswith('.js') for n in z.namelist()); assert 'vam/storage/migrations/004_study.sql' in z.namelist()"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: P5-validation-and-wheel
+          path: |
+            test-results.xml
+            frontend/test-results/
+            frontend/playwright-report/
+            browser-server.log
+            dist/*.whl

@@ -4,7 +4,7 @@
 
 <h1 align="center">Visual Agentic Memory (VAM)</h1>
 
-## EviReel P4
+## EviReel P5
 
 This repository now includes persistent multi-video management, isolated visual indexes,
 durable indexing jobs, browser playback and video-bound HTTP/WebSocket requests.
@@ -20,7 +20,13 @@ P4 adds SQLite conversations, bounded shared context and incremental summaries,
 reference resolution, idempotent background requests and reconnect/restart recovery.
 See the [P4 conversation protocol](docs/P4_CONVERSATION_API.md) and
 [delivery report](docs/P4_DELIVERY.md). The original VAM framework and TUI remain
-available. The React UI belongs to P5. Development uses `main` directly.
+available. P5 adds the blue-and-white React learning workspace, upload and processing
+states, chapter notes, manuscripts, grounded chat recovery, recycle bin and
+PPTX/PDF/TXT/SRT exports. See [P5 execution plan](docs/P5_FRONTEND_PLAN.md),
+[deployment and study API](docs/P5_DEPLOYMENT.md) and [delivery report](docs/P5_DELIVERY.md).
+Built web assets are included: start the single-worker API and open `/`.
+To rebuild them, run `pnpm install --frozen-lockfile` and `pnpm run build` in `frontend/`.
+Development uses `main` directly.
 
 <p align="center">
   Transforms unconstrained video streams into hierarchical visual memory, supports query-driven agentic retrieval, and grounds answers through visual inspection.

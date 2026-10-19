@@ -5,6 +5,7 @@ import errno
 import logging
 import re
 import shutil
+import time
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -59,6 +60,7 @@ class IndexingService:
         self.leases = {}
         self.memory_locks = {}
         self.closed = False
+        self.on_indexed = None
 
     async def start(self):
         self.owner.acquire()
@@ -90,6 +92,8 @@ class IndexingService:
 
     def _usable_video(self, video_id):
         row = self.registry.get(video_id)
+        if row['trashed_at'] is not None:
+            raise DomainError(409, 'video_trashed', 'Restore the video before using it')
         if row["status"] in {"deleting", "delete_failed"}:
             raise DomainError(409, "video_deleting", "Video is being deleted")
         return row
@@ -274,6 +278,8 @@ class IndexingService:
                                      vision_generation=job_id if vision_store else None,
                                      fingerprint=vision_store.model_fingerprint() if vision_store else None)
                 logger.info("index_complete video_id=%s job_id=%s status=%s", video_id, job_id, status)
+                if self.on_indexed and status in {'succeeded', 'partial'}:
+                    self.on_indexed(video_id)
         except asyncio.CancelledError:
             self.registry.update_job(job_id, status="interrupted", phase="interrupted",
                                      error_code="server_shutdown", error="Server stopped before indexing finished")
@@ -370,3 +376,14 @@ class IndexingService:
         except OSError as exc:
             self.registry.update_video(video_id, status="delete_failed", last_error="Deletion incomplete; retry deletion")
             raise DomainError(500, "delete_failed", "Video deletion incomplete; retry deletion") from exc
+
+    def trash(self, video_id, *, restore=False):
+        row = self.registry.get(video_id)
+        if self.leases.get(video_id):
+            raise DomainError(409, 'video_busy', 'Wait for the current operation to finish')
+        with self.registry.db.connect() as conn:
+            active = conn.execute("SELECT 1 FROM index_jobs WHERE video_id=? AND status IN ('queued','running')", (video_id,)).fetchone()
+        if active or row['status'] in {'deleting', 'delete_failed'}:
+            raise DomainError(409, 'video_busy', 'Wait for processing or deletion to finish')
+        self.registry.update_video(video_id, trashed_at=None if restore else time.time())
+        return self.registry.public(self.registry.get(video_id))

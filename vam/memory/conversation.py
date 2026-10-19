@@ -15,6 +15,8 @@ class ConversationStore:
 
     def create(self, video_id):
         row = self.registry.get(video_id)
+        if row['trashed_at'] is not None:
+            raise DomainError(409, 'video_trashed', 'Restore the video before creating a conversation')
         if row['status'] in {'deleting', 'delete_failed'}:
             raise DomainError(409, 'video_deleting', 'Video is being deleted')
         cid, now = 'c_' + uuid.uuid4().hex, time.time()
@@ -38,7 +40,7 @@ class ConversationStore:
         self.registry.get(video_id)
         with self.db.connect() as conn:
             total = conn.execute('SELECT COUNT(*) FROM conversations WHERE video_id=?', (video_id,)).fetchone()[0]
-            rows = conn.execute('SELECT * FROM conversations WHERE video_id=? ORDER BY updated_at DESC,conversation_id LIMIT ? OFFSET ?',
+            rows = conn.execute("SELECT c.*,COALESCE((SELECT substr(content,1,80) FROM messages m WHERE m.conversation_id=c.conversation_id AND m.role='user' ORDER BY message_id LIMIT 1),'新对话') AS title FROM conversations c WHERE video_id=? ORDER BY updated_at DESC,conversation_id LIMIT ? OFFSET ?",
                                 (video_id, limit, offset)).fetchall()
         return {'items': [dict(r) for r in rows], 'total': total, 'offset': offset, 'limit': limit}
 

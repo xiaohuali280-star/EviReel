@@ -12,6 +12,7 @@ class CreateConversation(StrictSchemaModel):
 
 @router.post('', status_code=201)
 async def create(body: CreateConversation, request: Request):
+    request.app.state.indexing._usable_video(body.video_id)
     return request.app.state.conversations.store.create(body.video_id)
 
 
