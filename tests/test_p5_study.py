@@ -9,6 +9,7 @@ import uuid
 from unittest.mock import AsyncMock, patch
 import zipfile
 
+import httpx
 from fastapi.testclient import TestClient
 import pytest
 
@@ -117,6 +118,52 @@ def test_failures_keep_previous_artifact_and_mark_changed_version(client, audio_
     assert client.get(f"/api/videos/{other}/study/jobs/{response['job_id']}").status_code == 404
 
 
+def test_real_http_boundary_persists_auth_failure_and_retains_notes(client, audio_media):
+    from test_study_http import client_factory
+    vid, _ = p2.ingest(client, audio_media)
+    artifact = generate(client, vid)
+    service = client.app.state.study
+    service.model = None
+    service.settings.siliconflow_api_key = 'test-only-not-a-secret'
+
+    def handler(request):
+        return httpx.Response(401, json={'error': {'message': 'PRIVATE provider content test-only-not-a-secret'}})
+
+    with patch('httpx.AsyncClient', client_factory(handler)):
+        response = client.post(f'/api/videos/{vid}/study', json={'request_id': rid()}).json()
+        job = study_terminal(client, vid, response['job_id'])
+    assert job['status'] == 'failed' and job['error_code'] == 'study_model_auth_failed'
+    state = client.get(f'/api/videos/{vid}/study').json()
+    assert state['artifact']['artifact_id'] == artifact['artifact_id']
+    assert 'PRIVATE' not in json.dumps(state) and 'test-only' not in json.dumps(state)
+    assert not service.indexing.leases
+
+
+def test_real_http_stream_retry_publishes_complete_artifact(client, audio_media):
+    from test_study_http import FragmentedStream, client_factory, sse
+    vid, _ = p2.ingest(client, audio_media)
+    service = client.app.state.study
+    service.model = None
+    service.settings.siliconflow_api_key = 'test-only-not-a-secret'
+    seen = []
+
+    def handler(request):
+        seen.append(request)
+        records = json.loads(request.content)['messages'][-1]['content']
+        chapters = [{'title': '章节', 'points': [r['text']], 'source_ids': [r['source_id']]} for r in json.loads(records)]
+        raw = json.dumps({'chapters': chapters}, ensure_ascii=False)
+        first = len(seen) == 1
+        stream = FragmentedStream(sse(raw='partial', finish=None, done=False) if first else sse(raw), fail=first)
+        return httpx.Response(200, headers={'content-type': 'text/event-stream'}, stream=stream)
+
+    with patch('httpx.AsyncClient', client_factory(handler)):
+        artifact = generate(client, vid)
+    content = artifact['content']
+    assert len(seen) == 2 and len(content['chapters']) == 2
+    assert {i for c in content['chapters'] for i in c['source_ids']} == {e['evidence_id'] for e in content['evidence']}
+    assert not service.indexing.leases
+
+
 def test_running_job_idempotency_busy_and_shutdown(client, audio_media):
     vid, _ = p2.ingest(client, audio_media)
     async def wait(messages):
@@ -180,10 +227,11 @@ def test_batches_validate_coverage_budget_and_timeouts(tmp_path):
         batches = service.batches(records)
         assert ''.join(b[0]['text'] for b in batches) == records[0]['text']
         async def missing(messages):
-            return {'chapters': [{'title': 'one', 'points': ['one'], 'source_ids': ['one']}]}
+            first = json.loads(messages[-1]['content'])[0]['source_id']
+            return {'chapters': [{'title': 'one', 'points': ['one'], 'source_ids': [first]}]}
         service.model = missing
         with pytest.raises(ValueError, match='omitted'):
-            await service.draft([records[0], dict(records[0], evidence_id='two')])
+            await service.draft([records[0], dict(records[0], evidence_id='two'), dict(records[0], evidence_id='three')])
         vid = 'v_' + uuid.uuid4().hex
         indexing.registry.directory(vid).mkdir()
         indexing.registry.register(vid, 'sample.mp4', 'source.mp4', 1, 2)
@@ -195,6 +243,27 @@ def test_batches_validate_coverage_budget_and_timeouts(tmp_path):
         await asyncio.gather(*list(service.tasks.values()))
         assert service.job(vid, job['job_id'])['error_code'] == 'study_timeout'
         assert not indexing.leases
+    asyncio.run(scenario())
+
+
+def test_missing_source_is_repaired_without_dropping_material(tmp_path):
+    async def scenario():
+        calls = []
+
+        async def omit_once(messages):
+            records = json.loads(messages[-1]['content'])
+            calls.append([r['source_id'] for r in records])
+            selected = records[:1] if len(calls) == 1 else records
+            return {'chapters': [{'title': '章节', 'points': [r['text']], 'source_ids': [r['source_id']]} for r in selected]}
+
+        cfg = Settings(_env_file=None, data_root=str(tmp_path))
+        service = StudyService(IndexingService(cfg), model=omit_once)
+        records = [{'evidence_id': key, 'text': key, 'start_t': i, 'end_t': i + 1} for i, key in enumerate(('one', 'two', 'three'))]
+        chapters = await service.draft(records)
+        assert calls == [['one', 'two', 'three'], ['two', 'three']]
+        assert {i for c in chapters for i in c['source_ids']} == {'one', 'two', 'three'}
+        assert [(c['start_t'], c['end_t']) for c in chapters] == [(0, 1), (1, 2), (2, 3)]
+
     asyncio.run(scenario())
 
 

@@ -68,7 +68,9 @@ class Settings(BaseSettings):
     study_max_batches: int = Field(80, ge=1, le=300)
     study_batch_chars: int = Field(10000, ge=1000, le=30000)
     study_timeout_s: float = Field(600, gt=0, le=3600)
-    study_model_timeout_s: float = Field(60, gt=0, le=180)
+    study_model_timeout_s: float = Field(180, gt=0, le=180)
+    study_stream: bool = True
+    study_model_attempts: int = Field(2, ge=1, le=3)
     study_max_export_pages: int = Field(500, ge=1, le=2000)
     embedding_api_key_override: str = ""
     embedding_base_url_override: str = ""

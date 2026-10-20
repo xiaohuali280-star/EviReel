@@ -28,6 +28,9 @@ Built web assets are included: start the single-worker API and open `/`.
 To rebuild them, run `pnpm install --frozen-lockfile` and `pnpm run build` in `frontend/`.
 Development uses `main` directly.
 
+For note-generation connection failures, timeouts or missing-source validation,
+see the [diagnosis, fix and real-provider validation](docs/STUDY_GENERATION_FIX.md).
+
 <p align="center">
   Transforms unconstrained video streams into hierarchical visual memory, supports query-driven agentic retrieval, and grounds answers through visual inspection.
 </p>
