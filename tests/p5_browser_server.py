@@ -37,6 +37,12 @@ async def study_model(messages):
         'source_ids': [r['source_id']]} for i, r in enumerate(records)]}
 
 
+async def text_answer_model(messages):
+    data = json.loads(messages[-1]['content'])
+    return json.dumps({'claims': [{'text': '视频讲解了生成树的概念与性质。',
+        'evidence_ids': [e['evidence_id']]} for e in data['sources'][:2]], 'warnings': []})
+
+
 async def fake_chat(self, messages, **kwargs):
     if messages[0]['content'].startswith('Resolve the current question'):
         data = json.loads(messages[-1]['content'])
@@ -93,7 +99,17 @@ def main():
             {'start': .1, 'end': 2.8, 'text': '生成树是无向连通图的极小连通子图，包含原图所有顶点。'},
             {'start': 3.1, 'end': 5.8, 'text': 'blue 生成树有 n 个顶点和 n-1 条边，任意两点之间存在唯一的简单路径。'},
         ], language='zh')
-        app = create_app(settings=settings, backend=TranscriptBackend(), indexer=delayed_indexer, transcriber=transcriber, study_model=study_model)
+        app = create_app(settings=settings, backend=TranscriptBackend(), indexer=delayed_indexer, transcriber=transcriber,
+                         study_model=study_model, chat_model=text_answer_model)
+
+        @app.post('/__test__/text-mode/{video_id}')
+        def text_mode(video_id: str):
+            service = app.state.indexing
+            service.registry.update_video(video_id, active_generation=None)
+            store = service._transcript_store(video_id)
+            with store.connect(write=True) as conn:
+                conn.execute('UPDATE transcript_heads SET search_version=NULL WHERE video_id=?', (video_id,))
+            return {'mode': 'explicit-mock-text-only'}
 
         @app.get('/__test__/media')
         def media():

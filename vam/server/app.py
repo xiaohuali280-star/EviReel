@@ -21,7 +21,7 @@ from vam.server.ws.agent_chat import router as agent_chat_router
 from vam.video_registry import DomainError
 from vam.server.upload_limit import UploadLimitMiddleware
 
-def create_app(*, settings=None, backend=None, indexer=None, transcriber=None, reranker=None, study_model=None) -> FastAPI:
+def create_app(*, settings=None, backend=None, indexer=None, transcriber=None, reranker=None, study_model=None, chat_model=None) -> FastAPI:
     settings = settings or get_settings()
 
     @asynccontextmanager
@@ -30,19 +30,19 @@ def create_app(*, settings=None, backend=None, indexer=None, transcriber=None, r
         app.state.indexing = service
         await service.start()
         try:
-            conversations = ConversationService(service)
-            app.state.conversations = conversations
-            conversations.start()
             study = StudyService(service, model=study_model)
             app.state.study = study
             study.start()
+            conversations = ConversationService(service, study=study, chat_model=chat_model)
+            app.state.conversations = conversations
+            conversations.start()
             service.on_indexed = study.auto
             yield
         finally:
-            if hasattr(app.state, 'study'):
-                await app.state.study.close()
             if hasattr(app.state, 'conversations'):
                 await app.state.conversations.close()
+            if hasattr(app.state, 'study'):
+                await app.state.study.close()
             await service.close()
 
     app = FastAPI(title=settings.app_name, version=settings.app_version, lifespan=lifespan)

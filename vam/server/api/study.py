@@ -43,11 +43,14 @@ async def export(video_id: str, artifact_id: str, request: Request, format: str 
 
 
 @router.get('/{video_id}/transcripts/export')
-async def export_manuscript(video_id: str, request: Request, format: str = Query('txt', pattern='^(txt|srt)$')):
+async def export_manuscript(video_id: str, request: Request, format: str = Query('txt', pattern='^(txt|srt)$'),
+                            version: str | None = Query(None, pattern=r'^[0-9a-f]{32,64}$')):
     service = request.app.state.indexing
     lock = service.memory_locks.setdefault(video_id, asyncio.Lock())
     async with lock:
         async with service.transcript_context(video_id) as store:
+            if version and store.state()['text_version'] != version:
+                raise DomainError(409, 'chat_context_stale', 'Transcript changed; request the current manuscript')
             page = store.list(kind='segments', limit=200)
             if not page['items']:
                 raise DomainError(409, 'transcript_empty', 'There is no speech manuscript to export')
@@ -57,3 +60,17 @@ async def export_manuscript(video_id: str, request: Request, format: str = Query
     content = await run_sync(manuscript, records, format)
     return Response(content, media_type='text/plain; charset=utf-8',
                     headers={'Content-Disposition': f'attachment; filename="EviReel-{video_id}.{format}"'})
+
+
+@router.get('/{video_id}/chat/resource')
+async def chat_resource(video_id: str, request: Request,
+                        kind: str = Query(pattern='^(study|transcript)$'),
+                        owner: str = Query(pattern=r'^v_[0-9a-f]{32}$'),
+                        artifact_id: str | None = Query(None, pattern=r'^a_[0-9a-f]{32}$'),
+                        job_id: str | None = Query(None, pattern=r'^[0-9a-f]{32}$'),
+                        version: str | None = Query(None, pattern=r'^[0-9a-f]{32,64}$'),
+                        offset: int = Query(0, ge=0)):
+    if owner != video_id:
+        raise DomainError(404, 'resource_not_found', 'Resource does not belong to this video')
+    return request.app.state.conversations.actions.resource(video_id, kind=kind, artifact_id=artifact_id,
+        job_id=job_id, version=version, offset=offset)

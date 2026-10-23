@@ -155,11 +155,11 @@ class IndexingService:
             if not registered and directory.exists():
                 shutil.rmtree(self.registry.directory(video_id))
 
-    def schedule(self, video_id, *, kind="video"):
+    def schedule(self, video_id, *, kind="video", allow_retained=False):
         if self.closed:
             raise DomainError(503, "server_stopping", "Server is stopping")
         self._usable_video(video_id)
-        if self.leases.get(video_id):
+        if self.leases.get(video_id) and not allow_retained:
             raise DomainError(409, "video_busy", "Video is in use; retry indexing later")
         job_id = self.registry.create_job(video_id, self.settings.max_queued_jobs, kind)
         task = asyncio.create_task(self._run(video_id, job_id))

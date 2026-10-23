@@ -141,7 +141,7 @@ class ConversationStore:
         row = self.registry.get(video_id)
         state = self.registry.transcript_state(row)
         for item in copied.get('result', {}).get('evidence', []):
-            current = state.get('search_version') if item.get('source') == 'transcript' else row['active_generation']
+            current = state.get('text_version' if item.get('version_basis') == 'text' else 'search_version') if item.get('source') == 'transcript' else row['active_generation']
             item['historical_snapshot'] = True
             item['stale_evidence'] = item.get('index_version') != current
         return copied
@@ -149,10 +149,14 @@ class ConversationStore:
     def messages(self, cid, after=0, limit=50):
         conversation = self.get(cid)
         with self.db.connect() as conn:
-            rows = conn.execute('SELECT m.*,r.rewritten_question,r.resolution,r.status,r.error_code,r.result FROM messages m JOIN conversation_requests r USING(conversation_id,request_id) WHERE m.conversation_id=? AND message_id>? ORDER BY message_id LIMIT ?', (cid, after, limit+1)).fetchall()
+            rows = conn.execute('SELECT m.*,r.rewritten_question,r.resolution,r.status,r.error_code,r.result,r.payload AS request_payload FROM messages m JOIN conversation_requests r USING(conversation_id,request_id) WHERE m.conversation_id=? AND message_id>? ORDER BY message_id LIMIT ?', (cid, after, limit+1)).fetchall()
         items = []
         for row in rows[:limit]:
             item = dict(row)
+            payload = json.loads(item.pop('request_payload'))
+            for field in ('action', 'scope'):
+                if payload.get(field) is not None:
+                    item[field] = payload[field]
             item['resolution'] = json.loads(item['resolution']) if item['resolution'] else None
             item['result'] = self.mark_snapshot(json.loads(item['result']), conversation['video_id']) if item['role'] == 'assistant' and item['result'] else None
             items.append(item)

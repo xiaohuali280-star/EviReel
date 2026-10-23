@@ -4,22 +4,26 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 
 from vam.agent import stream_agent_response, stream_retrieve_tool_request, stream_summarize_tool_request
-from vam.memory.context_manager import ContextManager
+from vam.memory.context_manager import ContextManager, ConversationContext
 from vam.memory.conversation import ConversationStore
 from vam.protocol import RetrieveToolArgs, SummarizeToolArgs
 from vam.video_registry import DomainError
+from vam.chat_actions import ChatActions
+from vam.chat_text import answer_text
 
 logger = logging.getLogger(__name__)
 PROTOCOL_VERSION = 2
 
 
 class ConversationService:
-    def __init__(self, indexing, *, model=None):
+    def __init__(self, indexing, *, study, model=None, chat_model=None):
         self.indexing, self.settings = indexing, indexing.settings
         self.store = ConversationStore(indexing.registry)
         self.contexts = ContextManager(self.store, self.settings, model)
+        self.actions = ChatActions(indexing, study, model=chat_model)
         self.tasks, self.subscribers = {}, {}
         self.closed = False
 
@@ -59,6 +63,7 @@ class ConversationService:
         if self.closed:
             raise DomainError(503, 'server_stopping', 'Server is stopping')
         self.indexing._usable_video(request.video_id)
+        self.actions.validate_scope(request.video_id, request.scope)
         cid, rid = request.conversation_id, request.request_id
         original = request.text if request.type == 'text' else (
             RetrieveToolArgs.model_validate(request.args).question if request.name == 'retrieve'
@@ -67,7 +72,12 @@ class ConversationService:
             raise DomainError(413, 'question_too_large', 'Question exceeds the configured message limit')
         if not self.contexts.fits(original + ' ' * 900):
             raise DomainError(413, 'question_context_limit', 'Question exceeds the configured context budget')
-        payload = request.model_dump(exclude={'conversation_id', 'request_id'})
+        # Preserve the canonical payload of pre-shortcut requests on replay.
+        payload = request.model_dump(exclude={'conversation_id', 'request_id', 'action', 'scope'})
+        if request.action:
+            payload['action'] = request.action
+        if request.scope:
+            payload['scope'] = request.scope.model_dump()
         fresh = self.store.accept(cid, rid, request.video_id, payload, original, self.settings.conversation_max_running)
         if fresh:
             release = self.indexing._retain(request.video_id)
@@ -92,7 +102,7 @@ class ConversationService:
             self.publish(cid, rid, self.terminal(self.store.request(cid, rid)))
             raise
         except Exception as exc:
-            code = 'request_timeout' if isinstance(exc, TimeoutError) else (exc.code if isinstance(exc, DomainError) else 'agent_failed')
+            code = 'request_timeout' if isinstance(exc, (TimeoutError, asyncio.TimeoutError)) else (exc.code if isinstance(exc, DomainError) else 'agent_failed')
             logger.warning('conversation_request_failed code=%s exception=%s', code, type(exc).__name__)
             self.store.fail(cid, rid, code)
             self.publish(cid, rid, self.terminal(self.store.request(cid, rid)))
@@ -105,17 +115,25 @@ class ConversationService:
         from vam.retrieval.frame_store import FrameStore
 
         cid, rid = request.conversation_id, request.request_id
-        context = await self.contexts.build(cid, original)
-        if request.type == 'tool' and request.name == 'summarize':
+        context = ConversationContext('{}', [], []) if request.action in ('notes', 'transcript', 'slides') else await self.contexts.build(cid, original)
+        if request.action or request.scope or request.type == 'tool' and request.name == 'summarize':
             resolution = {'original_question': original, 'rewritten_question': original, 'anchor_ids': [], 'needs_clarification': False}
         else:
             resolution = await self.contexts.resolve(original, context)
         self.store.resolved(cid, rid, resolution)
         self.publish(cid, rid, self.envelope({'type': 'resolved', 'resolution': resolution, 'warnings': context.warnings}, cid, rid))
         final = None
-        if resolution['needs_clarification']:
+        if request.action in ('notes', 'transcript', 'slides'):
+            final = self.actions.execute(request)
+        elif not request.scope and re.search(r'这部分|这一部分|这一段', original):
+            final = {'type': 'final', 'text': '请先选择一个章节或定位播放位置，明确你指的是哪一部分。',
+                     'result': {'needs_clarification': True, 'evidence': [], 'citations': [], 'warnings': []}}
+        elif resolution['needs_clarification']:
             final = {'type': 'final', 'text': resolution['clarification'],
                      'result': {'answer': resolution['clarification'], 'needs_clarification': True, 'evidence': [], 'citations': [], 'warnings': []}}
+        elif request.type == 'text' and (self.actions.capabilities(request.video_id)['mode'] == 'text' or request.scope):
+            self.publish(cid, rid, self.envelope({'type': 'status', 'stage': 'answering'}, cid, rid))
+            final = await answer_text(self.actions, request, resolution, context)
         else:
             async with self.indexing.retrieval_context(request.video_id) as scope:
                 store = scope.visual if scope.visual is not None else FrameStore(backend=scope.backend)

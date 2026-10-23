@@ -15,7 +15,7 @@
 
 历史消息包括 role、content、request_id、status、rewritten_question、resolution、created_at；assistant 附完整 final 快照（`result.result` 为 P3 结果）。原始问题永不被检索改写覆盖。失败/中断仅保留 user 消息与请求状态，不创建正常 assistant 回答。GET request 返回的 `result` 是持久化的完整 final 事件。
 
-历史证据的 evidence_id、index_version、来源、时间、引用保持原样。读取时在 Evidence 加 `historical_snapshot=true`、`stale_evidence`；分别比较当前视觉版本或字幕搜索版本。版本变化时，旧图片链接仍遵循 P3 的过期错误，不重定向到新记录。引用快照和原始回答不被重写。
+历史证据的 evidence_id、index_version、来源、时间、引用保持原样。读取时在 Evidence 加 `historical_snapshot=true`、`stale_evidence`；分别比较当前视觉版本或字幕搜索版本。文本问答的字幕证据另带 `version_basis=text`，按 `text_version` 校验，不依赖语义索引。版本变化时，旧图片链接仍遵循 P3 的过期错误，不重定向到新记录。引用快照和原始回答不被重写。
 
 删除视频受到请求资源租用保护，运行中返回 409 video_busy；删除成功后数据库外键级联删除所属会话、消息、请求。
 
@@ -59,4 +59,33 @@ Context Manager 给顶层 router 和内部 Planner 同一份视频专属 JSON �
 
 省略两个 ID 时，为当前 socket 的每个视频分配私有持久会话与每问题 ID，accepted 会返回 ID；其他连接不会隐式获得它。需要重连恢复的客户端必须保存并传回 ID。`{"type":"reset","video_id":"v_…"}` 明确创建新会话，返回 conversation_created，旧历史仍保存；删除走 HTTP。原 TUI 使用自己的库入口，不共用浏览器默认会话。
 
-本阶段没有用户登录/授权体系；会话 ID 是资源定位符，不是权限边界。维持现有可信单用户部署与单 worker 数据目录约束，P5 界面尚未实现。
+本项目没有用户登录/授权体系；会话 ID 是资源定位符，不是权限边界。维持现有可信单用户部署与单 worker 数据目录约束。P5 已提供浏览器界面。
+
+## 2026-10-23 快捷动作与文本问答扩展
+
+`GET /api/videos/{video_id}` 新增 `chat`：`available`、`mode=text|retrieval|unavailable`、`reason`、当前来源 `version` 及 `actions={notes,video,transcript,slides}` 布尔能力。每个功能独立判定：缺少模型时，已有成品仍可读取；语义索引失败但存在可读文稿时仍可问答。
+
+持久化 `type=text` 请求支持以下可选字段，旧请求保持兼容：
+
+```json
+{
+  "action": "video",
+  "scope": {"start_t": 0, "end_t": 60, "version": "0123456789abcdef0123456789abcdef"}
+}
+```
+
+这是附加字段示例，实际请求仍须提供原有视频、会话、请求 ID 和 text。`action` 严格枚举为 `notes|video|transcript|slides`；普通问题不带 action。`scope` 独立可选，起止必须有限、非负、有序且不超过真实视频时长；version 若提供必须等于当前来源版本。范围无效返回 `invalid_time_range`，过时返回 `chat_context_stale`。相同请求 ID 更改 action/scope 同样触发 `request_conflict`。历史 user 消息返回原 action/scope，重试可以保留它们。
+
+笔记、文稿、课件动作返回 final，`result.resources` 保存经服务器生成的视频归属和成品/任务标识，例如：
+
+```json
+{"kind":"study","video_id":"v_0123456789abcdef0123456789abcdef","job_id":"0123456789abcdef0123456789abcdef","label":"学习笔记"}
+```
+
+`study` 资源使用 job_id 或 artifact_id；`transcript` 使用 job_id 或文稿 version。任务确认不是生成完成。客户端通过 `GET /api/videos/{video_id}/chat/resource?owner={video_id}&kind=study&job_id=…&offset=0` 读取实际状态。owner 必须与路径视频一致，任务和成品再次检查归属；资源 ID 不是用户授权凭证。
+
+响应包括 status、可选进度/error_code、ready 时的 total、preview 和 links。笔记每页 5 章，文稿每页 10 段；offset 为已读取条数。服务器构造 Markdown/PPTX/PDF 或 TXT/SRT 下载链接，不使用模型输出的资源 URL。历史笔记返回 stale 并禁用时间定位；旧文稿返回 `chat_context_stale`，不会静默下载新版。`transcripts/export` 增加可选 version，并在读取锁内校验。
+
+文本问答返回 `material_mode=transcript|events` 及 `text_basis_only`，发送 `status(stage=answering)` 后在结构、引用通过验证及持久化完成时发布 final。正文不发布未经验证的流式片段。当前来源用短别名传给模型，服务器映射回真实证据；历史引用不成为本次来源。超长整片概览转为完整学习任务资源卡，而不是只总结开头。`CHAT_TEXT_CHARS` 默认 12000，可配置 1000–30000；最多 24 条材料，模型结构校验最多重试一次，总请求仍受会话预算限制。
+
+错误分类包括 `chat_source_not_ready`、`chat_context_limit`、`chat_context_stale`、`chat_invalid_output`、`chat_model_auth_failed`、`chat_model_rate_limited`、`chat_model_connection_failed`、`chat_model_unavailable`、`chat_model_request_rejected` 和 `request_timeout`。前端提供对应中文提示；失败仅保留失败 user 请求，不保存伪装成正常回答的半成品。

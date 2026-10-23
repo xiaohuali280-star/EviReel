@@ -98,6 +98,8 @@ test('video switches isolate late answers and offline recovery merges the same r
   await page.getByLabel('向 AI 助手提问').fill('生成树有哪些性质？');
   await page.getByRole('button', {name: '发送问题', exact: true}).click();
   await expect(page.locator('.pending')).toBeVisible();
+  // The pending bubble appears before the first conversation is created.
+  await expect.poll(() => page.evaluate(() => Object.keys(localStorage).some(k => k.startsWith('evireel:pending:')))).toBe(true);
   const saved = await page.evaluate(() => {
     const key = Object.keys(localStorage).find(k => k.startsWith('evireel:pending:'))!;
     return JSON.parse(localStorage.getItem(key)!);

@@ -3,7 +3,8 @@ import Markdown from 'react-markdown';
 import {ArrowUp, BookOpen, Check, ChevronDown, ChevronRight, Copy, Download, FileText, Globe, History, LoaderCircle, LockKeyhole, Maximize, MessageSquarePlus, Moon, Paperclip, Play, Plus, Presentation, RefreshCw, Search, Sun, Trash2, Video as VideoIcon, X} from 'lucide-react';
 import {api, codeText, downloadFile, errorText, isProcessing, post, requestId, seekTime, time, upload} from './api';
 import {ChatChannel, remembered} from './chat';
-import type {AgentEvent, Chapter, Conversation, Evidence, Job, Message, Page, Study, Transcript, UIConfig, Video} from './types';
+import {actionMessages, ResourceCard} from './quick-actions';
+import type {AgentEvent, Chapter, ChatAction, ChatPayload, ChatScope, Conversation, Evidence, Job, Message, Page, Study, Transcript, UIConfig, Video} from './types';
 
 const prompts = ['这段视频的主要内容是什么？', '帮我总结这节课的重点', '这部分的要点有什么好处？', '有哪些值得记录的知识点？'];
 const vidPattern = /^v_[0-9a-f]{32}$/;
@@ -11,21 +12,21 @@ function selectedFromURL() {const v = new URLSearchParams(location.search).get('
 function Robot({large = false}: {large?: boolean}) {
   return <div className={`robot-art ${large ? 'large' : ''}`} aria-hidden="true"><span className="spark s1">✦</span><span className="spark s2">✧</span><span className="bubble b1">━━<br />━</span><span className="bubble b2">━━<br />━</span><span className="robot-head"><span className="robot-face"><i /><i /></span></span><span className="robot-body" /></div>;
 }
-function Welcome({ready, action, suggest}: {ready: boolean; action: (name: string) => void; suggest: (text: string) => void}) {
+function Welcome({ready, action, suggest, actions, pending = false, compact = false, hasVideo = false}: {ready: boolean; action: (name: string) => void; suggest: (text: string) => void; actions?: Record<string, boolean>; pending?: boolean; compact?: boolean; hasVideo?: boolean}) {
   const features = [
     {name: '自动生成笔记', text: '智能提取视频核心内容，生成结构化笔记。', icon: <FileText />, color: 'blue', action: 'notes'},
-    {name: 'AI 看视频', text: '快速理解视频重点，提炼核心观点。', icon: <Play />, color: 'purple', action: 'question'},
+    {name: 'AI 看视频', text: '快速理解视频重点，提炼核心观点。', icon: <Play />, color: 'purple', action: 'video'},
     {name: '生成文稿', text: '自动生成逐字稿，并智能梳理要点。', icon: <FileText />, color: 'green', action: 'transcript'},
     {name: '生成课件', text: '一键生成精美课件，支持导出与下载。', icon: <Presentation />, color: 'orange', action: 'slides'},
   ];
-  return <div className="welcome"><Robot /><h2>{ready ? '围绕视频，开启深入学习' : '上传视频后，开始和 AI 助手对话'}</h2><p>我可以帮你总结视频内容、回答相关问题、<br />定位具体时间点，并支持基于视频内容继续深入讨论。</p><h3>我可以帮你：</h3><div className="features">{features.map(f => <button key={f.name} className={`feature ${f.color}`} disabled={!ready} onClick={() => action(f.action)}><span className="feature-icon">{f.icon}</span><span><strong>{f.name}</strong><small>{f.text}</small></span></button>)}</div><div className="suggest-title">你可以试着问{!ready && '（上传视频后可用）'}</div><div className="suggestions">{prompts.map(p => <button key={p} disabled={!ready} onClick={() => suggest(p)}>{p}<ChevronRight size={17} /></button>)}</div></div>;
+  return <div className={`welcome ${compact ? 'compact' : ''}`}>{!compact && <><Robot /><h2>{ready ? '围绕视频，开启深入学习' : '上传视频后，开始和 AI 助手对话'}</h2><p>我可以帮你总结视频内容、回答相关问题、<br />定位具体时间点，并支持基于视频内容继续深入讨论。</p></>}<h3>我可以帮你：</h3><div className="features">{features.map(f => <button key={f.name} className={`feature ${f.color}`} disabled={pending || !(actions?.[f.action] ?? ready)} onClick={() => action(f.action)}><span className="feature-icon">{f.icon}</span><span><strong>{f.name}</strong><small>{f.text}</small></span></button>)}</div><div className="suggest-title">你可以试着问{!ready && '（内容就绪后可用）'}</div><div className="suggestions">{prompts.map(p => <button key={p} disabled={!ready || pending} onClick={() => suggest(p)}>{p}<ChevronRight size={17} /></button>)}</div></div>;
 }
 function MarkdownText({children}: {children: string}) {
   return <Markdown components={{a: ({children}) => <span>{children}</span>, img: () => null}}>{children}</Markdown>;
 }
 function EvidenceCard({e, video, seek}: {e: Evidence; video: Video; seek: (n: number) => void}) {
   if (e.video_id !== video.video_id || !Number.isFinite(e.start_t) || e.start_t < 0 || e.end_t < e.start_t || e.end_t > video.duration + .01) return null;
-  const current = e.source === 'transcript' ? video.transcript.search_version : video.active_generation;
+  const current = e.source === 'transcript' ? (e.version_basis === 'text' ? video.transcript.text_version : video.transcript.search_version) : video.active_generation;
   const stale = e.stale_evidence || e.index_version !== current;
   const image = !stale && e.frame_id && e.source !== 'transcript' ? `/api/videos/${video.video_id}/frames/${encodeURIComponent(e.frame_id)}/image?index_version=${encodeURIComponent(e.index_version)}` : null;
   return <button className={`evidence ${stale ? 'stale' : ''}`} disabled={!!stale || !video.capabilities.playback} onClick={() => seek(e.start_t)}>
@@ -52,6 +53,8 @@ export default function App() {
   const [study, setStudy] = useState<Study | null>(null);
   const [tab, setTab] = useState('notes');
   const [chapterIndex, setChapterIndex] = useState(0);
+  const [selectedChapter, setSelectedChapter] = useState<Chapter | null>(null);
+  const [unread, setUnread] = useState(false);
   const [manuscript, setManuscript] = useState<Transcript[]>([]);
   const [manuscriptTotal, setManuscriptTotal] = useState(0);
   const [manuscriptLoading, setManuscriptLoading] = useState(false);
@@ -75,17 +78,28 @@ export default function App() {
   const queuedSeek = useRef<number | null>(null);
   const uploadAbort = useRef<AbortController | null>(null);
   const channel = useRef<ChatChannel | null>(null);
-  const queuedQuestion = useRef<{cid: string; text: string} | null>(null);
+  const queuedQuestion = useRef<ChatPayload | null>(null);
+  const sendLock = useRef(false);
+  const conversationRevision = useRef(0);
+  const chatBody = useRef<HTMLDivElement>(null);
+  const followBottom = useRef(true);
   const active = useRef({videoId, cid});
   active.current = {videoId, cid};
-  const ready = !!video && !isProcessing(video.status) && (video.capabilities.vision || video.capabilities.transcript_search);
+  const ready = !!video && (video.chat?.available ?? (!isProcessing(video.status) && (video.capabilities.vision || video.capabilities.transcript_search)));
   const busy = !!video && isProcessing(video.status);
   const artifact = study?.artifact;
   const chapter = artifact?.content.chapters[chapterIndex];
   const refresh = useCallback(() => setRevision(v => v + 1), []);
-  useEffect(() => setChapterIndex(0), [artifact?.artifact_id]);
+  useEffect(() => {setChapterIndex(0); setSelectedChapter(null)}, [artifact?.artifact_id]);
+  useEffect(() => {
+    const body = chatBody.current;
+    if (!body) return;
+    if (followBottom.current) {body.scrollTop = body.scrollHeight; setUnread(false)}
+    else setUnread(true);
+  }, [messages, pending, stage]);
 
   const chooseVideo = useCallback((id: string) => {
+    queuedQuestion.current = null; sendLock.current = false; conversationRevision.current++;
     const url = new URL(location.href); id ? url.searchParams.set('video', id) : url.searchParams.delete('video');
     history.pushState(null, '', url); setVideoId(id); setError('');
   }, []);
@@ -107,7 +121,7 @@ export default function App() {
     }; load(); return () => {abort.abort(); clearTimeout(timer)};
   }, [offset, search, trash, revision]);
   useEffect(() => {
-    setVideo(null); setJob(null); setStudy(null); setCid(''); setMessages([]); setManuscript([]); setManuscriptTotal(0); setChapterIndex(0); setTab('notes'); setMediaError(''); queuedSeek.current = null;
+    setDraft(''); sendLock.current = false; queuedQuestion.current = null; setVideo(null); setJob(null); setStudy(null); setCid(''); setMessages([]); setManuscript([]); setManuscriptTotal(0); setChapterIndex(0); setTab('notes'); setMediaError(''); queuedSeek.current = null;
     setConversations([]); setPlaybackTime(0);
   }, [videoId, trash]);
   useEffect(() => {
@@ -131,11 +145,12 @@ export default function App() {
   useEffect(() => {
     if (!videoId || trash) return;
     const abort = new AbortController();
+    const selection = conversationRevision.current;
     api<Page<Conversation>>(`/api/conversations?video_id=${videoId}&limit=200`, {signal: abort.signal}).then(result => {
       if (abort.signal.aborted) return;
       setConversations(result.items);
       let saved = ''; try {saved = localStorage.getItem(`evireel:conversation:${videoId}`) || ''} catch { /* optional */ }
-      setCid(result.items.find(c => c.conversation_id === saved)?.conversation_id || result.items[0]?.conversation_id || '');
+      if (selection === conversationRevision.current) setCid(result.items.find(c => c.conversation_id === saved)?.conversation_id || result.items[0]?.conversation_id || '');
     }).catch(e => {if (!abort.signal.aborted) setError(errorText(e))});
     return () => abort.abort();
   }, [videoId, trash]);
@@ -148,7 +163,8 @@ export default function App() {
     if (!signal?.aborted && active.current.cid === conversation && active.current.videoId === vid) setMessages(all);
   }, []);
   useEffect(() => {
-    setMessages([]); setPending(false); setPendingText(''); setStage(''); setDraft('');
+    setMessages([]); setPending(false); setPendingText(''); setStage('');
+    sendLock.current = false;
     if (!cid || !videoId || trash) return;
     const abort = new AbortController();
     try {localStorage.setItem(`evireel:conversation:${videoId}`, cid)} catch { /* optional */ }
@@ -156,6 +172,7 @@ export default function App() {
     const socket = new ChatChannel(videoId, cid, event => {
       if (active.current.cid !== cid || active.current.videoId !== videoId) return;
       if (event.type === 'final' || event.type === 'error') {
+        sendLock.current = false;
         setPending(false); setPendingText(''); setStage('');
         if (event.type === 'error') setError(codeText(event.code));
         loadMessages(cid, videoId, abort.signal).catch(e => setError(errorText(e)));
@@ -163,11 +180,11 @@ export default function App() {
     }, setConnection);
     channel.current = socket;
     const saved = remembered(cid);
-    if (saved && saved.video_id === videoId) {setPending(true); setPendingText(saved.text); setStage('正在恢复上次请求'); socket.send(saved)}
-    else if (queuedQuestion.current?.cid === cid) {
-      const text = queuedQuestion.current.text; queuedQuestion.current = null;
-      setPending(true); setPendingText(text); setStage('正在发送问题');
-      socket.send({type: 'text', video_id: videoId, conversation_id: cid, request_id: requestId(), text});
+    if (saved && saved.video_id === videoId) {sendLock.current = true; setPending(true); setPendingText(saved.text); setStage('正在恢复上次请求'); socket.send(saved)}
+    else if (queuedQuestion.current?.conversation_id === cid && queuedQuestion.current.video_id === videoId) {
+      const payload = queuedQuestion.current; queuedQuestion.current = null;
+      sendLock.current = true; setPending(true); setPendingText(payload.text); setStage('正在发送问题');
+      socket.send(payload);
     }
     return () => {abort.abort(); socket.close(); if (channel.current === socket) channel.current = null};
   }, [cid, videoId, trash, loadMessages]);
@@ -219,31 +236,52 @@ export default function App() {
   useEffect(() => {if (tab === 'transcript' && video?.capabilities.transcript && manuscript.length === 0) transcripts()}, [tab, video?.capabilities.transcript, videoId]);
   async function newConversation() {
     if (!ready) return;
+    conversationRevision.current++; setDraft('');
     const vid = videoId;
     try {const c = await post<Conversation>('/api/conversations', {video_id: vid});
       if (active.current.videoId !== vid) return;
       setConversations(prev => [c, ...prev]); setCid(c.conversation_id); setShowHistory(false);
     } catch (e) {setError(errorText(e))}
   }
-  async function send(text = draft) {
-    if (!ready || pending || !text.trim()) return;
+  async function send(text = draft, options: Pick<ChatPayload, 'action' | 'scope'> = {}, shortcut = false) {
+    const permitted = options.action ? video?.chat?.actions[options.action] ?? ready : ready;
+    if (!permitted || pending || sendLock.current || !text.trim() || !videoId) return;
     if (text.length > (config?.message_chars || 2000)) {setError('问题超过字数上限，请缩短后重试。'); return}
+    sendLock.current = true; conversationRevision.current++; followBottom.current = true;
+    setPending(true); setPendingText(text.trim()); setStage('正在发送问题'); setError('');
+    const vid = videoId;
+    const payload: ChatPayload = {type: 'text', video_id: vid, conversation_id: cid, request_id: requestId(), text: text.trim(), ...options};
     if (!cid) {
-      const vid = videoId; setPending(true);
       try {const c = await post<Conversation>('/api/conversations', {video_id: vid});
         if (active.current.videoId !== vid) return;
-        queuedQuestion.current = {cid: c.conversation_id, text: text.trim()};
-        setConversations(prev => [c, ...prev]); setCid(c.conversation_id); setDraft('');
-      } catch (e) {setPending(false); setError(errorText(e))}
+        queuedQuestion.current = {...payload, conversation_id: c.conversation_id};
+        setConversations(prev => [c, ...prev]); setCid(c.conversation_id); if (!shortcut) setDraft('');
+      } catch (e) {if (active.current.videoId === vid) {sendLock.current = false; setPending(false); setError(errorText(e))}}
       return;
     }
-    const payload = {type: 'text' as const, video_id: videoId, conversation_id: cid, request_id: requestId(), text: text.trim()};
-    if (channel.current?.send(payload)) {setPending(true); setPendingText(payload.text); setDraft(''); setStage('正在发送问题'); setError('')}
+    if (channel.current?.send(payload)) {if (!shortcut) setDraft('')}
+    else {sendLock.current = false; setPending(false); setError('对话正在连接，请稍后重试。')}
   }
   async function feature(name: string) {
-    if (name === 'transcript') {setTab('transcript'); if (!video?.capabilities.transcript) setNotice('文稿尚未就绪，可在学习区重试语音处理。')}
-    else if (name === 'question') {setDraft('这段视频的主要内容是什么？'); document.getElementById('question')?.focus()}
-    else {setTab('notes'); if (!artifact) await generate(); else if (name === 'slides') setNotice('课件已就绪，请使用学习区的 PPTX / PDF 下载按钮。')}
+    if (!(name in actionMessages)) return;
+    const action = name as ChatAction;
+    await send(actionMessages[action], {action}, true);
+  }
+  function quickQuestion(text: string) {
+    let scope: ChatScope | undefined;
+    if (text === prompts[2] && video) {
+      if (selectedChapter && artifact && !artifact.stale) {
+        scope = {start_t: selectedChapter.start_t, end_t: selectedChapter.end_t};
+        text = `${text}（章节：${selectedChapter.title}，${time(scope.start_t)}–${time(scope.end_t)}）`;
+      } else if (player.current && player.current.readyState >= 1) {
+        const now = player.current.currentTime;
+        const current = manuscript.find(r => now >= r.start_t && now <= r.end_t);
+        scope = {start_t: current?.start_t ?? Math.max(0, now - 15), end_t: current?.end_t ?? Math.min(video.duration, now + 15)};
+        text = `${text}（播放片段：${time(scope.start_t)}–${time(scope.end_t)}）`;
+      }
+      if (scope && video.chat?.version) scope.version = video.chat.version;
+    }
+    send(text, scope ? {scope} : {}, true);
   }
   async function download(url: string) {
     if (downloading) return;
@@ -259,7 +297,7 @@ export default function App() {
     try {await api(`/api/videos/${confirm.video_id}`, {method: 'DELETE'}); setConfirm(null); refresh(); setNotice('视频及关联记录已永久删除。')}
     catch (e) {setError(errorText(e))}
   }
-  function selectChapter(c: Chapter, index: number) {setChapterIndex(index); seek(c.start_t)}
+  function selectChapter(c: Chapter, index: number) {setChapterIndex(index); setSelectedChapter(c); seek(c.start_t)}
   const sourceLink = (format: string) => `/api/videos/${videoId}/study/artifacts/${artifact?.artifact_id}/export?format=${format}`;
 
   return <div className="app">
@@ -296,8 +334,11 @@ export default function App() {
       </main>
       <aside className="assistant"><header className="assistant-heading"><span className="assistant-symbol"><LockKeyhole size={23} /></span><h2>AI 助手</h2><button className="icon-button" title="历史对话" aria-label="历史对话" disabled={!videoId || busy} onClick={() => setShowHistory(v => !v)}><History size={17} /></button><button className="new-chat" disabled={!ready || pending} onClick={newConversation}><MessageSquarePlus size={16} />新对话</button></header>
         {showHistory && <div className="history-panel"><h3>历史对话</h3>{conversations.length ? conversations.map(c => <button className={cid === c.conversation_id ? 'selected' : ''} key={c.conversation_id} onClick={() => {setCid(c.conversation_id); setShowHistory(false)}}>{c.title || '新对话'}<small>{new Date(c.updated_at * 1000).toLocaleString('zh-CN')}</small></button>) : <p>还没有对话</p>}</div>}
-        <div className="assistant-body">{(!ready || messages.length === 0 && !pending) ? <Welcome ready={ready} action={feature} suggest={setDraft} /> : <div className="messages">{messages.map(m => <div className={`message ${m.role}`} key={m.message_id}>{m.role === 'assistant' && <span className="answer-icon">✦</span>}<div><div className="message-text"><MarkdownText>{m.role === 'assistant' ? m.content.replace(/\[ev_[0-9a-f]{32}\]/g, '') : m.content}</MarkdownText></div>{m.role === 'assistant' && video && <><div className="answer-tools"><button aria-label="复制回答" onClick={() => navigator.clipboard.writeText(m.content).then(() => {setCopied(m.request_id); setTimeout(() => setCopied(''), 2000)}).catch(() => setNotice('当前浏览器无法复制，请手动选择文本。'))}>{copied === m.request_id ? <Check size={15} /> : <Copy size={15} />}</button><span>基于当前视频</span></div>{m.result?.result?.warnings?.length ? <p className="fine-print">内容可能存在识别误差或证据不足，请结合来源核对。</p> : null}<div className="evidence-list">{(m.result?.result?.evidence || []).filter(e => (m.result?.result?.citations || []).some(c => c.evidence_id === e.evidence_id)).map(e => <EvidenceCard key={e.evidence_id} e={e} video={video} seek={seek} />)}</div></>}{m.role === 'user' && ['failed', 'interrupted'].includes(m.status) && <div className="request-error">{codeText(m.error_code)}<button disabled={pending} onClick={() => send(m.content)}>重新提问</button></div>}</div></div>)}{pending && <><>{!messages.some(m => m.role === 'user' && m.content === pendingText && ['accepted', 'running'].includes(m.status)) && <div className="message user"><div className="message-text">{pendingText}</div></div>}</><div className="pending" role="status"><LoaderCircle size={17} className="spin" />{stage}</div></>}<div className="suggestions followups">{prompts.slice(0, 2).map(p => <button key={p} disabled={pending} onClick={() => setDraft(p)}>{p}<ChevronRight size={16} /></button>)}</div></div>}</div>
-        <div className="composer"><textarea id="question" aria-label="向 AI 助手提问" rows={2} disabled={!ready || pending} maxLength={config?.message_chars || 2000} placeholder={!ready ? '请先上传视频，上传后即可开始提问…' : pending ? 'AI 正在回答，可以稍后继续追问…' : '基于当前视频提问，获得更准确的答案…'} value={draft} onChange={e => setDraft(e.target.value)} onKeyDown={e => {if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {e.preventDefault(); send()}}} /><div className="composer-tools"><button aria-label="附件支持范围" onClick={() => setNotice('请通过左侧上传视频。当前对话仅基于所选视频，不支持额外附件。')}><Paperclip size={21} /></button><span><Globe size={17} />基于当前视频<ChevronDown size={14} /></span><button className="send" aria-label="发送问题" disabled={!ready || pending || !draft.trim()} onClick={() => send()}><ArrowUp size={23} /></button></div></div>
+        {messages.length > 0 && <details className="quick-menu" key={cid}><summary>快捷功能</summary><Welcome compact ready={ready} actions={video?.chat?.actions} pending={pending} hasVideo={!!video} action={feature} suggest={quickQuestion} /></details>}
+        {video?.chat?.available && <div className="chat-basis">{video.chat.mode === 'text' ? '基于文稿/笔记问答 · 画面分析尚未就绪' : '基于当前视频的可用索引'}</div>}
+        <div className="assistant-body" ref={chatBody} onScroll={() => {const b = chatBody.current; if (b) followBottom.current = b.scrollHeight - b.scrollTop - b.clientHeight < 80}}>{(messages.length === 0 && !pending) ? <Welcome ready={ready} actions={video?.chat?.actions} pending={pending} hasVideo={!!video} action={feature} suggest={quickQuestion} /> : <div className="messages">{messages.map(m => <div className={`message ${m.role}`} key={m.message_id}>{m.role === 'assistant' && <span className="answer-icon">✦</span>}<div><div className="message-text"><MarkdownText>{m.role === 'assistant' ? m.content.replace(/\[ev_[0-9a-f]{32}\]/g, '') : m.content}</MarkdownText></div>{m.role === 'assistant' && video && <><div className="answer-tools"><button aria-label="复制回答" onClick={() => navigator.clipboard.writeText(m.content).then(() => {setCopied(m.request_id); setTimeout(() => setCopied(''), 2000)}).catch(() => setNotice('当前浏览器无法复制，请手动选择文本。'))}>{copied === m.request_id ? <Check size={15} /> : <Copy size={15} />}</button><span>{m.result?.result?.material_mode === 'transcript' ? '基于语音文稿 · 未分析画面' : m.result?.result?.material_mode === 'events' ? '基于画面摘要' : '基于当前视频'}</span></div>{m.result?.result?.warnings?.length ? <p className="fine-print">内容可能存在识别误差或证据不足，请结合来源核对。</p> : null}<div className="evidence-list">{(m.result?.result?.evidence || []).filter(e => (m.result?.result?.citations || []).some(c => c.evidence_id === e.evidence_id)).map(e => <EvidenceCard key={e.evidence_id} e={e} video={video} seek={seek} />)}</div></>}{m.role === 'assistant' && m.result?.result?.resources?.map((resource, i) => <ResourceCard key={i} resource={resource} videoId={videoId} download={download} view={kind => {setTab(kind === 'transcript' ? 'transcript' : 'notes'); refresh()}} seek={seek} refreshed={refresh} />)}{m.role === 'user' && ['failed', 'interrupted'].includes(m.status) && <div className="request-error">{codeText(m.error_code)}<button disabled={pending} onClick={() => send(m.content, {action: m.action, scope: m.scope}, true)}>重新提问</button></div>}</div></div>)}{pending && <><>{!messages.some(m => m.role === 'user' && m.content === pendingText && ['accepted', 'running'].includes(m.status)) && <div className="message user"><div className="message-text">{pendingText}</div></div>}</><div className="pending" role="status"><LoaderCircle size={17} className="spin" />{stage}</div></>}</div>}</div>
+        {unread && <button className="latest-message" onClick={() => {followBottom.current = true; if (chatBody.current) chatBody.current.scrollTop = chatBody.current.scrollHeight; setUnread(false)}}>回到最新</button>}
+        <div className="composer"><textarea id="question" aria-label="向 AI 助手提问" rows={2} disabled={!ready || pending} maxLength={config?.message_chars || 2000} placeholder={!video ? '请先上传视频，上传后即可开始提问…' : !ready ? codeText(video.chat?.reason) : pending ? 'AI 正在回答，可以稍后继续追问…' : '基于当前视频提问，获得更准确的答案…'} value={draft} onChange={e => setDraft(e.target.value)} onKeyDown={e => {if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {e.preventDefault(); send()}}} /><div className="composer-tools"><button aria-label="附件支持范围" onClick={() => setNotice('请通过左侧上传视频。当前对话仅基于所选视频，不支持额外附件。')}><Paperclip size={21} /></button><span><Globe size={17} />基于当前视频<ChevronDown size={14} /></span><button className="send" aria-label="发送问题" disabled={!ready || pending || !draft.trim()} onClick={() => send()}><ArrowUp size={23} /></button></div></div>
         {ready && cid && <div className={`connection ${connection}`}>{connection === 'online' ? '对话已连接' : '连接恢复中，请求将在后台保留'}</div>}
       </aside></div>
     </div>

@@ -75,7 +75,7 @@ class GroundedAnswer(BaseModel):
     warnings: list[Literal['speech_visual_conflict', 'possible_asr_error', 'insufficient_evidence']] = Field(default_factory=list, max_length=3)
 
 
-def validate_answer(payload, evidence):
+def validate_answer(payload, evidence, *, allow_durations=False):
     answer = GroundedAnswer.model_validate(payload)
     available = {e['evidence_id']: Evidence.model_validate(e).model_dump() for e in evidence}
     if len({e['video_id'] for e in available.values()}) > 1:
@@ -83,7 +83,11 @@ def validate_answer(payload, evidence):
     citations, lines = {}, []
     for claim in answer.claims:
         # URLs, IDs and time labels must be generated from verified records, not LLM text.
-        if re.search(r'ev_|https?://|file://|/api/|javascript:|data:|\]\(|(?<!\d)\d+:\d{2}|(?<![\d.])\d+(?:\.\d+)?\s*(?:s\b|秒|分钟|小时|seconds?\b|minutes?\b|hours?\b)', claim.text, re.I):
+        resource = re.search(r'ev_|https?://|file://|/api/|javascript:|data:|\]\(|(?<!\d)\d+:\d{2}', claim.text, re.I)
+        duration = re.search(r'(?<![\d.])\d+(?:\.\d+)?\s*(?:s\b|秒|分钟|小时|seconds?\b|minutes?\b|hours?\b)', claim.text, re.I)
+        # Course workload/duration facts are ordinary answer text in text chat.
+        # Playable positions and resource links still come only from real records.
+        if resource or (duration and not allow_durations):
             raise ValueError('Model inserted a resource or time reference into claim text')
         refs = []
         for eid in dict.fromkeys(claim.evidence_ids):

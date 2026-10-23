@@ -31,6 +31,12 @@ Development uses `main` directly.
 For note-generation connection failures, timeouts or missing-source validation,
 see the [diagnosis, fix and real-provider validation](docs/STUDY_GENERATION_FIX.md).
 
+The assistant now sends all four feature cards and four suggested questions directly
+to the current conversation, with durable learning-resource cards and real downloads.
+Readable transcripts enable grounded chat even when semantic indexing is unavailable.
+See the [approved plan](docs/CHAT_ACTIONS_PLAN.md) and
+[implementation and acceptance report](docs/CHAT_ACTIONS_DELIVERY.md).
+
 <p align="center">
   Transforms unconstrained video streams into hierarchical visual memory, supports query-driven agentic retrieval, and grounds answers through visual inspection.
 </p>

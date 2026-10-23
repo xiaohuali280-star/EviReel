@@ -6,3 +6,15 @@
 @media(prefers-reduced-motion:reduce){*{animation-duration:.01ms!important;animation-iteration-count:1!important;transition:none!important}}
 
 .transcript-line.current{background:#edf5ff;color:var(--blue);border-radius:7px}
+
+/* Persistent chat shortcuts and owned task resources */
+.chat-basis{font-size:11px;line-height:1.6;color:var(--muted);padding:8px 18px;border-bottom:1px solid var(--line)}
+.quick-menu{padding:10px 16px;border-bottom:1px solid var(--line);max-height:46%;overflow:auto;flex-shrink:0}
+.quick-menu summary{cursor:pointer;color:#326fd7;font-size:12px;font-weight:600;list-style-position:inside}
+.welcome.compact{padding:8px 0 0;margin:0}.compact .feature{padding:10px 8px;min-height:70px}.compact .suggest-title{margin-top:12px}
+.compact .feature-icon{width:28px;height:30px}.compact .feature strong{font-size:12px}.compact .feature small{font-size:10px}
+.resource-card{margin:12px 0;padding:13px;border:1px solid var(--line);border-radius:12px;background:var(--surface);font-size:12px;line-height:1.7;max-width:100%;overflow-wrap:anywhere}
+.resource-card>strong{font-size:13px}.resource-card>p{color:var(--muted);margin:6px 0}.resource-preview{max-height:280px;overflow:auto}
+.resource-preview>div{display:flex;gap:8px;padding:6px 0;border-bottom:1px solid var(--line)}.resource-preview button{color:#2875e8;flex-shrink:0;font-size:11px;align-self:flex-start}
+.resource-links{display:flex;flex-wrap:wrap;gap:7px;margin-top:10px}.resource-links button,.resource-card>button{border:1px solid var(--line);padding:5px 9px;border-radius:7px;color:#2875e8}
+.latest-message{align-self:center;font-size:11px;border:1px solid var(--line);border-radius:20px;padding:6px 12px;color:#2875e8;background:var(--surface)}

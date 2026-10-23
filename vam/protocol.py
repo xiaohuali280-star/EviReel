@@ -9,12 +9,26 @@ class StrictSchemaModel(BaseModel):
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
 
 
+class ChatScope(StrictSchemaModel):
+    start_t: float = Field(ge=0)
+    end_t: float = Field(ge=0)
+    version: Optional[str] = Field(None, max_length=64, pattern=r'^[0-9a-f]{32,64}$')
+
+    @model_validator(mode='after')
+    def bounds(self):
+        if self.end_t < self.start_t:
+            raise ValueError('end_t must be >= start_t')
+        return self
+
+
 class VideoAgentRequest(StrictSchemaModel):
     type: Literal["text", "tool"]
     video_id: str = Field(..., pattern=r"^v_[0-9a-f]{32}$")
     conversation_id: Optional[str] = Field(None, pattern=r"^c_[0-9a-f]{32}$")
     request_id: Optional[str] = Field(None, pattern=r"^r_[0-9a-f]{32}$")
     text: Optional[str] = Field(None, max_length=4000)
+    action: Optional[Literal['notes', 'video', 'transcript', 'slides']] = None
+    scope: Optional[ChatScope] = None
     name: Optional[Literal["retrieve", "summarize"]] = None
     args: Dict[str, Any] = Field(default_factory=dict)
 
@@ -26,6 +40,8 @@ class VideoAgentRequest(StrictSchemaModel):
             raise ValueError("text must not be empty")
         if self.type == "tool" and self.name is None:
             raise ValueError("tool name is required")
+        if self.type != 'text' and (self.action or self.scope):
+            raise ValueError('Quick actions/context require a text message')
         return self
 
 

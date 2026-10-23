@@ -62,6 +62,7 @@ class Settings(BaseSettings):
     conversation_model_timeout_s: float = Field(30, gt=0, le=120)
     conversation_request_timeout_s: float = Field(180, gt=0, le=900)
     conversation_max_running: int = Field(4, ge=1, le=32)
+    chat_text_chars: int = Field(12000, ge=1000, le=30000)
     frontend_dist: str = ''
     study_auto_generate: bool = True
     study_max_running: int = Field(2, ge=1, le=8)

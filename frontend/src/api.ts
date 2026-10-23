@@ -21,8 +21,21 @@ export function seekTime(target: number, duration: number) {
   return Number.isFinite(target) && Number.isFinite(duration) && duration > 0 ? Math.min(Math.max(0, target), Math.max(0, duration - .05)) : null;
 }
 const messages: Record<string, string> = {
+  chat_source_not_ready: '视频内容尚未准备好，请先生成文稿或完成视频处理。',
+  chat_context_stale: '所选章节或文稿已更新，请重新选择后发送。',
+  chat_context_limit: '当前材料超出问答范围，请选择章节或先生成完整笔记。',
+  chat_invalid_output: '回答未通过来源校验，请重试。',
+  chat_model_auth_failed: '模型密钥无效或没有调用权限，请检查服务器配置并重启后端。',
+  chat_model_unavailable: '模型暂不可用，请检查模型名称或稍后重试。',
+  chat_model_rate_limited: '模型服务额度不足或请求过于频繁，请检查余额和限额。',
+  chat_model_request_rejected: '模型接口拒绝了请求，请检查模型与接口是否兼容。',
+  chat_model_connection_failed: '与模型服务的连接中断，请稍后重试。',
+  chat_model_incomplete: '模型回答未完整返回，请重新发送。',
+  asr_disabled: '服务器尚未启用语音识别，请启用后生成文稿。',
+  transcript_empty: '该视频没有识别到可用语音。', transcript_not_ready: '文稿尚未就绪，请重试语音处理。',
+  conversation_busy: '当前对话正在处理，请等待完成。', conversation_capacity: '回答任务较多，请稍后重试。',
   video_busy: '视频正在使用中，请等待当前操作完成后重试。', index_running: '视频正在处理中，请稍后重试。',
-  model_not_configured: '请在服务器配置模型服务后再生成笔记。', study_generation_failed: '笔记生成失败，旧成品已保留，可重新生成。',
+  model_not_configured: '请在服务器配置模型服务后使用 AI 功能。', study_generation_failed: '笔记生成失败，旧成品已保留，可重新生成。',
   study_budget_exceeded: '视频超过当前完整笔记的生成预算，请调整服务器限额后重试。', study_timeout: '笔记生成超时，可重新生成。',
   study_model_auth_failed: '模型密钥无效或没有调用权限，请检查服务器配置，修改后重启后端。',
   study_model_unavailable: '模型暂不可用或模型名称不正确，请检查配置或稍后重试。',

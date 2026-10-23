@@ -36,7 +36,7 @@ async def restore_video(video_id: str, request: Request):
 @router.get("/videos/{video_id}")
 async def video_detail(video_id: str, request: Request):
     reg = request.app.state.indexing.registry
-    return reg.public(reg.get(video_id))
+    return reg.public(reg.get(video_id)) | {'chat': request.app.state.conversations.actions.capabilities(video_id)}
 
 @router.get("/videos/{video_id}/content")
 async def video_content(video_id: str, request: Request):
