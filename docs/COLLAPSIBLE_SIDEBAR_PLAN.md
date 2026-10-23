@@ -2,7 +2,7 @@
 
 日期：2026-10-23（Asia/Shanghai）
 
-状态：用户已审核，A–E 及 F 的本地验收已完成，正在上传 `main` 并核对 GitHub CI。结果见 [交付记录](COLLAPSIBLE_SIDEBAR_DELIVERY.md)。
+状态：A–F 已完成并上传 `main`，本地验收和 [GitHub CI](https://github.com/xiaohuali280-star/EviReel/actions/runs/39956992091) 均通过。结果见 [交付记录](COLLAPSIBLE_SIDEBAR_DELIVERY.md)。
 
 ## 1. 目标与当前布局
 

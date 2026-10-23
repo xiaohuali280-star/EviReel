@@ -31,4 +31,4 @@
 
 外观检查额外发现并修正了手机工具条继承纵向 flex 方向的问题，增加工具条高度检查；展开宽度和滚动恢复也加入明确断言，避免只凭按钮可点击判断布局正确。
 
-GitHub CI 在上传代码后核对，届时补充提交与结果链接。
+代码提交：[21c70c0](https://github.com/xiaohuali280-star/EviReel/commit/21c70c027d2ee72d610295f0b1c902891e59ef28)。[GitHub CI](https://github.com/xiaohuali280-star/EviReel/actions/runs/39956992091) 已通过：后端 215 项、前端契约 8 项、完整浏览器回归 11 项全部通过，类型检查、生产构建和含页面资源的 wheel 打包成功。本条验收结果随后以纯文档提交补充，不修改已验证代码。
