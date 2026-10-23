@@ -1,10 +1,11 @@
 import {useCallback, useEffect, useRef, useState} from 'react';
 import Markdown from 'react-markdown';
-import {ArrowUp, BookOpen, Check, ChevronDown, ChevronRight, Copy, Download, FileText, Globe, History, LoaderCircle, LockKeyhole, Maximize, MessageSquarePlus, Moon, Paperclip, Play, Plus, Presentation, RefreshCw, Search, Sun, Trash2, Video as VideoIcon, X} from 'lucide-react';
+import {ArrowUp, BookOpen, Check, ChevronDown, ChevronRight, Copy, Download, FileText, Globe, History, LoaderCircle, LockKeyhole, Maximize, MessageSquarePlus, Moon, PanelLeftClose, PanelLeftOpen, Paperclip, Play, Plus, Presentation, RefreshCw, Search, Sun, Trash2, Video as VideoIcon, X} from 'lucide-react';
 import {api, codeText, downloadFile, errorText, isProcessing, post, requestId, seekTime, time, upload} from './api';
 import {ChatChannel, remembered} from './chat';
 import {actionMessages, ResourceCard} from './quick-actions';
 import {useResizablePanels} from './use-resizable-panels';
+import {useSidebar} from './use-sidebar';
 import type {AgentEvent, Chapter, ChatAction, ChatPayload, ChatScope, Conversation, Evidence, Job, Message, Page, Study, Transcript, UIConfig, Video} from './types';
 
 const prompts = ['这段视频的主要内容是什么？', '帮我总结这节课的重点', '这部分的要点有什么好处？', '有哪些值得记录的知识点？'];
@@ -37,6 +38,7 @@ function EvidenceCard({e, video, seek}: {e: Evidence; video: Video; seek: (n: nu
 
 export default function App() {
   const panels = useResizablePanels();
+  const sidebar = useSidebar();
   const [config, setConfig] = useState<UIConfig | null>(null);
   const [videos, setVideos] = useState<Page<Video>>({items: [], total: 0, offset: 0, limit: 20});
   const [videoId, setVideoId] = useState(selectedFromURL);
@@ -303,17 +305,21 @@ export default function App() {
   const sourceLink = (format: string) => `/api/videos/${videoId}/study/artifacts/${artifact?.artifact_id}/export?format=${format}`;
 
   return <div className="app">
-    <aside className="sidebar"><a className="brand" href="/" onClick={e => {e.preventDefault(); setTrash(false); chooseVideo('')}}><span className="brand-mark"><Play fill="white" /></span>EviReel</a>
-      <button className="primary upload-button" disabled={uploadProgress !== null || !config} onClick={() => file.current?.click()}><Plus size={21} /> 上传视频</button>
+    <aside className="sidebar" data-collapsed={!sidebar.expanded} data-mobile={sidebar.mobile} aria-label="视频导航">
+      <div className="sidebar-header"><a className="brand" href="/" aria-label="EviReel 首页" onClick={e => {e.preventDefault(); setTrash(false); chooseVideo('')}}><span className="brand-mark"><Play fill="white" /></span><span className="sidebar-label">EviReel</span></a>
+        <button ref={sidebar.toggleButton} className="sidebar-toggle" aria-label={sidebar.expanded ? '收起侧边栏' : '展开侧边栏'} aria-expanded={sidebar.expanded} aria-controls="sidebar-library" data-tooltip={sidebar.expanded ? '收起侧边栏' : '展开侧边栏'} title={sidebar.expanded ? '收起侧边栏' : '展开侧边栏'} onClick={sidebar.toggle}>{sidebar.expanded ? <PanelLeftClose size={19} /> : <PanelLeftOpen size={19} />}</button></div>
+      <button className="primary upload-button" aria-label="上传视频" data-tooltip="上传视频" disabled={uploadProgress !== null || !config} onClick={() => file.current?.click()}><Plus size={21} /><span className="sidebar-label">上传视频</span></button>
       <input ref={file} type="file" aria-label="选择视频文件" accept={config?.extensions.join(',') || 'video/*'} hidden onChange={e => handleUpload(e.target.files?.[0])} />
-      <nav><button className={!trash ? 'active' : ''} onClick={() => {setTrash(false); setOffset(0)}}><VideoIcon /> 我的视频 <span>{!trash && videos.total}</span></button><button className={trash ? 'active' : ''} onClick={() => {setTrash(true); chooseVideo(''); setOffset(0)}}><Trash2 /> 回收站</button></nav>
+      <nav aria-label="视频分类"><button className={!trash ? 'active' : ''} aria-label="我的视频" aria-current={!trash ? 'page' : undefined} data-tooltip="我的视频" onClick={() => {sidebar.expand(); setTrash(false); setOffset(0)}}><VideoIcon /><span className="sidebar-label">我的视频</span><span className="sidebar-count">{!trash && videos.total}</span></button><button className={trash ? 'active' : ''} aria-label="回收站" aria-current={trash ? 'page' : undefined} data-tooltip="回收站" onClick={() => {sidebar.expand(); setTrash(true); chooseVideo(''); setOffset(0)}}><Trash2 /><span className="sidebar-label">回收站</span></button></nav>
+      <div id="sidebar-library" className="sidebar-library" ref={sidebar.library} hidden={!sidebar.expanded}>
       <div className="library-title">{trash ? '已删除的视频' : '视频资料库'}<span>{videos.total}</span></div>
-      <div className="video-list">{videos.items.map(v => <div key={v.video_id} className={`video-item ${videoId === v.video_id ? 'selected' : ''}`}>
-        <button className="video-pick" disabled={trash} onClick={() => chooseVideo(v.video_id)}><span className="video-thumb"><Play size={17} /></span><span><strong>{v.original_name}</strong><small>{time(v.duration)} · {isProcessing(v.status) ? '处理中' : v.status === 'failed' ? '处理失败' : trash ? '已移入回收站' : '视频资料'}</small></span></button>
+      <div className="video-list" ref={sidebar.list} onScroll={sidebar.rememberScroll}>{videos.items.map(v => <div key={v.video_id} className={`video-item ${videoId === v.video_id ? 'selected' : ''}`}>
+        <button className="video-pick" disabled={trash} onClick={() => {chooseVideo(v.video_id); sidebar.selected()}}><span className="video-thumb"><Play size={17} /></span><span><strong>{v.original_name}</strong><small>{time(v.duration)} · {isProcessing(v.status) ? '处理中' : v.status === 'failed' ? '处理失败' : trash ? '已移入回收站' : '视频资料'}</small></span></button>
         <div className="video-actions">{trash ? <><button onClick={() => move(v, true)}>恢复</button><button className="danger" onClick={() => setConfirm(v)} aria-label={`永久删除 ${v.original_name}`}><Trash2 size={14} /></button></> : <button onClick={() => move(v)} aria-label={`移入回收站 ${v.original_name}`}><Trash2 size={14} /></button>}</div>
       </div>)}{videos.total === 0 && <p className="library-empty">{search ? '没有匹配的视频' : trash ? '回收站为空' : '上传视频，开始积累知识'}</p>}</div>
       {videos.total > 20 && <div className="pagination"><button disabled={offset === 0} onClick={() => setOffset(n => Math.max(0, n - 20))}>上一页</button><span>{Math.floor(offset / 20) + 1}</span><button disabled={offset + 20 >= videos.total} onClick={() => setOffset(n => n + 20)}>下一页</button></div>}
-      <div className="workspace-badge"><span>E</span><div>我的学习空间<small>内容沉淀，让学习发生</small></div></div>
+      </div>
+      <div className="workspace-badge" title="我的学习空间"><span>E</span><div className="sidebar-label">我的学习空间<small>内容沉淀，让学习发生</small></div></div>
     </aside>
     <div className="workspace"><header className="topbar"><label className="search"><Search size={20} /><input aria-label="搜索视频文件名" placeholder="搜索视频文件名…" value={query} onChange={e => setQuery(e.target.value)} />{query && <button aria-label="清除搜索" onClick={() => setQuery('')}><X size={16} /></button>}</label><div className="top-actions"><button aria-label={dark ? '切换浅色外观' : '切换深色外观'} onClick={() => setDark(v => !v)}>{dark ? <Moon /> : <Sun />}</button><span className="avatar" title="当前本地学习空间">E</span></div></header>
       {(error || notice) && <div className={`toast ${error ? 'error' : ''}`} role={error ? 'alert' : 'status'}><span>{error || notice}</span><button aria-label="关闭提示" onClick={() => {setError(''); setNotice('')}}><X size={16} /></button></div>}

@@ -39,3 +39,38 @@
 @media(max-width:1150px){.columns.resizable-columns{--split-gap:12px}}
 @container(max-width:380px){.features{grid-template-columns:1fr}.feature{min-height:0}.assistant-heading{margin:0 10px;gap:6px}.assistant-heading h2{font-size:18px}.assistant-heading .new-chat{padding:8px;font-size:11px}.composer-tools>span{font-size:11px}.welcome>p{margin-left:0;margin-right:0}}
 @container(max-width:580px){.notes-layout{grid-template-columns:1fr}.chapters{border-right:0;border-bottom:1px solid var(--line);max-height:190px;overflow:auto}.empty-state p{font-size:14px}.empty-state h1{font-size:27px}.video-illustration{width:330px;transform:scale(.85)}}
+
+/* The icon rail shares the same navigation and library DOM as the full sidebar. */
+.sidebar{z-index:2}
+.sidebar-header{display:flex;align-items:center;gap:5px;margin-bottom:24px;min-width:0}
+.sidebar-header .brand{margin:0;flex:1;min-width:0;gap:8px;font-size:24px;white-space:nowrap}
+.sidebar-header .brand-mark{width:32px;height:32px;flex-shrink:0;border-radius:11px}
+.sidebar-toggle{display:grid;place-items:center;flex-shrink:0;width:28px;height:32px;border-radius:8px;color:#6d83aa;position:relative}
+.sidebar-library{display:flex;flex-direction:column;min-height:0;flex:1}
+.sidebar-library[hidden]{display:none!important}
+.sidebar nav>button .sidebar-label{margin:0;font-size:inherit}
+.sidebar nav>button .sidebar-count{margin-left:auto}
+.sidebar [data-tooltip]{position:relative}
+.sidebar[data-collapsed="true"]{width:72px;padding:20px 12px 16px}
+.sidebar[data-collapsed="true"] .sidebar-header{flex-direction:column;gap:14px;margin-bottom:20px}
+.sidebar[data-collapsed="true"] .brand{flex:none}
+.sidebar[data-collapsed="true"] .sidebar-label,.sidebar[data-collapsed="true"] .sidebar-count{display:none}
+.sidebar[data-collapsed="true"] .upload-button{width:44px;height:44px;padding:0;margin-bottom:16px}
+.sidebar[data-collapsed="true"] nav>button{width:44px;height:44px;padding:0;justify-content:center}
+.sidebar[data-collapsed="true"] .workspace-badge{margin-top:auto;justify-content:center;padding-top:16px}
+.sidebar[data-collapsed="true"] [data-tooltip]:is(:hover,:focus-visible)::after,.sidebar-toggle:focus-visible::after{content:attr(data-tooltip);position:absolute;left:calc(100% + 10px);top:50%;transform:translateY(-50%);padding:7px 10px;border-radius:7px;background:var(--ink);color:var(--surface);white-space:nowrap;font-size:12px;font-weight:500;z-index:20;pointer-events:none;box-shadow:0 3px 14px #0002}
+@media(max-width:1150px){.sidebar-header .brand{font-size:22px}.sidebar-header .brand-mark{width:31px;height:31px}.sidebar nav>button{gap:10px}}
+@media(max-width:600px){
+  .sidebar[data-mobile="true"]{width:100%;height:auto;position:static;padding:14px;transition:none}
+  .sidebar[data-mobile="true"] .sidebar-header{margin:0;flex-direction:row;gap:8px}
+  .sidebar[data-mobile="true"] .sidebar-library{grid-column:1/-1;flex:initial}
+  .sidebar[data-mobile="true"] .library-title{margin:0 4px 8px}
+  .sidebar[data-mobile="true"] .upload-button{margin:0}
+  .sidebar[data-mobile="true"][data-collapsed="true"]{display:flex;flex-direction:row;align-items:center;gap:8px;flex-wrap:nowrap}
+  .sidebar[data-mobile="true"][data-collapsed="true"] .sidebar-header{flex:1}
+  .sidebar[data-mobile="true"][data-collapsed="true"] .upload-button{width:40px;height:40px;flex-shrink:0}
+  .sidebar[data-mobile="true"][data-collapsed="true"] nav{flex-direction:row;gap:4px;flex-shrink:0}
+  .sidebar[data-mobile="true"][data-collapsed="true"] nav>button{width:40px;height:40px;flex:none}
+  .sidebar[data-mobile="true"][data-collapsed="true"] .workspace-badge{display:none}
+  .sidebar[data-mobile="true"] [data-tooltip]:is(:hover,:focus-visible)::after{left:auto;right:0;top:calc(100% + 7px);transform:none}
+}

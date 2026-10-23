@@ -41,6 +41,9 @@ The divider between the learning area and AI assistant now supports dragging,
 keyboard adjustment and a remembered proportion. See the
 [resizable workspace guide and validation](docs/RESIZABLE_WORKSPACE_DELIVERY.md).
 
+The left navigation can collapse to a remembered icon rail, with an independent
+compact toolbar on phones. See the [sidebar guide and validation](docs/COLLAPSIBLE_SIDEBAR_DELIVERY.md).
+
 <p align="center">
   Transforms unconstrained video streams into hierarchical visual memory, supports query-driven agentic retrieval, and grounds answers through visual inspection.
 </p>
