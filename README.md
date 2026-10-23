@@ -37,6 +37,10 @@ Readable transcripts enable grounded chat even when semantic indexing is unavail
 See the [approved plan](docs/CHAT_ACTIONS_PLAN.md) and
 [implementation and acceptance report](docs/CHAT_ACTIONS_DELIVERY.md).
 
+The divider between the learning area and AI assistant now supports dragging,
+keyboard adjustment and a remembered proportion. See the
+[resizable workspace guide and validation](docs/RESIZABLE_WORKSPACE_DELIVERY.md).
+
 <p align="center">
   Transforms unconstrained video streams into hierarchical visual memory, supports query-driven agentic retrieval, and grounds answers through visual inspection.
 </p>

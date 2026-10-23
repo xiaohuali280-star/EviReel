@@ -11,6 +11,10 @@ test('real upload, processing, notes, media seek, recoverable chat, exports and 
   await expect(page.getByRole('heading', {name: '视频正在处理中'})).toBeVisible();
   await expect(page.getByRole('heading', {name: '上传视频后，开始和 AI 助手对话'})).toBeVisible();
   await expect(page.getByLabel('向 AI 助手提问')).toBeDisabled();
+  const splitter = page.getByRole('separator', {name: '调整学习区与 AI 助手宽度'});
+  await splitter.focus(); await page.keyboard.press('ArrowLeft');
+  await expect(splitter).toHaveAttribute('aria-valuenow', '63');
+  await splitter.dblclick();
   await page.screenshot({path: 'test-results/P5_PROCESSING.png', fullPage: true});
   await expect(page.getByRole('heading', {name: '笔记内容', exact: true})).toBeVisible({timeout: 30000});
   const vid = new URL(page.url()).searchParams.get('video')!;
