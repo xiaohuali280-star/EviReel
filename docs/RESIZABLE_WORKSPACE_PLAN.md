@@ -2,7 +2,7 @@
 
 日期：2026-10-23（Asia/Shanghai）
 
-状态：用户已审核，A–E 及 F 的本地验收已完成，正在上传 `main` 并核对 GitHub CI。实现与验证见 [交付记录](RESIZABLE_WORKSPACE_DELIVERY.md)。
+状态：A–F 已完成并上传 `main`，本地验收和 [GitHub CI](https://github.com/xiaohuali280-star/EviReel/actions/runs/39953222479) 均通过。实现与验证见 [交付记录](RESIZABLE_WORKSPACE_DELIVERY.md)。
 
 ## 1. 当前布局与目标
 
@@ -62,4 +62,4 @@
 - [x] 窗口缩放后边界正确；窄屏上下排列，回宽屏恢复偏好；至少覆盖 1440px、1920px 和 390px 视口。
 - [x] 拖动时视频播放位置、聊天草稿、消息、在途请求与后台任务保持连续，无额外模型调用。
 - [x] 原浏览器回归和新分栏用例通过，类型检查与生产构建通过，静态资源与代码一致。
-- [ ] 用户审核后实施并上传 main，核对 GitHub CI，补充完成记录。
+- [x] 用户审核后实施并上传 main，核对 GitHub CI，补充完成记录。
