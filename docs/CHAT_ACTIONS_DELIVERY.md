@@ -45,7 +45,7 @@
 - 最终浏览器回归使用全新独立数据目录、合成媒体及明确的模拟模型；与真实接口验收分开。修正原有浏览器测试的等待时机：用户气泡出现后，等待首次会话创建并保存待发送请求，才读取恢复标识。
 - Ruff E9/F 和差异空白检查通过。私有文稿、聊天正文、API Key、运行数据和日志均不进入提交。
 
-GitHub CI 在上传本次 `main` 提交后核对，结果以仓库 Actions 为准。
+代码提交：[860be0e](https://github.com/xiaohuali280-star/EviReel/commit/860be0ee9ad7740faff1e740bd41c0241f5f4770)。[GitHub CI](https://github.com/xiaohuali280-star/EviReel/actions/runs/39948417909) 已成功：最终代码后端 215 项、前端 3 项、浏览器 4 项全部通过；类型检查、生产构建和含页面资源的 wheel 打包通过。本条验收记录随后以纯文档提交补充，不改动已验证代码。
 
 ## 本地使用
 
