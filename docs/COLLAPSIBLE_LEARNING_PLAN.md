@@ -24,4 +24,4 @@
 4. 验证桌面、手机、深色模式及与左右布局控制的组合；运行类型检查、前端契约和完整浏览器回归，更新生产静态页面。
 5. 核对提交范围及密钥，直接上传 GitHub `main`，检查 CI 并补充交付记录。
 
-状态：实现与本地验收完成，正在上传 `main` 并核对 GitHub CI。结果见 [交付记录](COLLAPSIBLE_LEARNING_DELIVERY.md)。
+状态：设计、实现与验收已完成并上传 `main`，本地验证和 [GitHub CI](https://github.com/xiaohuali280-star/EviReel/actions/runs/40095332224) 均通过。结果见 [交付记录](COLLAPSIBLE_LEARNING_DELIVERY.md)。
