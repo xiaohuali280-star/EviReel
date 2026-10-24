@@ -1,0 +1,105 @@
+import {expect, test} from '@playwright/test';
+import type {APIRequestContext} from '@playwright/test';
+
+async function ingest(request: APIRequestContext, name: string) {
+  const media = await (await request.get('/__test__/media')).body();
+  const result = await (await request.post('/api/videos', {multipart: {video: {name, mimeType: 'video/mp4', buffer: media}}})).json();
+  await expect.poll(async () => (await (await request.get(`/api/videos/${result.video_id}/study`)).json()).artifact?.artifact_id, {timeout: 30000}).toBeTruthy();
+  return result.video_id as string;
+}
+
+test('learning content starts minimized, expands downwards, retains selection and lazily reads the manuscript', async ({page, request}) => {
+  const vid = await ingest(request, '默认收起与文稿.mp4');
+  let transcriptReads = 0;
+  page.on('request', req => {const url = new URL(req.url()); if (url.pathname === `/api/videos/${vid}/transcripts` && url.searchParams.get('kind') === 'segments') transcriptReads++});
+  await page.goto(`/?video=${vid}`);
+  const panel = page.locator('#learning-content');
+  const notes = page.getByRole('button', {name: '章节与笔记', exact: true});
+  const transcript = page.getByRole('button', {name: '文稿', exact: true});
+  await expect(notes).toBeVisible(); await expect(transcript).toBeVisible();
+  await expect(panel).toBeHidden();
+  expect(await panel.evaluate(node => node.getBoundingClientRect().height)).toBe(0);
+  await expect(page.getByRole('heading', {name: '笔记内容', exact: true})).toBeHidden();
+  await expect(page.getByRole('button', {name: '刷新学习内容', exact: true})).toHaveCount(0);
+  expect(transcriptReads).toBe(0);
+  await page.screenshot({path: 'test-results/LEARNING_MINIMIZED.png', fullPage: true});
+  await notes.focus(); await page.keyboard.press('Enter');
+  await expect(notes).toHaveAttribute('aria-expanded', 'true');
+  await expect(page.getByRole('heading', {name: '笔记内容', exact: true})).toBeVisible();
+  const headerBox = (await page.locator('.content-tabs').boundingBox())!, panelBox = (await panel.boundingBox())!;
+  expect(panelBox.y).toBeGreaterThanOrEqual(headerBox.y + headerBox.height - 1);
+  await page.locator('.chapters button').last().click();
+  const selected = await page.locator('.chapters button.selected').textContent();
+  await page.getByRole('button', {name: '收起笔记和文稿', exact: true}).click();
+  await expect(panel).toBeHidden(); await expect(panel.getByRole('button')).toHaveCount(0);
+  const expand = page.getByRole('button', {name: '展开笔记和文稿', exact: true});
+  await expand.focus(); await page.keyboard.press('Space');
+  await expect(page.locator('.chapters button.selected')).toHaveText(selected!);
+  expect(transcriptReads).toBe(0);
+  await transcript.click();
+  await expect(page.locator('.transcript-line')).toHaveCount(2);
+  expect(transcriptReads).toBe(1);
+  const text = await page.locator('.transcript-line').first().textContent();
+  await transcript.click(); await expect(panel).toBeHidden();
+  await page.getByRole('button', {name: '展开笔记和文稿', exact: true}).click();
+  await expect(page.locator('.transcript-line').first()).toHaveText(text!);
+  expect(transcriptReads).toBe(1);
+  await page.setViewportSize({width: 390, height: 900});
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await expect(page.getByRole('button', {name: '收起笔记和文稿', exact: true})).toBeVisible();
+  await page.getByRole('button', {name: '切换深色外观'}).click();
+  await page.screenshot({path: 'test-results/LEARNING_MOBILE_EXPANDED.png', fullPage: true});
+  await page.getByRole('button', {name: '收起笔记和文稿', exact: true}).click();
+  await expect(panel).toBeHidden();
+});
+
+test('explicit resource viewing expands the correct content, while refresh and video switches start minimized', async ({page, request}) => {
+  const a = await ingest(request, '查看资料A.mp4'), b = await ingest(request, '查看资料B.mp4');
+  await page.goto(`/?video=${a}`);
+  const panel = page.locator('#learning-content');
+  await expect(page.getByLabel('向 AI 助手提问')).toBeEnabled();
+  await page.getByRole('button', {name: '自动生成笔记', exact: false}).click();
+  await expect(page.locator('.resource-card').getByRole('button', {name: '在学习区查看', exact: true})).toBeEnabled();
+  await expect(panel).toBeHidden();
+  await page.locator('.resource-card').getByRole('button', {name: '在学习区查看', exact: true}).click();
+  await expect(page.getByRole('heading', {name: '笔记内容', exact: true})).toBeVisible();
+  await page.getByRole('button', {name: '收起笔记和文稿', exact: true}).click();
+  await page.locator('.quick-menu summary').click();
+  await page.locator('.quick-menu').getByRole('button', {name: '生成文稿', exact: false}).click();
+  await expect(page.locator('.resource-card')).toHaveCount(2);
+  const view = page.locator('.resource-card').last().getByRole('button', {name: '在学习区查看', exact: true});
+  await expect(view).toBeEnabled(); await expect(panel).toBeHidden(); await view.click();
+  await expect(page.locator('.transcript-line')).toHaveCount(2);
+  await expect(page.getByRole('button', {name: '文稿', exact: true})).toHaveAttribute('aria-expanded', 'true');
+  await page.reload();
+  await expect(page.getByRole('button', {name: '章节与笔记', exact: true})).toBeVisible(); await expect(panel).toBeHidden();
+  await page.getByRole('button', {name: '展开笔记和文稿', exact: true}).click();
+  await expect(panel).toBeVisible();
+  await page.getByRole('button', {name: /查看资料B.mp4/}).first().click();
+  await expect(page.getByRole('heading', {name: '查看资料B.mp4', exact: true})).toBeVisible();
+  expect(new URL(page.url()).searchParams.get('video')).toBe(b);
+  await expect(panel).toBeHidden();
+});
+
+test('learning toggles preserve playback, draft and a running conversation', async ({page, request}) => {
+  const vid = await ingest(request, '展开收起连续性.mp4');
+  const sent: string[] = [];
+  page.on('websocket', ws => ws.on('framesent', event => {try {const f = JSON.parse(String(event.payload)); if (f.type === 'text') sent.push(f.request_id)} catch { /* ping */ }}));
+  await page.goto(`/?video=${vid}`);
+  await expect(page.getByLabel('向 AI 助手提问')).toBeEnabled();
+  const player = page.getByLabel('视频播放器');
+  await player.evaluate(async (node: HTMLVideoElement) => {node.dataset.identity = 'learning-same'; node.muted = true; node.playbackRate = .5; await node.play(); node.currentTime = 1});
+  await page.getByLabel('向 AI 助手提问').fill('展开收起后保留的草稿');
+  await page.getByRole('button', {name: 'AI 看视频', exact: false}).click();
+  await expect(page.locator('.pending')).toBeVisible();
+  await page.getByRole('button', {name: '章节与笔记', exact: true}).click();
+  await expect(page.locator('#learning-content')).toBeVisible();
+  await page.getByRole('button', {name: '收起笔记和文稿', exact: true}).click();
+  await expect(page.locator('#learning-content')).toBeHidden();
+  await expect(player).toHaveAttribute('data-identity', 'learning-same');
+  expect(await player.evaluate((node: HTMLVideoElement) => node.currentTime)).toBeGreaterThanOrEqual(1);
+  expect(await player.evaluate((node: HTMLVideoElement) => node.paused)).toBe(false);
+  await expect(page.getByLabel('向 AI 助手提问')).toHaveValue('展开收起后保留的草稿');
+  await expect(page.locator('.message.assistant')).toHaveCount(1);
+  expect(new Set(sent).size).toBe(1);
+});

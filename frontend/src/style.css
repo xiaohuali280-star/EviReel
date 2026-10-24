@@ -41,6 +41,10 @@
 @container(max-width:580px){.notes-layout{grid-template-columns:1fr}.chapters{border-right:0;border-bottom:1px solid var(--line);max-height:190px;overflow:auto}.empty-state p{font-size:14px}.empty-state h1{font-size:27px}.video-illustration{width:330px;transform:scale(.85)}}
 
 /* The icon rail shares the same navigation and library DOM as the full sidebar. */
+.learning-content[hidden]{display:none!important}
+.content-tabs .learning-toggle{width:32px;justify-content:center;flex-shrink:0}
+.learning-toggle.open svg{transform:rotate(180deg)}
+@media(max-width:600px){.content-tabs{gap:12px}.content-tabs>button{font-size:12px;gap:4px}}
 .sidebar{z-index:2}
 .sidebar-header{display:flex;align-items:center;gap:5px;margin-bottom:24px;min-width:0}
 .sidebar-header .brand{margin:0;flex:1;min-width:0;gap:8px;font-size:24px;white-space:nowrap}

@@ -51,6 +51,7 @@ test('collapse during processing and chat keeps video, draft, request and librar
   await page.goto(`/?video=${upload.video_id}`);
   await expect(page.getByRole('heading', {name: '视频正在处理中'})).toBeVisible();
   await page.getByRole('button', {name: '收起侧边栏', exact: true}).click();
+  await page.getByRole('button', {name: '章节与笔记', exact: true}).click();
   await expect(page.getByRole('heading', {name: '笔记内容', exact: true})).toBeVisible({timeout: 30000});
   expect(new URL(page.url()).searchParams.get('video')).toBe(upload.video_id);
   const player = page.getByLabel('视频播放器');

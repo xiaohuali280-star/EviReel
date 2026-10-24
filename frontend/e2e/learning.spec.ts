@@ -16,6 +16,7 @@ test('real upload, processing, notes, media seek, recoverable chat, exports and 
   await expect(splitter).toHaveAttribute('aria-valuenow', '63');
   await splitter.dblclick();
   await page.screenshot({path: 'test-results/P5_PROCESSING.png', fullPage: true});
+  await page.getByRole('button', {name: '章节与笔记', exact: true}).click();
   await expect(page.getByRole('heading', {name: '笔记内容', exact: true})).toBeVisible({timeout: 30000});
   const vid = new URL(page.url()).searchParams.get('video')!;
   const detail = await (await request.get(`/api/videos/${vid}`)).json();
@@ -77,9 +78,10 @@ test('real upload, processing, notes, media seek, recoverable chat, exports and 
   await page.getByLabel(`移入回收站 ${detail.original_name}`).click();
   await expect(page.getByRole('heading', {name: '还没有上传视频'})).toBeVisible();
   await page.getByRole('button', {name: '回收站', exact: true}).click();
-  await page.getByRole('button', {name: '恢复', exact: true}).click();
+  await page.locator('.video-item').filter({hasText: detail.original_name}).getByRole('button', {name: '恢复', exact: true}).click();
   await page.getByRole('button', {name: /我的视频/}).click();
   await page.getByRole('button', {name: /009 图的应用.mp4/}).first().click();
+  await page.getByRole('button', {name: '章节与笔记', exact: true}).click();
   await expect(page.getByRole('heading', {name: '笔记内容', exact: true})).toBeVisible();
   await page.getByLabel(`移入回收站 ${detail.original_name}`).click();
   await page.getByRole('button', {name: '回收站', exact: true}).click();

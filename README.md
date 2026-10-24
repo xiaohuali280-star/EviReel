@@ -44,6 +44,10 @@ keyboard adjustment and a remembered proportion. See the
 The left navigation can collapse to a remembered icon rail, with an independent
 compact toolbar on phones. See the [sidebar guide and validation](docs/COLLAPSIBLE_SIDEBAR_DELIVERY.md).
 
+Notes and manuscript content start minimized below the player; click a heading
+to expand downwards, or use the arrow to minimize again. See the
+[learning disclosure guide](docs/COLLAPSIBLE_LEARNING_DELIVERY.md).
+
 <p align="center">
   Transforms unconstrained video streams into hierarchical visual memory, supports query-driven agentic retrieval, and grounds answers through visual inspection.
 </p>
