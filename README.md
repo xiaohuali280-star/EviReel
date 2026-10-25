@@ -48,6 +48,10 @@ Notes and manuscript content start minimized below the player; click a heading
 to expand downwards, or use the arrow to minimize again. See the
 [learning disclosure guide](docs/COLLAPSIBLE_LEARNING_DELIVERY.md).
 
+Transcripts open in paragraph reading mode, with density adapted to video length and
+sentence/pause boundaries. Switch to original segments for precise review; both modes
+share the same text and timestamps. See the [transcript reading guide](docs/TRANSCRIPT_READING_DELIVERY.md).
+
 <p align="center">
   Transforms unconstrained video streams into hierarchical visual memory, supports query-driven agentic retrieval, and grounds answers through visual inspection.
 </p>

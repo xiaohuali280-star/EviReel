@@ -37,7 +37,7 @@ test('learning content starts minimized, expands downwards, retains selection an
   await expect(page.locator('.chapters button.selected')).toHaveText(selected!);
   expect(transcriptReads).toBe(0);
   await transcript.click();
-  await expect(page.locator('.transcript-line')).toHaveCount(2);
+  await expect(page.locator('.transcript-line')).toHaveCount(1);
   expect(transcriptReads).toBe(1);
   const text = await page.locator('.transcript-line').first().textContent();
   await transcript.click(); await expect(panel).toBeHidden();
@@ -69,7 +69,7 @@ test('explicit resource viewing expands the correct content, while refresh and v
   await expect(page.locator('.resource-card')).toHaveCount(2);
   const view = page.locator('.resource-card').last().getByRole('button', {name: '在学习区查看', exact: true});
   await expect(view).toBeEnabled(); await expect(panel).toBeHidden(); await view.click();
-  await expect(page.locator('.transcript-line')).toHaveCount(2);
+  await expect(page.locator('.transcript-line')).toHaveCount(1);
   await expect(page.getByRole('button', {name: '文稿', exact: true})).toHaveAttribute('aria-expanded', 'true');
   await page.reload();
   await expect(page.getByRole('button', {name: '章节与笔记', exact: true})).toBeVisible(); await expect(panel).toBeHidden();

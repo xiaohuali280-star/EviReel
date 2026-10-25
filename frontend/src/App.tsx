@@ -6,6 +6,7 @@ import {ChatChannel, remembered} from './chat';
 import {actionMessages, ResourceCard} from './quick-actions';
 import {useResizablePanels} from './use-resizable-panels';
 import {useSidebar} from './use-sidebar';
+import {TranscriptReader} from './TranscriptReader';
 import type {AgentEvent, Chapter, ChatAction, ChatPayload, ChatScope, Conversation, Evidence, Job, Message, Page, Study, Transcript, UIConfig, Video} from './types';
 
 const prompts = ['这段视频的主要内容是什么？', '帮我总结这节课的重点', '这部分的要点有什么好处？', '有哪些值得记录的知识点？'];
@@ -60,9 +61,6 @@ export default function App() {
   const [chapterIndex, setChapterIndex] = useState(0);
   const [selectedChapter, setSelectedChapter] = useState<Chapter | null>(null);
   const [unread, setUnread] = useState(false);
-  const [manuscript, setManuscript] = useState<Transcript[]>([]);
-  const [manuscriptTotal, setManuscriptTotal] = useState(0);
-  const [manuscriptLoading, setManuscriptLoading] = useState(false);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [cid, setCid] = useState('');
   const [showHistory, setShowHistory] = useState(false);
@@ -89,6 +87,8 @@ export default function App() {
   const chatBody = useRef<HTMLDivElement>(null);
   const followBottom = useRef(true);
   const active = useRef({videoId, cid});
+  const manuscript = useRef<Transcript[]>([]);
+  const rememberManuscript = useCallback((items: Transcript[]) => {manuscript.current = items}, []);
   active.current = {videoId, cid};
   const ready = !!video && (video.chat?.available ?? (!isProcessing(video.status) && (video.capabilities.vision || video.capabilities.transcript_search)));
   const busy = !!video && isProcessing(video.status);
@@ -126,8 +126,8 @@ export default function App() {
     }; load(); return () => {abort.abort(); clearTimeout(timer)};
   }, [offset, search, trash, revision]);
   useEffect(() => {
-    setDraft(''); sendLock.current = false; queuedQuestion.current = null; setVideo(null); setJob(null); setStudy(null); setCid(''); setMessages([]); setManuscript([]); setManuscriptTotal(0); setChapterIndex(0); setTab('notes'); setLearningOpen(false); setMediaError(''); queuedSeek.current = null;
-    setConversations([]); setPlaybackTime(0);
+    setDraft(''); sendLock.current = false; queuedQuestion.current = null; setVideo(null); setJob(null); setStudy(null); setCid(''); setMessages([]); setChapterIndex(0); setTab('notes'); setLearningOpen(false); setMediaError(''); queuedSeek.current = null;
+    setConversations([]); setPlaybackTime(0); manuscript.current = [];
   }, [videoId, trash]);
   useEffect(() => {
     if (!videoId || trash) return;
@@ -224,21 +224,6 @@ export default function App() {
     try {const result = await post<Job>(`/api/videos/${videoId}/study`, {request_id: requestId()}); setStudy(s => s ? {...s, job: result} : s); setNotice('已开始生成章节、笔记与课件。'); refresh()}
     catch (e) {setError(errorText(e))}
   }
-  async function transcripts(more = false) {
-    if (!videoId || manuscriptLoading) return;
-    const vid = videoId; setManuscriptLoading(true);
-    try {
-      let result = await api<Page<Transcript>>(`/api/videos/${vid}/transcripts?kind=segments&limit=100&offset=${more ? manuscript.length : 0}`);
-      if (more && manuscript.length && result.items.length && manuscript[0].transcript_version !== result.items[0].transcript_version) {
-        result = await api<Page<Transcript>>(`/api/videos/${vid}/transcripts?kind=segments&limit=100&offset=0`); more = false;
-      }
-      if (active.current.videoId !== vid) return;
-      setManuscript(prev => more && (!prev.length || prev[0].transcript_version === result.items[0]?.transcript_version) ? [...prev, ...result.items] : result.items);
-      setManuscriptTotal(result.total);
-    } catch (e) {if (active.current.videoId === vid) setError(errorText(e))}
-    finally {setManuscriptLoading(false)}
-  }
-  useEffect(() => {if (learningOpen && tab === 'transcript' && video?.capabilities.transcript && manuscript.length === 0) transcripts()}, [learningOpen, tab, video?.capabilities.transcript, videoId]);
   async function newConversation() {
     if (!ready) return;
     conversationRevision.current++; setDraft('');
@@ -280,7 +265,7 @@ export default function App() {
         text = `${text}（章节：${selectedChapter.title}，${time(scope.start_t)}–${time(scope.end_t)}）`;
       } else if (player.current && player.current.readyState >= 1) {
         const now = player.current.currentTime;
-        const current = manuscript.find(r => now >= r.start_t && now <= r.end_t);
+        const current = manuscript.current.find(r => now >= r.start_t && now < r.end_t);
         scope = {start_t: current?.start_t ?? Math.max(0, now - 15), end_t: current?.end_t ?? Math.min(video.duration, now + 15)};
         text = `${text}（播放片段：${time(scope.start_t)}–${time(scope.end_t)}）`;
       }
@@ -341,7 +326,8 @@ export default function App() {
             {study?.job && isProcessing(study.job.status) && <div className="status-banner"><LoaderCircle className="spin" size={17} />正在生成完整笔记… {study.job.total > 0 && `已完成 ${study.job.current}/${study.job.total} 批`}</div>}
             {study?.job && ['failed', 'interrupted'].includes(study.job.status) && <div className="status-banner warning"><span>{codeText(study.job.error_code)}</span><button onClick={generate}>重试生成</button></div>}
             {artifact && chapter ? <><div className="artifact-tools"><span>{artifact.stale ? '旧版笔记 · 原视频来源已更新' : '完整笔记已就绪'}</span><a href={sourceLink('md')} aria-disabled={downloading} onClick={e => {e.preventDefault(); download(sourceLink('md'))}}><Download size={14} />笔记</a><a href={sourceLink('pptx')} aria-disabled={downloading} onClick={e => {e.preventDefault(); download(sourceLink('pptx'))}}>PPTX</a><a href={sourceLink('pdf')} aria-disabled={downloading} onClick={e => {e.preventDefault(); download(sourceLink('pdf'))}}>PDF</a><button disabled={!!study?.job && isProcessing(study.job.status)} onClick={generate}>重新生成</button></div><div className="notes-layout"><nav className="chapters" aria-label="章节目录"><h3>章节目录</h3>{artifact.content.chapters.map((c, i) => <button key={i} className={chapterIndex === i ? 'selected' : ''} onClick={() => selectChapter(c, i)}><Play size={15} fill="currentColor" /><time>{time(c.start_t)}</time><span>{c.title}</span></button>)}</nav><article className="notes"><h3>笔记内容</h3><h2>{time(chapter.start_t)} {chapter.title}</h2><ul>{chapter.points.map((point, i) => <li key={i}>{point}</li>)}</ul><h4>本章来源</h4>{chapter.source_ids.map(id => {const e = artifact.content.evidence.find(r => r.evidence_id === id); return e && <button key={id} className="time-chip" disabled={artifact.stale || !video.capabilities.playback} onClick={() => seek(e.start_t)}><Play size={11} />{time(e.start_t)}–{time(e.end_t)}</button>})}<p className="fine-print">{artifact.content.warnings.join(' ')}</p></article></div></> : <div className="content-empty"><BookOpen size={33} /><h3>将视频整理成章节与笔记</h3><p>{study?.model_configured ? '根据视频真实内容生成完整笔记，并提供来源定位。' : '请先在服务器配置模型服务，再生成章节与笔记。'}</p><button className="primary" disabled={!!study?.job && isProcessing(study.job.status)} onClick={generate}>生成章节与笔记</button></div>}
-          </> : <div className="manuscript"><div className="artifact-tools"><span>语音识别文稿 · 未经人工校对</span>{video.capabilities.transcript && <><a href={`/api/videos/${videoId}/transcripts/export?format=txt`} aria-disabled={downloading} onClick={e => {e.preventDefault(); download(`/api/videos/${videoId}/transcripts/export?format=txt`)}}>TXT</a><a href={`/api/videos/${videoId}/transcripts/export?format=srt`} aria-disabled={downloading} onClick={e => {e.preventDefault(); download(`/api/videos/${videoId}/transcripts/export?format=srt`)}}>SRT</a></>}<button onClick={() => retry('transcript')}>重试语音处理</button></div>{!video.capabilities.transcript ? <div className="content-empty"><FileText size={35} /><h3>文稿暂不可用</h3><p>{video.transcript.text_status === 'empty' ? '该视频未识别到语音内容。' : '语音处理尚未完成或失败，可重试。'}</p></div> : manuscript.map((r, i) => <button className={`transcript-line ${playbackTime >= r.start_t && playbackTime < r.end_t ? 'current' : ''}`} key={`${r.segment_id}-${i}`} onClick={() => seek(r.start_t)} disabled={!video.capabilities.playback}><time>{time(r.start_t)}</time><span>{r.text}</span></button>)}{manuscriptLoading && <p className="loading">正在读取文稿…</p>}{manuscript.length < manuscriptTotal && <button className="secondary load-more" disabled={manuscriptLoading} onClick={() => transcripts(true)}>加载更多（{manuscript.length}/{manuscriptTotal}）</button>}</div>}
+          </> : null}
+          <TranscriptReader key={video.video_id} video={video} visible={learningOpen && tab === 'transcript'} playbackTime={playbackTime} downloading={downloading} download={download} retry={() => retry('transcript')} seek={seek} onSegments={rememberManuscript} />
           </section>
         </> : videoId ? <div className="content-empty"><LoaderCircle className="spin" /><p>正在读取视频资料…</p><button onClick={refresh}>重试</button></div> : <section className="empty-state" onDragOver={e => e.preventDefault()} onDrop={e => {e.preventDefault(); handleUpload(e.dataTransfer.files[0])}}><div className="video-illustration" aria-hidden="true"><span className="float-note">━━<br />━━<br />━</span><div className="illustration-back" /><div className="illustration-screen"><Play size={72} fill="currentColor" /><span /></div><span className="float-chat">━━<br />━</span><i>✦</i></div><h1>还没有上传视频</h1><p>上传课程、会议、讲座或任何学习视频，<br />EviReel 将为你自动生成结构化笔记，并提供 AI 助手深度解读。</p><button className="primary first-upload" disabled={!config} onClick={() => file.current?.click()}><Plus />上传第一个视频</button><small>支持 {config?.extensions.map(e => e.slice(1).toUpperCase()).join('、') || '常见视频'} 格式 · 支持拖拽上传</small></section>}
       </main>

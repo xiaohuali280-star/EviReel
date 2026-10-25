@@ -31,7 +31,7 @@ test('real upload, processing, notes, media seek, recoverable chat, exports and 
   await expect.poll(() => page.locator('video').evaluate((v: HTMLVideoElement) => v.paused)).toBe(false);
   await page.locator('video').evaluate((v: HTMLVideoElement) => v.pause());
   await page.getByRole('button', {name: '文稿', exact: true}).click();
-  await expect(page.locator('.transcript-line')).toHaveCount(2);
+  await expect(page.locator('.transcript-line')).toHaveCount(1);
   const downloadWait = page.waitForEvent('download'); await page.getByRole('link', {name: 'SRT', exact: true}).click();
   expect((await downloadWait).suggestedFilename()).toMatch(/\.srt$/);
   await page.getByRole('button', {name: '章节与笔记', exact: true}).click();
