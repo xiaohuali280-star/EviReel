@@ -101,7 +101,8 @@ python -m vam.platform.migrate rollback-legacy --workspace <ws_id> [--dry-run]
 | 真实中间件 + 浏览器 | `frontend/e2e/upload-resume.spec.ts`（Chromium，平台模式） | 2/2 通过 |
 | 测试替身 | `resumable-upload.test.ts`（内存假存储）、`test_e1_unit.py` | 通过 |
 | 回归（验收 6） | 全量 pytest；P5 浏览器回归 21 个用例（单用户模式，mock provider） | pytest 234 passed / 0 skipped；P5 复跑 21/21 通过（首轮有 1 次未复现的卡顿，见 STATUS） |
-| 未运行 | Linux compose 本机无法运行（无 Docker）；CI `E1 platform` 等待重跑；真实模型调用 | — |
+| CI（Linux） | `4632b4f`：`E1 platform`（compose 中的真实 PG + MinIO，后端验收 + 浏览器验收）与 `EviReel CPU tests` | 均 success |
+| 未运行 | Linux compose 只在 CI 上运行过，本机无 Docker；真实模型调用 | — |
 
 ## 7. 交接给 E2
 - **接口**：`UploadService`（create/get/sign/complete/cancel/reconcile/accept_processing），`ObjectStore`（见 3.1）。

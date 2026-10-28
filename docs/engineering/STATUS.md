@@ -1,6 +1,6 @@
 # 工程状态
 
-更新：2026-10-28　阶段：**E1 进行中（本机验收通过；CI `E1 platform` 待修复后的提交重跑）**
+更新：2026-10-28　阶段：**E1 验收通过（本机 Windows 原生 + GitHub CI Linux）；内容秒传未做**
 
 ## 当前提交
 基线 `3ede061`；E1 实现 `2991d2b`；本机验证修复见其后的提交（`git log`）。
@@ -37,10 +37,16 @@
 | 既有 P5 浏览器回归（单用户模式，21 个用例，mock provider） | 完整运行 20 passed / 1 failed：`learning toggles preserve playback, draft and a running conversation` 在 `ingest` 阶段卡了约 29 分钟后，轮询学习产物超时。该文件单独复跑 3/3 通过（该用例 9.2 s）。完整复跑 **21/21 通过**（3.2 min）。那次卡顿没有复现，原 trace 已被单独复跑覆盖，根因未查明，记为未解释的偶发问题 |
 
 ### D. 未运行 / 未验证
-- Linux compose（`deploy/e1/compose.yml`）：本机没有 Docker，**未在本机运行**。依赖修复后提交的 CI `E1 platform` 重跑结果来确认。
-- `2991d2b` 的 CI `E1 platform` 失败（run 40674376201，第 4 步 compose 启动）：`minio/minio` 与 `minio/mc` 已从 Docker Hub 下架（仓库 404，`latest` 同样 404），镜像无法拉取。已改为基于 sha256 固定的 conda-forge 包构建本地镜像，**尚未在 CI 上验证**。
+- Linux compose（`deploy/e1/compose.yml`）：本机没有 Docker，**未在本机运行**；只在 CI（ubuntu-latest）上运行过，见 E。
+- `2991d2b` 的 CI `E1 platform` 失败（run 40674376201，第 4 步 compose 启动）：`minio/minio` 与 `minio/mc` 已从 Docker Hub 下架（仓库 404，`latest` 同样 404），镜像无法拉取。已改为基于 sha256 固定的 conda-forge 包构建本地镜像，在 `4632b4f` 的 CI 上验证通过（见 E）。
 - 真实模型调用：没有预算，未运行。
 - 内容秒传：未实现，列为下一步。
+
+### E. GitHub CI（`4632b4f`，Linux）
+| 工作流 | 结果 |
+| --- | --- |
+| `E1 platform` run 40684790364：compose 构建并通过健康检查 → schema dry-run → `test_e1_unit` + `test_e1_platform`（真实 PG + MinIO 容器）→ 前端 typecheck/vitest/build → E1 浏览器验收 | **success** |
+| `EviReel CPU tests` run 40684790380：既有后端、前端与 P5 浏览器回归 | **success** |
 
 ## 本轮修复（`2991d2b` 之后）
 1. `e1-local.ps1 -Action up` 卡住：`pg_ctl start | Out-Null` 时，postgres 子进程继承了 PowerShell 管道句柄，管道一直不关闭。改为通过 `cmd /c ... >nul 2>&1` 调用。
