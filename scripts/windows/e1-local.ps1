@@ -42,7 +42,10 @@ function Up {
     Remove-Item $pw
   }
   & "$PgBin\pg_ctl.exe" status -D $pgData *> $null
-  if ($LASTEXITCODE -ne 0) { & "$PgBin\pg_ctl.exe" start -D $pgData -l "$Logs\postgres.log" -o "-p $PgPort -h 127.0.0.1" -w | Out-Null }
+  if ($LASTEXITCODE -ne 0) {
+    # Run via cmd with nul handles: postgres inherits pg_ctl's stdout, and a PowerShell pipe would never close.
+    cmd /c "`"$PgBin\pg_ctl.exe`" start -D `"$pgData`" -l `"$Logs\postgres.log`" -o `"-p $PgPort -h 127.0.0.1`" -w >nul 2>&1"
+  }
   $env:PGPASSWORD = $C.PG_PASSWORD
   $exists = & "$PgBin\psql.exe" -h 127.0.0.1 -p $PgPort -U $C.PG_USER -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname='evireel'"
   if (-not $exists) { & "$PgBin\createdb.exe" -h 127.0.0.1 -p $PgPort -U $C.PG_USER evireel }
@@ -81,7 +84,8 @@ function TestEnv {
   $env:ENABLE_RETRIEVAL = 'false'; $env:QUERY_INCLUDE_LATEST_SEGMENT_VIDEO = 'false'
 }
 
-function Pnpm { & npm exec --yes pnpm@11.25.0 -- @args }
+# npm.cmd, not npm.ps1: the .ps1 shim drops splatted arguments after `--`, so pnpm would only print its help.
+function Pnpm { & npm.cmd exec --yes pnpm@11.25.0 -- @args }
 
 function Wait-Http($url, $seconds) {
   for ($i = 0; $i -lt $seconds; $i++) { try { Invoke-WebRequest $url -UseBasicParsing -TimeoutSec 2 | Out-Null; return $true } catch { Start-Sleep 1 } }

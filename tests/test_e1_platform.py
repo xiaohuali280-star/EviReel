@@ -265,13 +265,15 @@ def test_non_video_content_fails_verification_and_releases_everything(platform_a
 
 
 def test_expired_signature_is_rejected_and_resigning_works(platform_app, video_file):
-    _, app = platform_app(upload_url_ttl_s=1)
+    # X-Amz-Date is truncated to whole seconds, so a URL is valid for (ttl-1, ttl] seconds; a 1 s TTL
+    # left the re-signed URL as little as 0 s and made the second PUT flaky.
+    _, app = platform_app(upload_url_ttl_s=3)
     data = video_file.read_bytes()
     with TestClient(app) as client:
         alice, _ = users(client, app, "alice")["alice"]
         session = create(alice, data)
         urls = sign(alice, session["upload_id"], session, data, [1])
-        time.sleep(2.5)
+        time.sleep(4.5)
         expired = put_part(urls[1], part_bytes(data, session, 1))
         assert expired.status_code == 403
         fresh = sign(alice, session["upload_id"], session, data, [1])

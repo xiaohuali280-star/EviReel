@@ -66,7 +66,7 @@
 ### 4.2 平台模式（Linux / WSL2 容器）
 ```bash
 cp deploy/e1/dev.env.example deploy/e1/dev.env   # 修改为自己的开发口令
-docker compose --env-file deploy/e1/dev.env -f deploy/e1/compose.yml up -d --wait
+docker compose --env-file deploy/e1/dev.env -f deploy/e1/compose.yml up -d --wait   # 首次会构建 MinIO 镜像
 pip install -e ".[dev,platform]"
 export DATABASE_URL=postgresql://evireel:<pw>@127.0.0.1:5432/evireel S3_ENDPOINT=http://127.0.0.1:9000 \
        S3_PUBLIC_ENDPOINT=http://127.0.0.1:9000 S3_ACCESS_KEY=<key> S3_SECRET_KEY=<secret> S3_BUCKET=evireel
@@ -74,9 +74,10 @@ python -m vam.platform.migrate schema
 python -m vam.platform.migrate create-user --username alice     # 口令从 EVIREEL_NEW_PASSWORD 或交互输入
 vam-server   # 浏览器打开 http://127.0.0.1:8000/app/
 ```
+`minio/minio` 已从 Docker Hub 下架，因此 compose 用 `deploy/e1/minio/Dockerfile` 在本地构建镜像：`debian:12.12-slim`，加上 conda-forge 的 `minio-server-2025.10.15.17.29.55-hbcca054_0`（按 sha256 校验）。这个版本与 Windows 原生环境相同。健康检查请求 `/minio/health/ready`。
 
 ### 4.3 Windows 原生（无 Docker/WSL2，本机采用）
-二进制只放在 `.local-infra/`（git 忽略）；`scripts/windows/e1-local.ps1 -Action up|test|serve|down`。开发口令自动生成在 `.local-infra/dev-credentials.env`。
+二进制只放在 `.local-infra/`（git 忽略）：PostgreSQL 16.4（EDB zip，只用 bin/lib/share）、MinIO `RELEASE.2025-10-15T17-29-55Z`、FFmpeg 7.1.1（均来自 conda-forge）、Python 3.11（conda-forge，`.venv` 基于它创建）。入口是 `scripts/windows/e1-local.ps1 -Action up|test|serve|down`，PG 端口 54329，MinIO 端口 9100。开发口令自动生成在 `.local-infra/dev-credentials.env`，脚本不会打印它。`-Action test` 依次运行全量 pytest、前端 typecheck/vitest/build、既有 P5 浏览器回归和 E1 浏览器验收，日志写入 `e1-local-logs/`，汇总写入 `summary.txt`。
 
 ### 4.4 迁移已有数据（先在副本上预演）
 ```bash
@@ -89,10 +90,18 @@ python -m vam.platform.migrate rollback-legacy --workspace <ws_id> [--dry-run]
 回退条件：`check` 报告 drift/孤儿，或平台模式下旧视频不可用。回退方式：先执行 `rollback-legacy`，再去掉 `DATABASE_URL` 回到单用户模式。SQLite 和视频文件始终未被修改。
 
 ## 5. 生产要求（与开发配置的区别）
-托管或加固的 PostgreSQL 与 S3（备份、TLS、最小权限访问密钥、桶生命周期规则清理未完成分片）；`AUTH_COOKIE_SECURE=true` 并全站 HTTPS；密钥由密钥管理服务注入，不使用 `.env`；按真实前端域名配置存储 CORS。MinIO 社区版已于 2025 年停止发布二进制，生产前需重新评估所用的 S3 实现。
+托管或加固的 PostgreSQL 与 S3（备份、TLS、最小权限访问密钥、桶生命周期规则清理未完成分片）；`AUTH_COOKIE_SECURE=true` 并全站 HTTPS；密钥由密钥管理服务注入，不使用 `.env`；按真实前端域名配置存储 CORS。MinIO 社区版已于 2025 年停止发布二进制和 Docker 镜像（`minio/minio` 已从 Docker Hub 下架），生产前需重新评估所用的 S3 实现。
 
 ## 6. 验证记录
-见 `STATUS.md`（只记录实际运行的结果，真实中间件与测试替身分开记录）。
+完整记录见 `STATUS.md`。那里只记录实际运行的结果，并把真实中间件、测试替身和浏览器测试分开。2026-10-28 本机（Windows 原生、真实 PostgreSQL 16.4 + MinIO）的结果摘要：
+
+| 类别 | 内容 | 结果 |
+| --- | --- | --- |
+| 真实中间件 | `tests/test_e1_platform.py` 14 个场景，覆盖第二节验收 1–5 和第一节的迁移/回退 | 14/14 通过（签名过期用例修复了测试中 TTL 过短导致的偶发失败） |
+| 真实中间件 + 浏览器 | `frontend/e2e/upload-resume.spec.ts`（Chromium，平台模式） | 2/2 通过 |
+| 测试替身 | `resumable-upload.test.ts`（内存假存储）、`test_e1_unit.py` | 通过 |
+| 回归（验收 6） | 全量 pytest；P5 浏览器回归 21 个用例（单用户模式，mock provider） | pytest 234 passed / 0 skipped；P5 复跑 21/21 通过（首轮有 1 次未复现的卡顿，见 STATUS） |
+| 未运行 | Linux compose 本机无法运行（无 Docker）；CI `E1 platform` 等待重跑；真实模型调用 | — |
 
 ## 7. 交接给 E2
 - **接口**：`UploadService`（create/get/sign/complete/cancel/reconcile/accept_processing），`ObjectStore`（见 3.1）。
