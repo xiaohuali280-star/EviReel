@@ -25,7 +25,7 @@ export interface Chapter {title: string; start_t: number; end_t: number; points:
 export interface Artifact {artifact_id: string; stale: boolean; created_at: number; content: {title: string; chapters: Chapter[]; evidence: Evidence[]; warnings: string[]}}
 export interface Job {job_id: string; status: string; phase: string; current: number; total: number; error_code?: string; error?: string}
 export interface Study {job: Job | null; artifact: Artifact | null; model_configured: boolean; auto_enabled: boolean}
-export interface UIConfig {max_upload_bytes: number; max_video_duration_s: number; extensions: string[]; message_chars: number; model_configured: boolean}
+export interface UIConfig {upload_mode?: 'single' | 'resumable'; auth_required?: boolean; max_upload_bytes: number; max_video_duration_s: number; extensions: string[]; message_chars: number; model_configured: boolean}
 export type ChatAction = 'notes' | 'video' | 'transcript' | 'slides';
 export interface ChatScope {start_t: number; end_t: number; version?: string}
 export interface ChatPayload {type: 'text'; video_id: string; conversation_id: string; request_id: string; text: string; action?: ChatAction; scope?: ChatScope}

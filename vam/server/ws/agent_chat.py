@@ -11,6 +11,7 @@ from pydantic import ValidationError
 
 from vam.protocol import VideoAgentRequest
 from vam.video_registry import DomainError
+from vam.server.platform_auth import authorize_video
 
 router = APIRouter()
 
@@ -80,6 +81,10 @@ async def agent_chat(websocket: WebSocket):
                 for key, prefix in (('video_id', 'v'), ('conversation_id', 'c'), ('request_id', 'r')):
                     if re.fullmatch(prefix + r'_[0-9a-f]{32}', str(payload.get(key, ''))):
                         scope[key] = payload[key]
+                if re.fullmatch(r'v_[0-9a-f]{32}', str(payload.get('video_id', ''))):
+                    await authorize_video(websocket, payload['video_id'])
+                elif getattr(websocket.app.state, 'platform', None) is not None:
+                    raise ValueError('video_id required')
                 if payload.get('type') == 'reset':
                     video_id = payload.get('video_id')
                     conversation = service.store.create(video_id)

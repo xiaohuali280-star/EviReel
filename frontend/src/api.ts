@@ -5,6 +5,7 @@ export async function api<T>(url: string, options: RequestInit = {}): Promise<T>
   const response = await fetch(url, {...options, headers: {'Content-Type': 'application/json', ...options.headers}});
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
+    if (response.status === 401 && typeof window !== 'undefined') window.dispatchEvent(new Event('evireel:unauthenticated'));
     throw new ApiError(body.error?.code || 'http_error', body.error?.message || `请求失败（${response.status}）`, response.status);
   }
   return response.status === 204 ? undefined as T : response.json();
@@ -50,6 +51,10 @@ const messages: Record<string, string> = {
   video_trashed: '视频已移入回收站，恢复后即可继续学习。', request_timeout: '回答超时，请重新提问。',
   queue_full: '处理队列已满，请稍后重试。', study_queue_full: '笔记生成任务较多，请稍后重试。',
   study_running: '该视频正在生成笔记，请等待完成。', question_too_large: '问题超过字数上限，请缩短后重试。',
+  invalid_credentials: '用户名或密码不正确。', unauthenticated: '登录已过期，请重新登录。',
+  quota_exceeded: '学习空间的存储配额不足，请删除部分视频后重试。', too_many_uploads: '未完成的上传过多，请先完成或放弃其中一个。',
+  upload_not_found: '上传会话不存在或无权访问。', video_not_found: '视频不存在或无权访问。',
+  storage_unavailable: '对象存储暂不可用，请稍后重试。', upload_limit: '视频超过上传大小上限。', unsupported_media: '不支持的视频格式。',
   export_budget_exceeded: '课件超过当前导出页数上限，可下载笔记或调整服务器限额后重试。',
 };
 export function errorText(error: unknown) {

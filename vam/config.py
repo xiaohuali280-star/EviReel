@@ -76,6 +76,27 @@ class Settings(BaseSettings):
     embedding_api_key_override: str = ""
     embedding_base_url_override: str = ""
     embedding_model_override: str = ""
+    # E1 platform mode: enabled when DATABASE_URL is set. PostgreSQL holds identities,
+    # ownership, quota and upload sessions; S3-compatible storage holds originals.
+    database_url: str = ""
+    s3_endpoint: str = ""
+    s3_public_endpoint: str = ""
+    s3_access_key: str = ""
+    s3_secret_key: str = ""
+    s3_bucket: str = "evireel"
+    s3_region: str = "us-east-1"
+    s3_key_prefix: str = ""
+    upload_part_size: int = Field(8 * 1024 * 1024, ge=5 * 1024 * 1024, le=512 * 1024 * 1024)
+    upload_session_ttl_s: int = Field(24 * 3600, ge=60, le=7 * 24 * 3600)
+    upload_url_ttl_s: int = Field(900, ge=1, le=3600)
+    upload_lease_s: int = Field(300, ge=5, le=3600)
+    upload_max_active_sessions: int = Field(5, ge=1, le=100)
+    upload_verify_attempts: int = Field(3, ge=1, le=20)
+    upload_verify_part_etag: bool = True
+    upload_reconcile_interval_s: float = Field(60, ge=1, le=3600)
+    default_workspace_quota_bytes: int = Field(20 * 1024 ** 3, ge=0)
+    auth_session_ttl_s: int = Field(7 * 24 * 3600, ge=300, le=90 * 24 * 3600)
+    auth_cookie_secure: bool = False
     app_version: str = "0.1.0"
     websocket_path: str = "/ws/agent"
     
@@ -141,6 +162,10 @@ class Settings(BaseSettings):
     # Query ablation: attach the latest finalized segment as video context.
     query_include_latest_segment_video: bool = True
     query_latest_segment_video_path: str = ""
+
+    @property
+    def platform_enabled(self) -> bool:
+        return bool(self.database_url)
 
     @property
     def provider_name(self) -> str:

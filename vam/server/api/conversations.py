@@ -2,6 +2,7 @@ from fastapi import APIRouter, Query, Request
 from pydantic import Field
 
 from vam.protocol import StrictSchemaModel
+from vam.server.platform_auth import authorize_video
 
 router = APIRouter(prefix='/api/conversations', tags=['Conversations'])
 
@@ -12,6 +13,7 @@ class CreateConversation(StrictSchemaModel):
 
 @router.post('', status_code=201)
 async def create(body: CreateConversation, request: Request):
+    await authorize_video(request, body.video_id)
     request.app.state.indexing._usable_video(body.video_id)
     return request.app.state.conversations.store.create(body.video_id)
 

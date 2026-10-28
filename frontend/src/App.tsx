@@ -1,12 +1,16 @@
 import {useCallback, useEffect, useRef, useState} from 'react';
 import Markdown from 'react-markdown';
-import {ArrowUp, BookOpen, Check, ChevronDown, ChevronRight, Copy, Download, FileText, Globe, History, LoaderCircle, LockKeyhole, Maximize, MessageSquarePlus, Moon, PanelLeftClose, PanelLeftOpen, Paperclip, Play, Plus, Presentation, RefreshCw, Search, Sun, Trash2, Video as VideoIcon, X} from 'lucide-react';
+import {ArrowUp, BookOpen, LogOut, Check, ChevronDown, ChevronRight, Copy, Download, FileText, Globe, History, LoaderCircle, LockKeyhole, Maximize, MessageSquarePlus, Moon, PanelLeftClose, PanelLeftOpen, Paperclip, Play, Plus, Presentation, RefreshCw, Search, Sun, Trash2, Video as VideoIcon, X} from 'lucide-react';
 import {api, codeText, downloadFile, errorText, isProcessing, post, requestId, seekTime, time, upload} from './api';
 import {ChatChannel, remembered} from './chat';
 import {actionMessages, ResourceCard} from './quick-actions';
 import {useResizablePanels} from './use-resizable-panels';
 import {useSidebar} from './use-sidebar';
 import {TranscriptReader} from './TranscriptReader';
+import {Login, type Me} from './login';
+import {ResumeBanner, UploadPanel, uploadFailureText} from './upload-panel';
+import {ApiError} from './api';
+import {browserTransport, ResumableUpload, UploadError, type UploadSession, type UploadState} from './resumable-upload';
 import type {AgentEvent, Chapter, ChatAction, ChatPayload, ChatScope, Conversation, Evidence, Job, Message, Page, Study, Transcript, UIConfig, Video} from './types';
 
 const prompts = ['这段视频的主要内容是什么？', '帮我总结这节课的重点', '这部分的要点有什么好处？', '有哪些值得记录的知识点？'];
@@ -75,6 +79,12 @@ export default function App() {
   const [downloading, setDownloading] = useState(false);
   const [mediaError, setMediaError] = useState('');
   const [playbackTime, setPlaybackTime] = useState(0);
+  const [me, setMe] = useState<Me | null>(null);
+  const [authChecked, setAuthChecked] = useState(false);
+  const [uploadState, setUploadState] = useState<UploadState | null>(null);
+  const [resumable, setResumable] = useState<UploadSession[]>([]);
+  const uploader = useRef<ResumableUpload | null>(null);
+  const resumeTarget = useRef<UploadSession | null>(null);
   const file = useRef<HTMLInputElement>(null);
   const player = useRef<HTMLVideoElement>(null);
   const playerShell = useRef<HTMLDivElement>(null);
@@ -113,24 +123,40 @@ export default function App() {
   useEffect(() => {
     const abort = new AbortController(); api<UIConfig>('/api/ui-config', {signal: abort.signal}).then(setConfig).catch(e => setError(errorText(e))); return () => abort.abort();
   }, []);
+  const authRequired = !!config?.auth_required;
+  const signedIn = !authRequired || !!me;
+  useEffect(() => {
+    if (!config) return;
+    if (!config.auth_required) {setAuthChecked(true); return}
+    api<Me>('/api/auth/me').then(setMe).catch(() => setMe(null)).finally(() => setAuthChecked(true));
+    const expired = () => setMe(null);
+    addEventListener('evireel:unauthenticated', expired);
+    return () => removeEventListener('evireel:unauthenticated', expired);
+  }, [config]);
+  const loadResumable = useCallback(async () => {
+    if (config?.upload_mode !== 'resumable' || !signedIn) return;
+    try {setResumable((await api<{items: UploadSession[]}>('/api/uploads')).items)} catch { /* shown via other requests */ }
+  }, [config, signedIn]);
+  useEffect(() => {loadResumable()}, [loadResumable, revision]);
   useEffect(() => {
     document.documentElement.dataset.theme = dark ? 'dark' : 'light';
     try {localStorage.setItem('evireel:theme', dark ? 'dark' : 'light')} catch { /* optional preference */ }
   }, [dark]);
   useEffect(() => {
+    if (!signedIn) return;
     const abort = new AbortController(); let timer: ReturnType<typeof setTimeout>;
     const load = async () => {
       try {const result = await api<Page<Video>>(`/api/videos?offset=${offset}&limit=20&trash=${trash}&q=${encodeURIComponent(search)}`, {signal: abort.signal});
         if (!abort.signal.aborted) {setVideos(result); timer = setTimeout(load, 4000)}
       } catch (e) {if (!abort.signal.aborted) {setError(errorText(e)); timer = setTimeout(load, 6000)}}
     }; load(); return () => {abort.abort(); clearTimeout(timer)};
-  }, [offset, search, trash, revision]);
+  }, [offset, search, trash, revision, signedIn]);
   useEffect(() => {
     setDraft(''); sendLock.current = false; queuedQuestion.current = null; setVideo(null); setJob(null); setStudy(null); setCid(''); setMessages([]); setChapterIndex(0); setTab('notes'); setLearningOpen(false); setMediaError(''); queuedSeek.current = null;
     setConversations([]); setPlaybackTime(0); manuscript.current = [];
   }, [videoId, trash]);
   useEffect(() => {
-    if (!videoId || trash) return;
+    if (!videoId || trash || !signedIn) return;
     const abort = new AbortController(); let timer: ReturnType<typeof setTimeout>;
     const load = async () => {
       try {
@@ -146,9 +172,9 @@ export default function App() {
         setStudy(newStudy); setJob(newJob); timer = setTimeout(load, isProcessing(detail.status) || (newStudy.job && isProcessing(newStudy.job.status)) ? 1500 : 5000);
       } catch (e) {if (!abort.signal.aborted) {setError(errorText(e)); timer = setTimeout(load, 5000)}}
     }; load(); return () => {abort.abort(); clearTimeout(timer)};
-  }, [videoId, trash, revision, chooseVideo, refresh]);
+  }, [videoId, trash, revision, chooseVideo, refresh, signedIn]);
   useEffect(() => {
-    if (!videoId || trash) return;
+    if (!videoId || trash || !signedIn) return;
     const abort = new AbortController();
     const selection = conversationRevision.current;
     api<Page<Conversation>>(`/api/conversations?video_id=${videoId}&limit=200`, {signal: abort.signal}).then(result => {
@@ -158,7 +184,7 @@ export default function App() {
       if (selection === conversationRevision.current) setCid(result.items.find(c => c.conversation_id === saved)?.conversation_id || result.items[0]?.conversation_id || '');
     }).catch(e => {if (!abort.signal.aborted) setError(errorText(e))});
     return () => abort.abort();
-  }, [videoId, trash]);
+  }, [videoId, trash, signedIn]);
   const loadMessages = useCallback(async (conversation: string, vid: string, signal?: AbortSignal) => {
     const all: Message[] = []; let after = 0;
     do {
@@ -170,7 +196,7 @@ export default function App() {
   useEffect(() => {
     setMessages([]); setPending(false); setPendingText(''); setStage('');
     sendLock.current = false;
-    if (!cid || !videoId || trash) return;
+    if (!cid || !videoId || trash || !signedIn) return;
     const abort = new AbortController();
     try {localStorage.setItem(`evireel:conversation:${videoId}`, cid)} catch { /* optional */ }
     loadMessages(cid, videoId, abort.signal).catch(e => {if (!abort.signal.aborted) setError(errorText(e))});
@@ -192,12 +218,63 @@ export default function App() {
       socket.send(payload);
     }
     return () => {abort.abort(); socket.close(); if (channel.current === socket) channel.current = null};
-  }, [cid, videoId, trash, loadMessages]);
-  useEffect(() => () => uploadAbort.current?.abort(), []);
+  }, [cid, videoId, trash, loadMessages, signedIn]);
+  useEffect(() => () => {uploadAbort.current?.abort(); uploader.current?.pause()}, []);
   useEffect(() => {if (notice) {const timer = setTimeout(() => setNotice(''), 5000); return () => clearTimeout(timer)}}, [notice]);
 
+  async function startResumable(selected: File) {
+    const target = resumeTarget.current; resumeTarget.current = null;
+    if (target && (selected.size !== target.declared_size || selected.name !== target.original_name)) {
+      setError(uploadFailureText('file_mismatch')); return;
+    }
+    setError(''); setTrash(false); chooseVideo(''); setUploadName(selected.name);
+    const json = async <T,>(url: string, init: {method?: string; body?: unknown} = {}) => {
+      try {return await api<T>(url, {method: init.method, body: init.body === undefined ? undefined : JSON.stringify(init.body)})}
+      catch (e) {throw e instanceof ApiError ? new UploadError(e.code, e.message) : e}
+    };
+    const upload = new ResumableUpload(selected, browserTransport(json), setUploadState);
+    uploader.current = upload;
+    try {
+      const session = await upload.start(target || undefined);
+      if (session.state === 'completed') {
+        setUploadState(null); uploader.current = null; chooseVideo(session.video_id); refresh();
+        if (session.result?.index_error) setNotice('视频已校验，处理队列已满，可稍后点击“重新处理”。');
+      }
+    } catch (e) {
+      // A wrong reselected file must not hide the resume prompt; other failures stay in the panel.
+      if (e instanceof UploadError && e.code === 'file_mismatch') {setUploadState(null); uploader.current = null; setError(uploadFailureText(e.code))}
+    }
+    finally {if (file.current) file.current.value = ''; loadResumable()}
+  }
+  async function resumeUpload() {
+    const upload = uploader.current; if (!upload) return;
+    try {const session = await upload.resume(); if (session.state === 'completed') {setUploadState(null); uploader.current = null; chooseVideo(session.video_id); refresh()}}
+    catch { /* rendered */ }
+  }
+  async function cancelUpload() {
+    const upload = uploader.current;
+    if (upload && !['failed', 'completed'].includes(upload.state.phase)) await upload.cancel();
+    uploader.current = null; setUploadState(null); loadResumable();
+  }
+  async function discardSession(s: UploadSession) {
+    try {await api(`/api/uploads/${s.upload_id}`, {method: 'DELETE'}); setNotice('已放弃该上传，预留的存储空间已释放。')}
+    catch (e) {setError(errorText(e))}
+    loadResumable();
+  }
+  function chooseResume(s: UploadSession) {resumeTarget.current = s; setNotice(`请重新选择文件“${s.original_name}”，系统会校验是否为同一文件。`); file.current?.click()}
+  async function logout() {
+    try {await post('/api/auth/logout')} catch { /* cookie may already be gone */ }
+    setMe(null); setVideos({items: [], total: 0, offset: 0, limit: 20}); chooseVideo('');
+  }
+
   async function handleUpload(selected?: File) {
-    if (!selected || uploadProgress !== null) return;
+    if (!selected || uploadProgress !== null || (uploadState && !['failed', 'cancelled'].includes(uploadState.phase))) return;
+    if (config?.upload_mode === 'resumable') {
+      const extension = '.' + selected.name.split('.').pop()?.toLowerCase();
+      if (!config.extensions.includes(extension)) {setError(`支持格式：${config.extensions.join('、')}`); return}
+      if (selected.size > config.max_upload_bytes) {setError(`视频超过 ${Math.round(config.max_upload_bytes / 1024 / 1024)} MB 上传上限。`); return}
+      return startResumable(selected);
+    }
     if (!config) {setError('正在读取上传限制，请稍后重试。'); return}
     const extension = '.' + selected.name.split('.').pop()?.toLowerCase();
     if (!config.extensions.includes(extension)) {setError(`支持格式：${config.extensions.join('、')}`); return}
@@ -292,11 +369,13 @@ export default function App() {
   function showLearning(kind: string) {setTab(kind === 'transcript' ? 'transcript' : 'notes'); setLearningOpen(true); refresh()}
   const sourceLink = (format: string) => `/api/videos/${videoId}/study/artifacts/${artifact?.artifact_id}/export?format=${format}`;
 
+  if (config?.auth_required && authChecked && !me) return <Login onLogin={value => {setMe(value); refresh()}} />;
+  if (config?.auth_required && !authChecked) return <div className="login-page"><LoaderCircle className="spin" /></div>;
   return <div className="app">
     <aside className="sidebar" data-collapsed={!sidebar.expanded} data-mobile={sidebar.mobile} aria-label="视频导航">
       <div className="sidebar-header"><a className="brand" href="/" aria-label="EviReel 首页" onClick={e => {e.preventDefault(); setTrash(false); chooseVideo('')}}><span className="brand-mark"><Play fill="white" /></span><span className="sidebar-label">EviReel</span></a>
         <button ref={sidebar.toggleButton} className="sidebar-toggle" aria-label={sidebar.expanded ? '收起侧边栏' : '展开侧边栏'} aria-expanded={sidebar.expanded} aria-controls="sidebar-library" data-tooltip={sidebar.expanded ? '收起侧边栏' : '展开侧边栏'} title={sidebar.expanded ? '收起侧边栏' : '展开侧边栏'} onClick={sidebar.toggle}>{sidebar.expanded ? <PanelLeftClose size={19} /> : <PanelLeftOpen size={19} />}</button></div>
-      <button className="primary upload-button" aria-label="上传视频" data-tooltip="上传视频" disabled={uploadProgress !== null || !config} onClick={() => file.current?.click()}><Plus size={21} /><span className="sidebar-label">上传视频</span></button>
+      <button className="primary upload-button" aria-label="上传视频" data-tooltip="上传视频" disabled={uploadProgress !== null || (!!uploadState && !['failed', 'cancelled'].includes(uploadState.phase)) || !config} onClick={() => {resumeTarget.current = null; file.current?.click()}}><Plus size={21} /><span className="sidebar-label">上传视频</span></button>
       <input ref={file} type="file" aria-label="选择视频文件" accept={config?.extensions.join(',') || 'video/*'} hidden onChange={e => handleUpload(e.target.files?.[0])} />
       <nav aria-label="视频分类"><button className={!trash ? 'active' : ''} aria-label="我的视频" aria-current={!trash ? 'page' : undefined} data-tooltip="我的视频" onClick={() => {sidebar.expand(); setTrash(false); setOffset(0)}}><VideoIcon /><span className="sidebar-label">我的视频</span><span className="sidebar-count">{!trash && videos.total}</span></button><button className={trash ? 'active' : ''} aria-label="回收站" aria-current={trash ? 'page' : undefined} data-tooltip="回收站" onClick={() => {sidebar.expand(); setTrash(true); chooseVideo(''); setOffset(0)}}><Trash2 /><span className="sidebar-label">回收站</span></button></nav>
       <div id="sidebar-library" className="sidebar-library" ref={sidebar.library} hidden={!sidebar.expanded}>
@@ -309,10 +388,11 @@ export default function App() {
       </div>
       <div className="workspace-badge" title="我的学习空间"><span>E</span><div className="sidebar-label">我的学习空间<small>内容沉淀，让学习发生</small></div></div>
     </aside>
-    <div className="workspace"><header className="topbar"><label className="search"><Search size={20} /><input aria-label="搜索视频文件名" placeholder="搜索视频文件名…" value={query} onChange={e => setQuery(e.target.value)} />{query && <button aria-label="清除搜索" onClick={() => setQuery('')}><X size={16} /></button>}</label><div className="top-actions"><button aria-label={dark ? '切换浅色外观' : '切换深色外观'} onClick={() => setDark(v => !v)}>{dark ? <Moon /> : <Sun />}</button><span className="avatar" title="当前本地学习空间">E</span></div></header>
+    <div className="workspace"><header className="topbar"><label className="search"><Search size={20} /><input aria-label="搜索视频文件名" placeholder="搜索视频文件名…" value={query} onChange={e => setQuery(e.target.value)} />{query && <button aria-label="清除搜索" onClick={() => setQuery('')}><X size={16} /></button>}</label><div className="top-actions"><button aria-label={dark ? '切换浅色外观' : '切换深色外观'} onClick={() => setDark(v => !v)}>{dark ? <Moon /> : <Sun />}</button>{me ? <><span className="avatar" title={`${me.username} · ${me.workspace.name}`}>{me.username.slice(0, 1).toUpperCase()}</span><button aria-label="退出登录" title="退出登录" onClick={logout}><LogOut /></button></> : <span className="avatar" title="当前本地学习空间">E</span>}</div></header>
       {(error || notice) && <div className={`toast ${error ? 'error' : ''}`} role={error ? 'alert' : 'status'}><span>{error || notice}</span><button aria-label="关闭提示" onClick={() => {setError(''); setNotice('')}}><X size={16} /></button></div>}
+      {!uploadState && !trash && <ResumeBanner sessions={resumable} choose={chooseResume} discard={discardSession} />}
       <div className="columns resizable-columns" ref={panels.container} style={panels.style} data-stacked={panels.stacked} data-dragging={panels.dragging}><main className="main-panel" id="learning-panel">
-        {trash ? <section className="empty-state"><div className="empty-icon"><Trash2 size={64} /></div><h1>回收站</h1><p>视频、笔记和对话会一起保留，恢复后即可继续学习。</p><p>选择左侧视频恢复，或永久删除。</p></section> : uploadProgress !== null ? <section className="empty-state processing"><div className="empty-icon"><VideoIcon size={70} /></div><span className="eyebrow">正在上传</span><h1>把知识带进你的学习空间</h1><p className="filename">{uploadName}</p><div className="progress"><span style={{width: `${uploadProgress}%`}} /></div><strong>{uploadProgress}%</strong><p>{uploadProgress === 100 ? '上传完成，正在检查视频…' : '正在传输视频文件…'}</p><button className="secondary" onClick={() => uploadAbort.current?.abort()}>取消上传</button></section> : busy ? <section className="empty-state processing"><div className="processing-orbit"><VideoIcon size={58} /><span /><LoaderCircle className="spin" size={98} /></div><span className="eyebrow">让内容转化为知识</span><h1>视频正在处理中</h1><p className="filename">{video?.original_name}</p><p>我们正在整理视频内容，完成后即可查看笔记并开始提问。</p><div className="indeterminate"><span /></div><small>可以离开此页面，处理会在后台继续。</small></section> : video ? <>
+        {uploadState && !trash ? <UploadPanel name={uploadName} state={uploadState} pause={() => uploader.current?.pause()} resume={resumeUpload} cancel={cancelUpload} /> : trash ? <section className="empty-state"><div className="empty-icon"><Trash2 size={64} /></div><h1>回收站</h1><p>视频、笔记和对话会一起保留，恢复后即可继续学习。</p><p>选择左侧视频恢复，或永久删除。</p></section> : uploadProgress !== null ? <section className="empty-state processing"><div className="empty-icon"><VideoIcon size={70} /></div><span className="eyebrow">正在上传</span><h1>把知识带进你的学习空间</h1><p className="filename">{uploadName}</p><div className="progress"><span style={{width: `${uploadProgress}%`}} /></div><strong>{uploadProgress}%</strong><p>{uploadProgress === 100 ? '上传完成，正在检查视频…' : '正在传输视频文件…'}</p><button className="secondary" onClick={() => uploadAbort.current?.abort()}>取消上传</button></section> : busy ? <section className="empty-state processing"><div className="processing-orbit"><VideoIcon size={58} /><span /><LoaderCircle className="spin" size={98} /></div><span className="eyebrow">让内容转化为知识</span><h1>视频正在处理中</h1><p className="filename">{video?.original_name}</p><p>我们正在整理视频内容，完成后即可查看笔记并开始提问。</p><div className="indeterminate"><span /></div><small>可以离开此页面，处理会在后台继续。</small></section> : video ? <>
           <div className="video-heading"><div><h1>{video.original_name}</h1><p>{new Date(video.created_at * 1000).toLocaleDateString('zh-CN')} <span>{time(video.duration)}</span> <span>{artifact ? '已生成笔记' : '视频资料'}{video.capabilities.transcript && '、文稿'}</span></p></div><button className="icon-button" title="重新处理视频" aria-label="重新处理视频" onClick={() => retry()}><RefreshCw size={18} /></button></div>
           {['failed', 'interrupted', 'partial'].includes(video.status) && <div className="status-banner"><span>{video.status === 'partial' ? '部分能力未就绪，已完成的内容仍可使用。' : '上次视频处理未完成。'} {job?.error_code && `（${job.error_code}）`}</span><button onClick={() => retry()}>重新处理</button></div>}
           <div className="player-shell" ref={playerShell}>{video.capabilities.playback ? <video ref={player} key={video.video_id} src={video.content_url || undefined} controls playsInline preload="metadata" aria-label="视频播放器" onTimeUpdate={e => {

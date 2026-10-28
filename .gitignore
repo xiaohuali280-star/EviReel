@@ -96,3 +96,8 @@ playwright-report/
 test-results/
 !frontend/index.html
 !vam/server/static/index.html
+
+# E1 local middleware and credentials (never commit)
+deploy/e1/dev.env
+.local-infra/
+e1-local-logs/

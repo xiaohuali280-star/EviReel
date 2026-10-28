@@ -1,0 +1,41 @@
+# E1 local middleware for Linux / WSL2 (Docker Engine or Docker Desktop with the WSL2 backend).
+#   cp deploy/e1/dev.env.example deploy/e1/dev.env   # then change the dev passwords
+#   docker compose --env-file deploy/e1/dev.env -f deploy/e1/compose.yml up -d --wait
+# Development only: ports bind to 127.0.0.1, credentials come from an untracked env file.
+# Production needs managed PostgreSQL/S3 (or hardened equivalents), TLS, secrets management
+# and backups - see docs/engineering/E1_DELIVERY.md.
+name: evireel-e1
+services:
+  postgres:
+    image: postgres:16.4-alpine
+    environment:
+      POSTGRES_USER: ${EVIREEL_PG_USER:?set in dev.env}
+      POSTGRES_PASSWORD: ${EVIREEL_PG_PASSWORD:?set in dev.env}
+      POSTGRES_DB: evireel
+    ports: ["127.0.0.1:${EVIREEL_PG_PORT:-5432}:5432"]
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d evireel"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+  minio:
+    # Last MinIO community release with prebuilt images; pinned by tag. MinIO stopped publishing
+    # new community binaries in 2025 - re-evaluate the S3 implementation before production use.
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+    command: ["server", "/data", "--address", ":9000", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${EVIREEL_S3_ACCESS_KEY:?set in dev.env}
+      MINIO_ROOT_PASSWORD: ${EVIREEL_S3_SECRET_KEY:?set in dev.env}
+      # Browsers upload parts directly; only the dev web origins may call the S3 API.
+      MINIO_API_CORS_ALLOW_ORIGIN: ${EVIREEL_WEB_ORIGINS:-http://127.0.0.1:8000,http://localhost:8000}
+    ports: ["127.0.0.1:${EVIREEL_S3_PORT:-9000}:9000", "127.0.0.1:9001:9001"]
+    volumes: [miniodata:/data]
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+volumes:
+  pgdata:
+  miniodata:

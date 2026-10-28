@@ -89,3 +89,25 @@
   .sidebar[data-mobile="true"][data-collapsed="true"] .workspace-badge{display:none}
   .sidebar[data-mobile="true"] [data-tooltip]:is(:hover,:focus-visible)::after{left:auto;right:0;top:calc(100% + 7px);transform:none}
 }
+
+/* E1: resumable upload stages, resume prompt and sign-in */
+.upload-steps{display:flex;gap:8px;list-style:none;padding:0;margin:18px 0 0;flex-wrap:wrap;justify-content:center}
+.upload-steps li{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);padding:6px 11px;border-radius:20px;background:var(--soft)}
+.upload-steps li>span{width:17px;height:17px;border-radius:50%;display:grid;place-items:center;font-size:10px;border:1px solid currentColor}
+.upload-steps li[data-state=active]{color:var(--blue);background:#e7f1ff;font-weight:600}
+.upload-steps li[data-state=done]{color:#16936f}
+.upload-actions{display:flex;gap:10px;margin-top:18px;flex-wrap:wrap;justify-content:center}
+.upload-actions button{display:inline-flex;align-items:center;gap:6px}
+.upload-error{color:#ac5148;background:#fff5f3;border-radius:9px;padding:10px 13px;font-size:13px!important;line-height:1.7;max-width:480px;margin-top:12px}
+.resume-banner{margin:0 18px 12px;display:flex;flex-direction:column;gap:8px}
+.resume-item{display:flex;align-items:center;gap:12px;padding:11px 14px;border:1px solid #d9e7fb;background:#f0f7ff;border-radius:11px;color:#2d639e;font-size:12px}
+.resume-item>span{flex:1;min-width:0}.resume-item strong{display:block;overflow-wrap:anywhere}.resume-item small{display:block;color:var(--muted);margin-top:3px;line-height:1.6}
+.resume-item .primary{padding:7px 12px;font-size:12px}
+.login-page{min-height:100vh;display:grid;place-items:center;padding:20px}
+.login-card{width:360px;max-width:100%;background:var(--surface);border:1px solid var(--line);border-radius:18px;padding:30px;display:flex;flex-direction:column;gap:14px;box-shadow:0 20px 60px #10234412}
+.login-card h1{font-size:22px}.login-card>p{font-size:12px;color:var(--muted);line-height:1.7}
+.login-card label{display:flex;flex-direction:column;gap:6px;font-size:12px;color:#5d7095}
+.login-card input{border:1px solid var(--line);border-radius:9px;padding:10px 12px;background:var(--soft);color:var(--ink)}
+[data-theme=dark] .resume-item{background:#1b304f;border-color:#283650;color:#acd3ff}
+[data-theme=dark] .upload-error{background:#3a1f25}
+@media(max-width:600px){.resume-item{flex-wrap:wrap}.resume-banner{margin:0 12px 12px}}

@@ -3,6 +3,9 @@ from __future__ import annotations
 from fastapi import APIRouter, Request, UploadFile, File, Query
 from starlette.responses import FileResponse
 
+from vam.runtime import run_sync
+from vam.server.platform_auth import principal_of
+
 router = APIRouter(prefix="/api", tags=["Videos"])
 
 class LeasedFileResponse(FileResponse):
@@ -23,7 +26,11 @@ async def upload_video(request: Request, video: UploadFile = File(...)):
 @router.get("/videos")
 async def list_videos(request: Request, offset: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=200),
                       q: str = Query('', max_length=200), trash: bool = False):
-    return request.app.state.indexing.registry.list(offset, limit, q=q.strip(), trash=trash)
+    platform = getattr(request.app.state, 'platform', None)
+    allowed = None
+    if platform is not None:
+        allowed = await run_sync(platform.identity.owned_video_ids, principal_of(request).workspace_id)
+    return request.app.state.indexing.registry.list(offset, limit, q=q.strip(), trash=trash, video_ids=allowed)
 
 @router.post('/videos/{video_id}/trash')
 async def trash_video(video_id: str, request: Request):
@@ -46,6 +53,16 @@ async def video_content(video_id: str, request: Request):
 @router.delete("/videos/{video_id}", status_code=204)
 async def delete_video(video_id: str, request: Request):
     request.app.state.indexing.delete(video_id)
+    platform = getattr(request.app.state, 'platform', None)
+    if platform is not None:
+        # SQLite row is gone; ownership/quota release and object deletion are idempotent and
+        # re-driven by the upload reconciler if this process stops in between.
+        released = await run_sync(platform.identity.release_video, video_id)
+        if released and released.get('object_key'):
+            try:
+                await run_sync(platform.store.delete, released['object_key'])
+            except Exception:
+                pass
 
 @router.post("/videos/{video_id}/index", status_code=202)
 async def index_video(video_id: str, request: Request):

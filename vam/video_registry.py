@@ -76,13 +76,17 @@ class VideoRegistry:
         return {"text_version": None, "search_version": None, "readable": False, "searchable": False,
                 "text_status": "not_ready", "language": None, "search_uses_older_text": False}
 
-    def list(self, offset=0, limit=50, *, q='', trash=False):
+    def list(self, offset=0, limit=50, *, q='', trash=False, video_ids=None):
         # Literal substring search: user '%'/'_' are not SQL wildcard operators.
         where = "trashed_at IS NOT NULL" if trash else "trashed_at IS NULL"
         where += " AND instr(lower(original_name),lower(?))>0"
+        params = [q]
+        if video_ids is not None:  # platform mode: restrict to the caller's workspace
+            where += " AND video_id IN (SELECT value FROM json_each(?))"
+            params.append(json.dumps(list(video_ids)))
         with self.db.connect() as conn:
-            total = conn.execute("SELECT COUNT(*) FROM videos WHERE " + where, (q,)).fetchone()[0]
-            rows = conn.execute("SELECT * FROM videos WHERE " + where + " ORDER BY created_at DESC,video_id LIMIT ? OFFSET ?", (q, limit, offset)).fetchall()
+            total = conn.execute("SELECT COUNT(*) FROM videos WHERE " + where, params).fetchone()[0]
+            rows = conn.execute("SELECT * FROM videos WHERE " + where + " ORDER BY created_at DESC,video_id LIMIT ? OFFSET ?", (*params, limit, offset)).fetchall()
         return {"items": [self.public(dict(row)) for row in rows], "total": total, "offset": offset, "limit": limit}
 
     def register(self, video_id, original_name, source_path, size, duration):

@@ -42,8 +42,11 @@ include = ["vam*"]
 [tool.setuptools.package-data]
 "vam.storage" = ["migrations/*.sql"]
 "vam.memory" = ["migrations/*.sql"]
+"vam.platform" = ["migrations/*.sql"]
 "vam.server" = ["static/*", "static/assets/*"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]
+# E1 platform mode: PostgreSQL metadata + S3-compatible object storage
+platform = ["psycopg[binary]>=3.2,<3.3", "boto3>=1.35,<2"]
 asr = ["faster-whisper>=1.2.1,<2"]
