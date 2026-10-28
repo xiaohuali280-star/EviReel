@@ -23,7 +23,7 @@
 | 每视频帧/字幕索引（`videos/<id>/memory/*.sqlite3`） | 本地文件 | 暂留，不改向量检索 |
 | 续传上传的已验证原片 | 对象存储 | 新增；本地 `source.ext` 是处理用工作副本 |
 
-同一类事实只有一个写入方。两库之间唯一的跨库步骤是“验证通过 → 先写 SQLite `videos` 行 → 再在 PG 一个事务内完成会话、配额结算和归属”。中间崩溃时，SQLite 行存在但没有归属，因此对任何用户不可见；协调器按会话状态幂等补齐。删除视频是相反顺序：先删 SQLite，再释放归属并删除对象；残留的归属由协调器释放。
+同一类事实只有一个写入方。两库之间唯一的跨库步骤是“验证通过 → 先写 SQLite `videos` 行 → 再在 PG 一个事务内完成会话、配额结算和归属”。中间崩溃时，SQLite 行存在但没有归属，因此对任何用户不可见；协调器按会话状态幂等补齐。删除视频是相反顺序：先删 SQLite，再在 PG 一个事务内释放归属和配额，并写入一条待删除对象记录（`object_deletions`），之后才物理删除对象；残留的归属由协调器释放。
 
 ## 3. 关键设计
 
@@ -37,12 +37,14 @@
 - 所有转换都是带当前状态条件的 `UPDATE`；验证阶段另带 `state_version`（attempt token）。
 - **进度以存储为准**：`GET /api/uploads/{id}` 调用 ListParts 回写 `upload_parts`。客户端的 `/parts/{n}/done` 只是可丢失的提示。
 - **complete 幂等**：只有把 `uploading→completing` 改成功的请求执行合并；其余请求返回当前会话视图（`completed` 时返回 200 和同一个 `result`）。`video_id` 在建会话时就固定，所以不会产生第二个逻辑视频。
-- **合并与验证分离**：合并（completing）后进入 verifying，由后台任务流式下载对象：服务端计算 SHA-256 与大小，与声明大小比对；用各分片 MD5 计算 S3 复合 ETag 并比对（这个值不是整文件 MD5，只用于确认组装的是签过名的分片）；最后跑 `inspect_upload`。全部通过才注册视频并进入现有处理链路。失败时状态带错误码（`invalid_media`、`size_mismatch`、`integrity_mismatch`、`duration_limit`…），同时删除对象、释放配额。
+- **合并与验证分离**：合并（completing）后进入 verifying，由后台任务流式下载对象：服务端计算 SHA-256 与大小，与声明大小比对；用各分片 MD5 计算 S3 复合 ETag 并比对（这个值不是整文件 MD5，只用于确认组装的是签过名的分片）；最后跑 `inspect_upload`。全部通过才注册视频并进入现有处理链路。失败时状态带错误码（`invalid_media`、`size_mismatch`、`integrity_mismatch`、`duration_limit`…），并在同一事务内释放配额、登记待删除对象（见“对象清理”）。复合 ETag 只能证明组装的是签过名的分片，不能证明这些分片来自用户此刻选择的同一个文件；续传时的内容一致性由前端核对已传分片（3.4）保证。
 - **合并成功、DB 失败**：会话停在 completing。租约过期后，`reconcile()` 再次调用 ListParts（返回 NoSuchUpload），转而 `head_object` 确认对象已组装，然后进入 verifying，无需重传。验证中断（进程退出）同理：租约过期后重新认领，attempt token 阻止旧执行者发布结果。
 - **一次处理受理**：完成后 `accept_processing` 先查 SQLite 是否已有该视频的索引任务，没有才 `schedule`，再以 `job_id IS NULL` 条件写回 PG。同一事件循环内检查与调度之间没有 await，SQLite 的单活动任务唯一索引兜底。
 - **配额**：建会话时对 workspace 行加 `FOR UPDATE`，原子检查 `used+reserved+size ≤ quota` 并预占；结算（completed）或释放（aborted/expired/failed）与状态转换在同一事务中，只发生一次。活动会话数也有上限。
 - **取消/过期与完成竞争**：三者都要求当前状态为 `uploading`（行锁 + 条件更新），数据库决定唯一赢家。过期转换先提交，提交后再中止 multipart 上传。
-- **清理**：协调器周期执行，处理过期会话、卡住的 initiated、无会话的孤儿 multipart（超过租约宽限）、以及 SQLite 已删除的孤儿归属。
+- **取消的返回值**：`DELETE /api/uploads/{id}` 在 completing/verifying/completed 时返回 409 `upload_not_cancellable`。前端据此改为跟随服务端的真实阶段，而不是显示“已取消”。
+- **清理**：协调器周期执行，处理过期会话、卡住的 initiated、无会话的孤儿 multipart（超过租约宽限）、SQLite 已删除的孤儿归属，以及待删除对象。
+- **对象清理 `vam/platform/cleanup.py`（迁移 `002_object_deletions.sql`）**：已组装的对象一旦不可达（验证失败、大小不符、视频永久删除或孤儿归属释放），就在同一个状态转换事务里写入 `object_deletions(state='pending')`。提交后先尝试立即删除；失败只增加 `attempts`，按 5 s、10 s、20 s…（上限 1 h）退避，由协调器 `drain()` 重试，进程重启后照常继续。确认删除后标记 `done` 和 `done_at`。删除前若发现仍有 `video_ownership` 引用该对象，则标记为 `skipped` 且不删除。**配额语义**：配额在逻辑转换（归属删除/上传失败）时立即释放，物理删除是最终一致的。待删除记录是运维可见的存储负债（`migrate check` 报告 `pending_object_deletions`），不计入用户配额。multipart 的中止仍由孤儿 multipart 扫描负责。
 
 ### 3.3 身份与授权 `vam/platform/identity.py`、`vam/server/platform_auth.py`
 - 用户名 + scrypt 密码哈希；登录后签发随机令牌。数据库只存 SHA-256；令牌放在 HttpOnly、SameSite=Lax Cookie 中，也支持 Bearer。请求体不接受 user_id/workspace_id（StrictSchemaModel 会拒绝多余字段）。
@@ -51,12 +53,13 @@
 
 ### 3.4 前端 `frontend/src/resumable-upload.ts`
 - MD5 在 Web Worker 中计算（Web Crypto 不支持 MD5，库内实现，有测试向量）。默认 3 路并发；网络错误按指数退避加抖动重试；403 时重签；`BadDigest` 时重新读取分片后重传。暂停用 AbortController 中止进行中的请求。
-- 文件身份指纹 `fp1` = SHA-256(大小 + 首尾各 1 MiB + 3 处 64 KiB 采样)。只用于判断“重选的是不是同一个文件”，可信校验在服务端完成。
-- 刷新或重开浏览器后，从 `GET /api/uploads` 列出未完成会话，提示重新选择文件；名称、大小、指纹不符时拒绝，且不发送任何字节。
+- 文件身份分两层。① 快速预检：指纹 `fp1` = SHA-256(大小 + 首尾各 1 MiB + 3 处 64 KiB 采样)，它覆盖不到采样区以外的修改。② 内容核对：会话视图返回 `uploaded_part_md5`，即存储确认持有的每个分片的签名 Content-MD5（`_sync_parts` 已用 ETag 核对过）。续传前，前端用重选文件逐片计算这些分片的 MD5，任何一片不一致都按 `file_mismatch` 拒绝，不签名也不发送任何字节。因此最终对象只可能由同一份文件的字节组成，不会出现“旧文件已传分片 + 新文件剩余分片”的混合。代价是续传前要读取并哈希已上传部分（在 Worker 中进行）。前提是 `UPLOAD_VERIFY_PART_ETAG=true`（默认）；关闭后，账本中的“uploaded”不再与 ETag 核对。
+- 刷新或重开浏览器后，从 `GET /api/uploads` 列出未完成会话，提示重新选择文件；名称、大小、指纹或已传分片内容不符时拒绝，且不发送任何字节。
+- 取消：`cancel()` 返回 `cancelled | unconfirmed | continuing`。只有服务端确认后才显示已取消。网络失败时进入 `cancel_unconfirmed`，提示会话可能仍占用配额，并提供“重试取消”和“继续上传”。与完成竞争失败（409）时转为跟随服务端的合并/校验阶段。
 - 三阶段分开显示：上传分片 → 服务器校验 → 视频处理（沿用现有处理中界面）。
 
 ### 3.5 迁移工具 `python -m vam.platform.migrate`
-`schema [--dry-run]`、`create-user`、`set-quota`、`backfill-legacy [--dry-run]`、`check`、`rollback-legacy [--dry-run]`。SQLite 以只读 URI 打开，工具不移动、不修改现有视频文件和行。回填只新增 `origin='legacy'` 的归属，回退只删除这些行。
+`schema [--dry-run]`、`create-user`、`set-quota`、`backfill-legacy [--dry-run]`、`check`、`rollback-legacy [--dry-run]`。SQLite 以只读 URI 打开，工具不移动、不修改现有视频文件和行。回填只新增 `origin='legacy'` 的归属，回退只删除这些行。schema 当前为版本 2（`001_platform`、`002_object_deletions`），`schema` 按序幂等应用。002 只新建一张表，不改动已有数据；回退到只认识 v1 的代码时需要删除该表并移除 `schema_migrations` 中版本 2 的记录（v1 代码会拒绝启动比自己新的 schema）。
 
 ## 4. 启动方式
 
@@ -104,8 +107,11 @@ python -m vam.platform.migrate rollback-legacy --workspace <ws_id> [--dry-run]
 | CI（Linux） | `4632b4f`：`E1 platform`（compose 中的真实 PG + MinIO，后端验收 + 浏览器验收）与 `EviReel CPU tests` | 均 success |
 | 未运行 | Linux compose 只在 CI 上运行过，本机无 Docker；真实模型调用 | — |
 
+独立验收（目标 `be66e7d`）发现 3 项缺陷：续传文件内容一致性、对象删除的持久补偿、取消状态失真。它们的修复和回归结果见 STATUS“独立验收整改”：真实 PG+MinIO 下 22 passed（全量 237 passed）、E1 浏览器 2/2、vitest 30/30、P5 21/21。
+
 ## 7. 交接给 E2
-- **接口**：`UploadService`（create/get/sign/complete/cancel/reconcile/accept_processing），`ObjectStore`（见 3.1）。
+- **接口**：`UploadService`（create/get/sign/complete/cancel/reconcile/accept_processing），`ObjectStore`（见 3.1），`ObjectCleaner`（`enqueue` 在调用方事务内，`delete_now`/`drain`）。`object_deletions` 已经是一张持久任务表，E2 可以把它并入通用任务表或交给 Worker 消费。
+- **可选重构（独立验收的非阻塞建议）**：`UploadService` 仍同时负责会话、配额、对象协议、媒体校验、双库发布。清理已拆到 `cleanup.py`。E2 引入 Worker 时可再把验证（`_download_and_check/_publish`）拆成独立的执行单元，事务边界保持不变。
 - **任务受理入口**：`UploadService.accept_processing → IndexingService.schedule`。E2 应改为同一事务写入任务行和 outbox。
 - **原片验证产物**：对象存储 `workspaces/<ws>/uploads/<upload_id>/source.ext`、`upload_sessions.verified_sha256/verified_size`，以及本地工作副本 `videos/<id>/source.ext`。E2 的 Worker 应直接从对象存储读取，并以 sha256 作为阶段输入摘要。
 - **仍在进程内的部分**：`IndexingService.tasks/leases/memory_locks/semaphore`、`UploadService.tasks`（验证）、`ConversationService.tasks`、`StudyService`、`OwnerLock`。

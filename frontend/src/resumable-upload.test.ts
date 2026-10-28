@@ -21,6 +21,9 @@ class FakeServer implements Transport {
   expireNext = new Map<number, number>();   // part -> remaining 403 responses
   corruptOnce = new Set<number>();          // part -> next PUT stored with a wrong digest
   dropDone = false;
+  deleteFails = 0;                          // remaining DELETE network failures
+  completeBeforeDelete = false;             // the session completes before the DELETE arrives
+  deleteCalls = 0;
   clock = 0;
   session!: UploadSession;
   constructor(public partSize: number, public expiresIn = 900) {}
@@ -29,6 +32,7 @@ class FakeServer implements Transport {
   view(): UploadSession {
     const uploaded = [...this.stored.keys()].sort((a, b) => a - b);
     return {...this.session, uploaded_parts: uploaded,
+      uploaded_part_md5: Object.fromEntries(uploaded.map(n => [String(n), this.stored.get(n)!])),
       missing_parts: Array.from({length: this.session.part_count}, (_, i) => i + 1).filter(n => !this.stored.has(n))};
   }
   async json<T>(url: string, init: {method?: string; body?: any} = {}): Promise<T> {
@@ -55,7 +59,15 @@ class FakeServer implements Transport {
       this.session = {...this.session, state: 'completed', result: {video_id: this.session.video_id}};
       return this.view() as T;
     }
-    if (init.method === 'DELETE') {this.session = {...this.session, state: 'aborted'}; return this.view() as T}
+    if (init.method === 'DELETE') {
+      this.deleteCalls++;
+      if (this.deleteFails > 0) {this.deleteFails--; throw new TypeError('Failed to fetch')}
+      if (this.completeBeforeDelete) {
+        this.session = {...this.session, state: 'completed', result: {video_id: this.session.video_id}};
+        throw new UploadError('upload_not_cancellable', 'Upload is already completed');
+      }
+      this.session = {...this.session, state: 'aborted'}; return this.view() as T;
+    }
     return this.view() as T;
   }
   async put(url: string, body: Blob, digest: string, onProgress: (n: number) => void, signal: AbortSignal) {
@@ -106,6 +118,56 @@ describe('resumable upload client', () => {
     await run(makeFile(3 * MiB), server).start().catch(() => undefined);
     const other = run(makeFile(3 * MiB, 99), server);
     await expect(other.start({...server.view(), state: 'uploading'})).rejects.toMatchObject({code: 'file_mismatch'});
+  });
+
+  it('refuses to resume when the file changed outside the fingerprint samples, sending nothing', async () => {
+    const size = 20 * MiB, server = new FakeServer(4 * MiB);
+    const original = makeFile(size);
+    server.failPut.set(4, 99); server.failPut.set(5, 99);
+    await run(original, server).start().catch(() => undefined);
+    expect([...server.stored.keys()].sort()).toEqual([1, 2, 3]);
+    // Same size, same sampled ranges (head, tail, 25/50/75 %), different bytes at 2 MiB and 12.5 MiB.
+    const bytes = new Uint8Array(await original.arrayBuffer());
+    bytes[2 * MiB] ^= 0xff; bytes[12.5 * MiB] ^= 0xff;
+    const edited = new File([bytes], 'lecture.mp4', {type: 'video/mp4'});
+    expect(await fingerprint(edited)).toBe(await fingerprint(original));
+    server.failPut.clear(); server.puts = []; const signs = server.signCalls;
+    await expect(run(edited, server).start(server.view())).rejects.toMatchObject({code: 'file_mismatch'});
+    expect(server.puts).toEqual([]);
+    expect(server.signCalls).toBe(signs);
+    expect(server.completeCalls).toBe(0);
+    // The untouched original still resumes and sends only the missing parts.
+    expect((await run(makeFile(size), server).start(server.view())).state).toBe('completed');
+    expect([...server.puts].sort()).toEqual([4, 5]);
+  });
+
+  it('a cancel the server did not confirm is reported, not shown as cancelled, and can be retried', async () => {
+    const server = new FakeServer(MiB), states: UploadState[] = [];
+    const upload = run(makeFile(4 * MiB), server, states);
+    server.failPut.set(3, 99);
+    await upload.start().catch(() => undefined);
+    server.deleteFails = 1;
+    expect(await upload.cancel()).toBe('unconfirmed');
+    expect(states.at(-1)?.phase).toBe('cancel_unconfirmed');
+    expect(states.some(s => s.phase === 'cancelled')).toBe(false);
+    expect(server.session.state).toBe('uploading');
+    expect(await upload.cancel()).toBe('cancelled');
+    expect(states.at(-1)?.phase).toBe('cancelled');
+    expect(server.session.state).toBe('aborted');
+    expect(server.deleteCalls).toBe(2);
+  });
+
+  it('a cancel that loses the race to complete follows the real server stage', async () => {
+    const server = new FakeServer(MiB), states: UploadState[] = [];
+    const upload = run(makeFile(3 * MiB), server, states);
+    server.failPut.set(2, 99);
+    await upload.start().catch(() => undefined);
+    server.completeBeforeDelete = true;
+    expect(await upload.cancel()).toBe('continuing');
+    const result = await upload.wait();
+    expect(result.state).toBe('completed');
+    expect(states.at(-1)?.phase).toBe('completed');
+    expect(states.some(s => s.phase === 'cancelled')).toBe(false);
   });
 
   it('re-signs expired URLs and retries transient failures', async () => {

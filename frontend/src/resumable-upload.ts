@@ -6,10 +6,12 @@ import {md5, toBase64} from './md5';
 export interface UploadSession {
   upload_id: string; video_id: string; state: string; original_name: string; declared_size: number;
   part_size: number; part_count: number; client_fingerprint: string; uploaded_parts: number[];
-  mismatched_parts: number[]; uploaded_bytes: number; missing_parts: number[]; expires_at: string;
+  uploaded_part_md5?: Record<string, string>; mismatched_parts: number[]; uploaded_bytes: number; missing_parts: number[]; expires_at: string;
   error: {code: string; message: string} | null; result: {video_id: string; index_error?: {code: string}} | null; job_id: string | null;
 }
-export type Phase = 'hashing' | 'uploading' | 'paused' | 'completing' | 'verifying' | 'completed' | 'failed' | 'cancelled';
+export type Phase = 'hashing' | 'uploading' | 'paused' | 'completing' | 'verifying' | 'completed' | 'failed' | 'cancelled'
+  | 'cancel_unconfirmed';  // stopped locally, but the server has not confirmed the cancellation
+export type CancelOutcome = 'cancelled' | 'unconfirmed' | 'continuing';
 export interface UploadState {
   phase: Phase; session?: UploadSession; sentBytes: number; totalBytes: number;
   partsDone: number; partCount: number; retries: number; resigned: number; error?: string; errorCode?: string;
@@ -23,8 +25,9 @@ export interface Transport {
 }
 export class UploadError extends Error {constructor(public code: string, message: string) {super(message)}}
 
-// Identity of a *local* file for resume prompts: size + sampled SHA-256. Not a security hash;
-// the server recomputes the full SHA-256 of the assembled object during verification.
+// Quick identity check of a *local* file: size + sampled SHA-256. Sampling misses edits elsewhere,
+// so a resume additionally hashes every already-uploaded part (see verifyUploadedParts). The server
+// recomputes the full SHA-256 of the assembled object during verification.
 export async function fingerprint(file: Blob): Promise<string> {
   const sample = 1 << 20, size = file.size;
   const ranges: [number, number][] = [[0, Math.min(sample, size)]];
@@ -82,15 +85,51 @@ export class ResumableUpload {
   }
 
   resume(): Promise<UploadSession> {
-    if (this.state.phase !== 'paused' && this.state.phase !== 'failed') return this.finished!;
+    if (!['paused', 'failed', 'cancel_unconfirmed'].includes(this.state.phase)) return this.finished!;
     this.abort = new AbortController();
     return this.start(this.session);
   }
 
-  async cancel() {
+  /** The upload's current outcome (also after a cancel lost the race to complete). */
+  wait(): Promise<UploadSession> {return this.finished!}
+
+  /** Stop locally, then report what the server actually did; only 'cancelled' is final. */
+  async cancel(): Promise<CancelOutcome> {
     this.abort.abort();
-    if (this.session) await this.transport.json(`/api/uploads/${this.session.upload_id}`, {method: 'DELETE'}).catch(() => undefined);
-    this.emit({phase: 'cancelled'});
+    if (!this.session) {this.emit({phase: 'cancelled'}); return 'cancelled'}
+    const id = this.session.upload_id;
+    try {
+      this.session = await this.transport.json<UploadSession>(`/api/uploads/${id}`, {method: 'DELETE'});
+    } catch (e) {
+      if (e instanceof UploadError && e.code === 'upload_not_cancellable') {
+        // Complete won the race: follow the server's real stage instead of claiming a cancel.
+        this.abort = new AbortController();
+        this.finished = this.transport.json<UploadSession>(`/api/uploads/${id}`)
+          .then(s => {this.session = s; return this.waitVerified(this.abort.signal)})
+          .catch(err => {
+            this.emit({phase: 'failed', errorCode: err instanceof UploadError ? err.code : 'network', error: err instanceof Error ? err.message : String(err)});
+            throw err;
+          });
+        this.finished.catch(() => undefined);
+        return 'continuing';
+      }
+      this.emit({phase: 'cancel_unconfirmed', errorCode: e instanceof UploadError ? e.code : 'network',
+        error: e instanceof Error ? e.message : String(e)});
+      return 'unconfirmed';
+    }
+    forget(id);
+    this.emit({phase: 'cancelled', error: undefined, errorCode: undefined});
+    return 'cancelled';
+  }
+
+  /** Every part storage already holds must hash identically from the reselected file. */
+  private async verifyUploadedParts(session: UploadSession) {
+    const expected = session.uploaded_part_md5 || {};
+    for (const n of session.uploaded_parts) {
+      const md5 = expected[String(n)];
+      if (!md5 || await this.digest(n) !== md5)
+        throw new UploadError('file_mismatch', '所选文件的内容与已上传的部分不一致（文件可能已被修改），请选择原文件或放弃该上传。');
+    }
   }
 
   private async run(existing?: UploadSession): Promise<UploadSession> {
@@ -102,6 +141,7 @@ export class ResumableUpload {
         if (existing.declared_size !== this.file.size || existing.client_fingerprint !== fp)
           throw new UploadError('file_mismatch', '所选文件与未完成的上传不是同一个文件，请选择原文件或放弃该上传。');
         this.session = await this.transport.json<UploadSession>(`/api/uploads/${existing.upload_id}`);
+        if (this.session.state === 'uploading') await this.verifyUploadedParts(this.session);
       } else {
         this.session = await this.transport.json<UploadSession>('/api/uploads', {method: 'POST',
           body: {filename: this.file.name, size: this.file.size, fingerprint: fp, content_type: this.file.type}});

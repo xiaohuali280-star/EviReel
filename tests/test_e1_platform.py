@@ -5,6 +5,7 @@ on the upload path (database, object storage, ffprobe/ffmpeg, indexing pipeline)
 """
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import shutil
@@ -66,11 +67,30 @@ def platform_app(tmp_path, infra, monkeypatch):
     from test_p1_video_management import ColorBackend
     from vam.server.app import create_app
 
-    def start(**overrides):
+    def start(object_store=None, **overrides):
         settings = make_settings(tmp_path, infra, **overrides)
         monkeypatch.setattr(config, "_settings", settings)
-        return settings, create_app(settings=settings, backend=ColorBackend())
+        return settings, create_app(settings=settings, backend=ColorBackend(), object_store=object_store)
     return start
+
+
+class DeleteOutage:
+    """The REAL S3 store, with DeleteObject failing while ``down`` (injected storage fault)."""
+    def __init__(self, infra):
+        from vam.platform.object_store import S3ObjectStore
+        self.real = S3ObjectStore(endpoint=S3["endpoint"], public_endpoint=S3["endpoint"], access_key=S3["access_key"],
+                                  secret_key=S3["secret_key"], bucket=infra["bucket"])
+        self.down, self.failed_deletes = True, 0
+
+    def delete(self, key):
+        if self.down:
+            from vam.platform.object_store import ObjectStoreError
+            self.failed_deletes += 1
+            raise ObjectStoreError("injected: storage delete unavailable")
+        return self.real.delete(key)
+
+    def __getattr__(self, name):
+        return getattr(self.real, name)
 
 
 def users(client, app, *names, quota=None):
@@ -114,6 +134,10 @@ def test_resume_sends_only_missing_parts_and_new_video_is_playable(platform_app,
         upload_parts(alice, session, data, [1, 3])                        # connection drops before part 2
         resumed = alice.get(f"/api/uploads/{session['upload_id']}").json()  # page refresh: server-side truth
         assert resumed["uploaded_parts"] == [1, 3] and resumed["missing_parts"] == [2] + list(range(4, session["part_count"] + 1))
+        # The resuming client checks the reselected file against these (storage-confirmed) digests.
+        assert resumed["uploaded_part_md5"] == {str(n): md5_b64(part_bytes(data, session, n)) for n in (1, 3)}
+        edited = bytearray(data); edited[(session["part_size"] // 2)] ^= 0xFF
+        assert md5_b64(part_bytes(bytes(edited), session, 1)) != resumed["uploaded_part_md5"]["1"]
         assert alice.get("/api/uploads").json()["items"][0]["upload_id"] == session["upload_id"]
         upload_parts(alice, session, data, resumed["missing_parts"])
         accepted = alice.post(f"/api/uploads/{session['upload_id']}/complete")
@@ -465,3 +489,104 @@ def test_deleting_an_uploaded_video_releases_quota_and_object(platform_app, vide
         from vam.platform.object_store import NoSuchObject
         with pytest.raises(NoSuchObject):
             app.state.platform.store.head(pg(app, "SELECT object_key FROM upload_sessions")[0]["object_key"])
+
+
+def _object_exists(store, key):
+    from vam.platform.object_store import NoSuchObject
+    try:
+        store.head(key)
+        return True
+    except NoSuchObject:
+        return False
+
+
+def _drain_after_backoff(app):
+    # First retry is due 5 s after the failed attempt; wait it out instead of rewriting timestamps.
+    time.sleep(5.5)
+    return asyncio.run(app.state.platform.uploads.reconcile())["objects_deleted"]
+
+
+# Storage DELETE fails, the process restarts, storage recovers -> the object is eventually removed.
+def test_video_delete_during_storage_outage_converges_after_restart(platform_app, infra, video_file):
+    outage = DeleteOutage(infra)
+    _, app = platform_app(object_store=outage)
+    data = video_file.read_bytes()
+    with TestClient(app) as client:
+        alice, _ = users(client, app, "alice")["alice"]
+        session = create(alice, data)
+        upload_parts(alice, session, data, list(range(1, session["part_count"] + 1)))
+        alice.post(f"/api/uploads/{session['upload_id']}/complete")
+        done = wait_state(alice, session["upload_id"])
+        assert done["state"] == "completed"
+        deadline = time.monotonic() + 30
+        while not pg(app, "SELECT job_id FROM upload_sessions")[0]["job_id"] and time.monotonic() < deadline:
+            time.sleep(0.2)
+        wait_job(alice, pg(app, "SELECT job_id FROM upload_sessions")[0]["job_id"])
+        key = pg(app, "SELECT object_key FROM upload_sessions")[0]["object_key"]
+        assert alice.delete(f"/api/videos/{done['video_id']}").status_code == 204
+        # Logical deletion is complete: no ownership, quota released, video gone for the user.
+        assert pg(app, "SELECT 1 FROM video_ownership") == []
+        assert pg(app, "SELECT used_bytes FROM workspaces")[0]["used_bytes"] == 0
+        assert alice.get(f"/api/videos/{done['video_id']}").status_code == 404
+        # Physical deletion failed and is recorded durably, not just logged.
+        assert outage.failed_deletes == 1 and _object_exists(outage.real, key)
+        row = pg(app, "SELECT reason, state, attempts, last_error FROM object_deletions WHERE object_key=%s", key)[0]
+        assert (row["reason"], row["state"], row["attempts"]) == ("video_deleted", "pending", 1)
+        assert "injected" in row["last_error"]
+    # "Restart" with storage still down: the pending row survives and is retried, still pending.
+    _, app = platform_app(object_store=outage)
+    with TestClient(app):
+        assert _drain_after_backoff(app) == 0
+        assert pg(app, "SELECT state, attempts FROM object_deletions")[0] == {"state": "pending", "attempts": 2}
+    # Storage recovers; the next process converges.
+    outage.down = False
+    _, app = platform_app(object_store=outage)
+    with TestClient(app):
+        deadline = time.monotonic() + 30  # second backoff step is 10 s; startup or a later pass may do it
+        while pg(app, "SELECT state FROM object_deletions")[0]["state"] == "pending" and time.monotonic() < deadline:
+            asyncio.run(app.state.platform.uploads.reconcile())
+            time.sleep(1)
+        assert not _object_exists(outage.real, key)
+        row = pg(app, "SELECT state, done_at FROM object_deletions WHERE object_key=%s", key)[0]
+        assert row["state"] == "done" and row["done_at"] is not None
+        assert asyncio.run(app.state.platform.uploads.reconcile())["objects_deleted"] == 0  # idempotent
+
+
+def test_failed_verification_object_is_cleaned_after_storage_recovers(platform_app, infra):
+    outage = DeleteOutage(infra)
+    _, app = platform_app(object_store=outage)
+    data = b"not a video " * (1 << 19)
+    with TestClient(app) as client:
+        alice, _ = users(client, app, "alice")["alice"]
+        session = create(alice, data, "renamed.mp4")
+        upload_parts(alice, session, data, list(range(1, session["part_count"] + 1)))
+        alice.post(f"/api/uploads/{session['upload_id']}/complete")
+        failed = wait_state(alice, session["upload_id"])
+        assert failed["state"] == "failed" and failed["error"]["code"] == "invalid_media"
+        key = pg(app, "SELECT object_key FROM upload_sessions")[0]["object_key"]
+        ws = pg(app, "SELECT used_bytes, reserved_bytes FROM workspaces")[0]
+        assert (ws["used_bytes"], ws["reserved_bytes"]) == (0, 0)
+        assert _object_exists(outage.real, key)
+        assert pg(app, "SELECT reason, state FROM object_deletions")[0] == {"reason": "upload_failed", "state": "pending"}
+        outage.down = False
+        assert _drain_after_backoff(app) == 1
+        assert not _object_exists(outage.real, key)
+        assert pg(app, "SELECT state FROM object_deletions")[0]["state"] == "done"
+
+
+def test_cleanup_never_deletes_an_object_that_is_still_owned(platform_app, video_file):
+    _, app = platform_app()
+    data = video_file.read_bytes()
+    with TestClient(app) as client:
+        alice, _ = users(client, app, "alice")["alice"]
+        session = create(alice, data)
+        upload_parts(alice, session, data, list(range(1, session["part_count"] + 1)))
+        alice.post(f"/api/uploads/{session['upload_id']}/complete")
+        assert wait_state(alice, session["upload_id"])["state"] == "completed"
+        key = pg(app, "SELECT object_key FROM upload_sessions")[0]["object_key"]
+        from vam.platform.cleanup import enqueue
+        with app.state.platform.db.transaction() as conn:   # e.g. a stale or mistaken queue entry
+            enqueue(conn, key, "video_deleted")
+        assert app.state.platform.uploads.cleaner.delete_now(key) is False
+        assert _object_exists(app.state.platform.store, key)
+        assert pg(app, "SELECT state, last_error FROM object_deletions")[0] == {"state": "skipped", "last_error": "still_referenced"}

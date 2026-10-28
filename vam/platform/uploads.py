@@ -41,6 +41,7 @@ import uuid
 from pathlib import Path
 
 from vam.indexing.media import ALLOWED_EXTENSIONS, inspect_upload
+from vam.platform.cleanup import ObjectCleaner, enqueue
 from vam.platform.object_store import InvalidPart, NoSuchObject, NoSuchUpload, ObjectStoreError, StoredPart
 from vam.runtime import run_sync
 from vam.video_registry import DomainError
@@ -96,6 +97,7 @@ class UploadService:
     def __init__(self, db, store, identity, indexing, settings):
         self.db, self.store, self.identity, self.indexing, self.settings = db, store, identity, indexing, settings
         self.registry = indexing.registry
+        self.cleaner = ObjectCleaner(db, store)
         self.tasks: dict[str, asyncio.Task] = {}
         self.closed = False
         self.reconciler: asyncio.Task | None = None
@@ -155,6 +157,9 @@ class UploadService:
             "part_size": row["part_size"], "part_count": row["part_count"],
             "client_fingerprint": row["client_fingerprint"],
             "uploaded_parts": uploaded, "mismatched_parts": mismatched,
+            # Signed Content-MD5 of each part storage holds (ETag-checked in _sync_parts). A resuming
+            # client must match these against the reselected file before sending anything.
+            "uploaded_part_md5": {str(n): parts[n]["md5_b64"] for n in uploaded},
             "uploaded_bytes": sum(size(n) for n in uploaded),
             "missing_parts": [n for n in range(1, row["part_count"] + 1) if n not in set(uploaded)]
             if row["state"] in ("uploading", "initiated") else [],
@@ -394,9 +399,10 @@ class UploadService:
             return "failed"
         if info.size != row["declared_size"]:
             with self.db.transaction() as conn:
-                self._release(conn, self._row(conn, upload_id, lock=True), "failed", "size_mismatch",
-                              "Assembled file size does not match the declared size", expect_states=["completing"])
-            self._delete_object(row)
+                if self._release(conn, self._row(conn, upload_id, lock=True), "failed", "size_mismatch",
+                                 "Assembled file size does not match the declared size", expect_states=["completing"]):
+                    enqueue(conn, row["object_key"], "upload_failed", upload_id=upload_id)
+            self.cleaner.delete_now(row["object_key"])
             return "failed"
         self._mark_verifying(upload_id)
         return "verifying"
@@ -505,8 +511,10 @@ class UploadService:
         with self.db.transaction() as conn:
             failed = self._release(conn, row, "failed", exc.code, exc.message, expect_states=["verifying"],
                                    version=row["state_version"])
+            if failed:
+                enqueue(conn, row["object_key"], "upload_failed", upload_id=row["upload_id"])
         if failed:
-            self._delete_object(row)
+            self.cleaner.delete_now(row["object_key"])
             try:
                 self.registry.get(row["video_id"])
             except DomainError:
@@ -573,17 +581,12 @@ class UploadService:
         await run_sync(record)
         return job_id
 
-    def _delete_object(self, row):
-        try:
-            self.store.delete(row["object_key"])
-        except ObjectStoreError:
-            logger.warning("object_delete_deferred upload_id=%s", row["upload_id"])
-
     # ------------------------------------------------------------------ reconcile
     async def reconcile(self):
         """Idempotent recovery pass; safe to run at any time and repeatedly."""
         summary = {"expired": 0, "initiation_failed": 0, "merged": 0, "verify_restarted": 0,
-                   "processing_accepted": 0, "orphan_multipart_aborted": 0, "orphan_ownership_released": 0}
+                   "processing_accepted": 0, "orphan_multipart_aborted": 0, "orphan_ownership_released": 0,
+                   "objects_deleted": 0}
         def due():
             with self.db.connect() as conn:
                 return conn.execute(
@@ -616,6 +619,7 @@ class UploadService:
                 logger.exception("reconcile_session_failed upload_id=%s", row["upload_id"])
         summary["orphan_multipart_aborted"] = await run_sync(self._abort_orphan_multipart)
         summary["orphan_ownership_released"] = await run_sync(self._release_orphan_ownership)
+        summary["objects_deleted"] = await run_sync(self.cleaner.drain)
         return summary
 
     def _expire(self, row):
@@ -676,13 +680,8 @@ class UploadService:
                 continue
             except DomainError:
                 pass
-            if self.identity.release_video(row["video_id"]):
+            if self.identity.release_video(row["video_id"]):  # also queues the object for deletion
                 released += 1
-                if row["object_key"]:
-                    try:
-                        self.store.delete(row["object_key"])
-                    except ObjectStoreError:
-                        pass
         return released
 
 

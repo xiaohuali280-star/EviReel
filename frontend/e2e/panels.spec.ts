@@ -64,7 +64,7 @@ test('divider drags both ways, clamps, cancels, resets, persists and adapts to v
   await expect.poll(() => proportion(page)).toBe(75);
   await page.setViewportSize({width: 1024, height: 900});
   await expect(divider(page)).toBeVisible();
-  expect(await proportion(page)).toBeLessThan(75);
+  await expect.poll(() => proportion(page)).toBeLessThan(75);  // re-clamp lands after the resize event
   await noOverflow(page);
   await page.setViewportSize({width: 940, height: 900});
   await expect(divider(page)).toBeHidden(); await noOverflow(page);

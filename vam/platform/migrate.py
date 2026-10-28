@@ -110,7 +110,12 @@ def check(db, data_root=None):
         owned = {r["video_id"] for r in conn.execute("SELECT video_id FROM video_ownership")}
         stuck = conn.execute("SELECT upload_id, state FROM upload_sessions WHERE state IN ('initiated','completing','verifying') "
                              "AND lease_until < now() - interval '10 minutes'").fetchall()
+        deletions = conn.execute("SELECT COUNT(*) AS n, MIN(requested_at) AS oldest, MAX(attempts) AS attempts "
+                                 "FROM object_deletions WHERE state='pending'").fetchone()
     issues += [{"code": "stuck_upload", **dict(r)} for r in stuck]
+    if deletions["n"]:  # storage not yet reclaimed; the reconciler keeps retrying
+        issues.append({"code": "pending_object_deletions", "count": deletions["n"],
+                       "oldest": deletions["oldest"].isoformat(), "max_attempts": deletions["attempts"]})
     report = {"workspaces": len(quota), "owned_videos": len(owned)}
     if data_root:
         _, videos = read_legacy_videos(data_root)

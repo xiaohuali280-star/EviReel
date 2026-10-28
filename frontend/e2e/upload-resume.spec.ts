@@ -1,5 +1,6 @@
 // E1 browser acceptance on the explicit platform server (tests/e1_browser_server.py):
 // real PostgreSQL, real S3-compatible storage, real media; deterministic model adapter only.
+import {readFileSync} from 'node:fs';
 import {expect, test, type Page, type Request} from '@playwright/test';
 
 const base = process.env.EVIREEL_E1_URL;
@@ -56,6 +57,24 @@ test('interrupted upload resumes after refresh, re-signs, sends only missing par
   await (await chooser).setFiles({name: 'lecture.mp4', mimeType: 'video/mp4', buffer: Buffer.alloc(files.lecture.size, 1)});
   await expect(page.getByRole('alert')).toContainText('不是同一个文件');
   expect(sent).toEqual([]);
+
+  // An edited copy that keeps size and every fingerprint sample (one byte flipped inside uploaded
+  // part 1, between the 1 MiB head sample and the 25 % sample) is refused too: the client hashes
+  // the already-uploaded parts against the server's storage-confirmed digests before sending.
+  const original = readFileSync(files.lecture.path);
+  const at = Math.floor(original.length * 0.125);
+  expect(at).toBeGreaterThan(1 << 20); expect(at).toBeLessThan(session.part_size);
+  const edited = Buffer.from(original); edited[at] ^= 0xff;
+  let signs = 0;
+  page.on('request', r => {if (r.url().includes('/parts/sign')) signs++});
+  chooser = page.waitForEvent('filechooser');
+  await page.getByRole('button', {name: '选择文件继续'}).click();
+  // The previous alert is cleared when this attempt starts; its session read precedes the part check.
+  const read = page.waitForResponse(r => r.url().endsWith(`/api/uploads/${session.upload_id}`) && r.request().method() === 'GET');
+  await (await chooser).setFiles({name: 'lecture.mp4', mimeType: 'video/mp4', buffer: edited});
+  await read;
+  await expect(page.getByRole('alert')).toContainText('不是同一个文件');
+  expect(sent).toEqual([]); expect(signs).toBe(0);
 
   // Same file: one part's signature expires before it reaches storage -> client re-signs.
   let delayed = false;

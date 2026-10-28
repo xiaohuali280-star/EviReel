@@ -253,7 +253,16 @@ export default function App() {
   }
   async function cancelUpload() {
     const upload = uploader.current;
-    if (upload && !['failed', 'completed'].includes(upload.state.phase)) await upload.cancel();
+    if (upload && !['failed', 'completed'].includes(upload.state.phase)) {
+      const outcome = await upload.cancel();
+      if (outcome === 'unconfirmed') return;  // the panel shows it and offers retry / continue
+      if (outcome === 'continuing') {
+        setNotice('上传已在服务器端完成合并，无法取消，正在继续校验。');
+        try {const session = await upload.wait(); if (session.state === 'completed') {setUploadState(null); uploader.current = null; chooseVideo(session.video_id); refresh()}}
+        catch { /* rendered */ }
+        return;
+      }
+    }
     uploader.current = null; setUploadState(null); loadResumable();
   }
   async function discardSession(s: UploadSession) {

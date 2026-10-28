@@ -1,9 +1,32 @@
 # 工程状态
 
-更新：2026-10-28　阶段：**E1 验收通过（本机 Windows 原生 + GitHub CI Linux）；内容秒传未做**
+更新：2026-10-28　阶段：**E1 独立验收的 3 项缺陷已修复，本机回归通过；修复提交的 CI 结果见 `git log` 之后的记录**；内容秒传未做
 
 ## 当前提交
-基线 `3ede061`；E1 实现 `2991d2b`；本机验证修复见其后的提交（`git log`）。
+基线 `3ede061`；E1 实现 `2991d2b`；本机验证修复 `4632b4f`；独立验收（目标 `be66e7d`）整改见其后的提交（`git log`）。
+
+## 独立验收整改（`be66e7d` 之后）
+验收报告结论是“不建议无条件验收通过”，共 3 项 Spec 缺陷和 1 项非阻塞的规范建议。处理如下：
+
+| 发现 | 修复 | 回归测试 |
+| --- | --- | --- |
+| [P1] 重选文件只核对采样指纹，同大小文件在非采样区被修改时仍能续传，可能组装成“旧已传分片 + 新剩余分片” | 会话视图新增 `uploaded_part_md5`（存储确认分片的签名 MD5）。前端续传前用重选文件逐片计算已上传分片的 MD5，任一不符即 `file_mismatch`，不签名也不发送 | 测试替身：20 MiB 文件在 2 MiB 和 12.5 MiB 处修改，采样指纹相同但被拒绝，0 次 PUT、0 次签名；原文件仍只补传缺失片。真实 PG+MinIO：视图中的 MD5 等于实际存储分片的 MD5。浏览器（真实 PG+MinIO）：在已上传分片 1 内翻转一个字节、保持大小和全部采样，被拒绝且 0 次 PUT、0 次签名 |
+| [P2] 对象删除失败只记日志，没有持久补偿（验证失败、视频永久删除） | 迁移 `002_object_deletions.sql` 加 `vam/platform/cleanup.py`：在使对象不可达的同一事务内登记待删除；提交后立即尝试，失败按退避由协调器重试，跨进程重启继续执行；确认删除后标 `done`；仍被引用的对象标 `skipped` 且绝不删除。配额在逻辑删除时释放，`migrate check` 报告积压 | 真实 PG+MinIO，在真实 store 外包一层注入 DeleteObject 故障：① 删除视频时存储不可用 → 204、归属与配额已释放、对象仍在、记录 pending；重启后仍不可用 → 重试，attempts=2；存储恢复后再启动 → 对象删除、记录 done，再次协调为幂等。② 验证失败（非视频）时删除失败 → pending，恢复后清理。③ 仍被归属引用的对象即使误入队也不会删除 |
+| [P2] 取消请求失败（网络错误或 409 完成竞争）时，前端仍显示“已取消” | `cancel()` 返回 `cancelled / unconfirmed / continuing`。网络失败时进入 `cancel_unconfirmed`（提示会话可能仍占配额，可重试取消或继续上传）。409 `upload_not_cancellable` 时跟随服务端的真实阶段直到完成 | 测试替身：DELETE 网络失败 → `unconfirmed`，没有出现 `cancelled`，服务端仍是 uploading；重试 → `cancelled`。DELETE 时已完成 → `continuing`，`wait()` 得到 completed，没有出现 `cancelled` |
+| [Standards，非阻塞] `UploadService` 职责较多 | 清理已拆到 `cleanup.py`；验证执行单元的拆分留给 E2（见 E1_DELIVERY 第 7 节） | — |
+
+### 整改后的验证（2026-10-28，本机 Windows 原生，同一环境）
+| 类别 | 检查 | 结果 |
+| --- | --- | --- |
+| 真实中间件 | `pytest tests/test_e1_unit.py tests/test_e1_platform.py`（PostgreSQL 16.4 + MinIO `RELEASE.2025-10-15T17-29-55Z`；17 个平台场景，含 3 个新增） | **22 passed**（122 s） |
+| 真实中间件 | 全量 `pytest tests`（`e1-local.ps1 -Action test`） | **237 passed, 0 skipped**（327 s） |
+| 真实中间件 + 浏览器 | `upload-resume.spec.ts`（Chromium，平台模式，新增“修改过的同名同大小文件”步骤） | **2/2 通过** |
+| 测试替身 | vitest（`resumable-upload.test.ts` 11 个场景，含 3 个新增；共 5 个文件） | **30/30 通过** |
+| 回归 | 前端 typecheck / build | 通过 |
+| 回归 | 既有 P5 浏览器回归（单用户模式，21 个用例，mock provider） | 完整运行中 `panels.spec.ts:67` 失败 1 次：视口缩小后没有轮询，直接读取比例，读到了重新钳制前的 75。单独重复 3 次 9/9 通过。改为 `expect.poll`（只改测试）后完整复跑 **21/21 通过** |
+| 未运行 | Linux compose 本机无 Docker；整改提交的 GitHub CI 在推送后才运行；真实模型调用 | — |
+
+以下“验证记录”和“本轮修复”是 `4632b4f` 时的结果，保留作为历史。
 
 ## 已完成（代码层面）
 - PostgreSQL 平台 schema 与迁移器、身份/空间/归属/配额、上传会话状态机与协调器、S3 适配层。
@@ -61,6 +84,8 @@
 ## 已知限制
 - 单 API 实例（`OwnerLock`）；验证与受理任务在进程内执行，依靠租约和协调器实现重入，不支持多 API 实例或任务重启续跑。
 - 新上传在本地 `DATA_ROOT` 保留一份处理用副本（与对象存储中的原片重复）。E2 改为由 Worker 从对象存储读取。
+- 续传前要在浏览器中读取并哈希已上传部分（Worker 中进行，大文件续传会多花一些时间）；内容一致性检查依赖默认的 `UPLOAD_VERIFY_PART_ETAG=true`。
+- 对象物理删除是最终一致的：存储长期不可用时，`object_deletions` 会积压（`migrate check` 报告 `pending_object_deletions`）；配额已在逻辑删除时释放。
 - MinIO 社区版已停止发布二进制和 Docker 镜像。开发与 CI 固定使用 conda-forge 打包的最后一个版本，生产前需重新评估 S3 实现。
 
 ## 下一阶段入口

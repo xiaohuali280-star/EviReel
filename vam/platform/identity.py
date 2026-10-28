@@ -14,6 +14,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
+from vam.platform.cleanup import enqueue
 from vam.video_registry import DomainError
 
 SCRYPT_N, SCRYPT_R, SCRYPT_P = 2 ** 14, 8, 1
@@ -161,11 +162,17 @@ class IdentityService:
             raise DomainError(404, "video_not_found", "Video not found")
 
     def release_video(self, video_id: str):
-        """Drop ownership after the SQLite video row was deleted; idempotent."""
+        """Drop ownership after the SQLite video row was deleted; idempotent.
+
+        Quota is released here; the object is queued for deletion in the same transaction
+        (see vam.platform.cleanup), so it cannot be leaked by a later storage failure.
+        """
         with self.db.transaction() as conn:
             row = conn.execute("DELETE FROM video_ownership WHERE video_id=%s RETURNING workspace_id, size_bytes, object_key",
                                (video_id,)).fetchone()
             if row:
                 conn.execute("UPDATE workspaces SET used_bytes=GREATEST(used_bytes-%s, 0) WHERE workspace_id=%s",
                              (row["size_bytes"], row["workspace_id"]))
+                if row["object_key"]:
+                    enqueue(conn, row["object_key"], "video_deleted", video_id=video_id)
         return dict(row) if row else None

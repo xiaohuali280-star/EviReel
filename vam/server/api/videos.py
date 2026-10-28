@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, Request, UploadFile, File, Query
 from starlette.responses import FileResponse
 
 from vam.runtime import run_sync
 from vam.server.platform_auth import principal_of
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api", tags=["Videos"])
 
@@ -55,14 +59,14 @@ async def delete_video(video_id: str, request: Request):
     request.app.state.indexing.delete(video_id)
     platform = getattr(request.app.state, 'platform', None)
     if platform is not None:
-        # SQLite row is gone; ownership/quota release and object deletion are idempotent and
-        # re-driven by the upload reconciler if this process stops in between.
+        # SQLite row is gone; releasing ownership frees quota and queues the object in one
+        # transaction. A failed or interrupted delete here is retried by the upload reconciler.
         released = await run_sync(platform.identity.release_video, video_id)
         if released and released.get('object_key'):
             try:
-                await run_sync(platform.store.delete, released['object_key'])
-            except Exception:
-                pass
+                await run_sync(platform.uploads.cleaner.delete_now, released['object_key'])
+            except Exception:  # the deletion is already queued; never fail a completed logical delete
+                logger.warning("object_delete_deferred video_id=%s", video_id, exc_info=True)
 
 @router.post("/videos/{video_id}/index", status_code=202)
 async def index_video(video_id: str, request: Request):

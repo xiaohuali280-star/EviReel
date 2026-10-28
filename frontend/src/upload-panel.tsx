@@ -30,7 +30,7 @@ export function UploadPanel({name, state, pause, resume, cancel}: {name: string;
   const verifying = ['completing', 'verifying'].includes(state.phase);
   return <section className="empty-state processing upload-panel" aria-live="polite">
     <div className="empty-icon"><VideoIcon size={70} /></div>
-    <span className="eyebrow">{verifying ? '服务器校验中' : state.phase === 'failed' ? '上传暂停' : '断点续传上传'}</span>
+    <span className="eyebrow">{verifying ? '服务器校验中' : state.phase === 'failed' ? '上传暂停' : state.phase === 'cancel_unconfirmed' ? '取消未确认' : '断点续传上传'}</span>
     <h1>把知识带进你的学习空间</h1>
     <p className="filename">{name}</p>
     <Steps phase={state.phase} />
@@ -42,11 +42,12 @@ export function UploadPanel({name, state, pause, resume, cancel}: {name: string;
     </>}
     {verifying && <><div className="indeterminate"><span /></div><p>上传完成。服务器正在核对文件大小、完整性并检查视频格式，通过后才会开始处理。</p></>}
     {state.phase === 'failed' && <p className="upload-error" role="alert">{uploadFailureText(state.errorCode, state.error)}</p>}
+    {state.phase === 'cancel_unconfirmed' && <p className="upload-error" role="alert" data-testid="cancel-unconfirmed">取消请求没有得到服务器确认（网络可能中断）。上传已在本机停止，但服务器上的会话可能仍然保留并占用配额。请重试取消，或继续上传。</p>}
     <div className="upload-actions">
       {state.phase === 'uploading' && <button className="secondary" onClick={pause}><Pause size={16} />暂停</button>}
-      {(state.phase === 'paused' || (state.phase === 'failed' && !['file_mismatch', 'quota_exceeded', 'upload_expired', 'too_many_uploads'].includes(state.errorCode || '') && !state.errorCode?.startsWith('upload_')))
+      {(state.phase === 'paused' || state.phase === 'cancel_unconfirmed' || (state.phase === 'failed' && !['file_mismatch', 'quota_exceeded', 'upload_expired', 'too_many_uploads'].includes(state.errorCode || '') && !state.errorCode?.startsWith('upload_')))
         && <button className="primary" onClick={resume}><Play size={16} />继续上传</button>}
-      {!verifying && state.phase !== 'completed' && <button className="secondary" onClick={cancel}><X size={16} />{state.phase === 'failed' ? '关闭' : '取消上传'}</button>}
+      {!verifying && state.phase !== 'completed' && <button className="secondary" onClick={cancel}><X size={16} />{state.phase === 'failed' ? '关闭' : state.phase === 'cancel_unconfirmed' ? '重试取消' : '取消上传'}</button>}
     </div>
     {!verifying && <small>可以暂停或刷新页面；重新选择同一文件后只会补传缺失的分片。</small>}
   </section>;
