@@ -49,4 +49,6 @@ include = ["vam*"]
 dev = ["pytest>=8"]
 # E1 platform mode: PostgreSQL metadata + S3-compatible object storage
 platform = ["psycopg[binary]>=3.2,<3.3", "boto3>=1.35,<2"]
+# E2 worker pipeline: Celery workers + outbox dispatcher on RabbitMQ (Linux / containers)
+pipeline = ["celery>=5.5,<5.7"]
 asr = ["faster-whisper>=1.2.1,<2"]

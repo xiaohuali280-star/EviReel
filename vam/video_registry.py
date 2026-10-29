@@ -124,6 +124,21 @@ class VideoRegistry:
             conn.execute("UPDATE videos SET status='queued',last_error=NULL WHERE video_id=?", (video_id,))
         return jid
 
+    def project_job(self, job_id, video_id, kind):
+        """Worker mode: mirror a PostgreSQL job into index_jobs (the UI's read model). Idempotent.
+        PostgreSQL allows one active job per video, so any other active row here is stale."""
+        now = time.time()
+        with self.db.connect(write=True) as conn:
+            if conn.execute("SELECT 1 FROM index_jobs WHERE job_id=?", (job_id,)).fetchone():
+                return
+            conn.execute("UPDATE index_jobs SET status='interrupted',phase='interrupted',updated_at=? "
+                         "WHERE video_id=? AND status IN ('queued','running')", (now, video_id))
+            attempt = conn.execute("SELECT COALESCE(MAX(attempt),0)+1 FROM index_jobs WHERE video_id=? AND kind=?",
+                                   (video_id, kind)).fetchone()[0]
+            conn.execute("INSERT INTO index_jobs(job_id,video_id,generation,status,phase,attempt,started_at,updated_at,kind) "
+                         "VALUES(?,?,?,'queued','queued',?,?,?,?)", (job_id, video_id, job_id, attempt, now, now, kind))
+            conn.execute("UPDATE videos SET status='queued',last_error=NULL WHERE video_id=?", (video_id,))
+
     def finish(self, video_id, job_id, *, status, result, error_code=None, error=None, vision_generation=None, fingerprint=None):
         with self.db.connect(write=True) as conn:
             if vision_generation:

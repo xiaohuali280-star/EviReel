@@ -578,7 +578,9 @@ class UploadService:
             job_id = existing[0]
         else:
             try:
-                job_id = self.indexing.schedule(video_id)
+                # The request id makes acceptance idempotent in worker mode (PostgreSQL unique key):
+                # a retry after a crash between job creation and this record returns the same job.
+                job_id = self.indexing.schedule(video_id, request_id=f"upload:{upload_id}")
             except DomainError as exc:
                 job_id, index_error = None, {"code": exc.code, "message": exc.message}
         def record():

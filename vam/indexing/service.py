@@ -61,10 +61,22 @@ class IndexingService:
         self.memory_locks = {}
         self.closed = False
         self.on_indexed = None
+        # E2 worker mode: a PipelineClient (set by the app). Jobs are then accepted durably in
+        # PostgreSQL and executed by Celery workers; this process runs no indexing work itself.
+        self.pipeline = None
+        self.worker_mode = settings.platform_enabled and settings.pipeline_mode == "worker"
 
     async def start(self):
         self.owner.acquire()
         try:
+            if self.worker_mode:
+                # Jobs outlive the API in worker mode: never mark them interrupted, never touch
+                # worker scratch. Only the filesystem side of interrupted deletions resumes below.
+                with self.registry.db.connect() as conn:
+                    deleting = [r[0] for r in conn.execute("SELECT video_id FROM videos WHERE status='deleting'")]
+                for video_id in deleting:
+                    self.delete(video_id)
+                return
             self.registry.recover()
             for path in (self.registry.root / ".uploads").glob("*.part"):
                 path.unlink(missing_ok=True)
@@ -155,10 +167,14 @@ class IndexingService:
             if not registered and directory.exists():
                 shutil.rmtree(self.registry.directory(video_id))
 
-    def schedule(self, video_id, *, kind="video", allow_retained=False):
+    def schedule(self, video_id, *, kind="video", allow_retained=False, request_id=None):
         if self.closed:
             raise DomainError(503, "server_stopping", "Server is stopping")
         self._usable_video(video_id)
+        if self.pipeline is not None:
+            # Published indexes are immutable generations swapped by the worker's publish stage,
+            # so readers holding a lease do not block accepting a new job.
+            return self.pipeline.submit(video_id, kind=kind, request_id=request_id)
         if self.leases.get(video_id) and not allow_retained:
             raise DomainError(409, "video_busy", "Video is in use; retry indexing later")
         job_id = self.registry.create_job(video_id, self.settings.max_queued_jobs, kind)
@@ -365,6 +381,8 @@ class IndexingService:
         with self.registry.db.connect() as conn:
             if conn.execute("SELECT 1 FROM index_jobs WHERE video_id=? AND status IN ('queued','running')", (video_id,)).fetchone():
                 raise DomainError(409, "index_running", "Wait for indexing to finish before deleting")
+        if self.pipeline is not None and self.pipeline.has_active(video_id):
+            raise DomainError(409, "index_running", "Wait for indexing to finish before deleting")
         directory = self.registry.directory(video_id)
         self.registry.update_video(video_id, status="deleting")
         try:
@@ -383,6 +401,8 @@ class IndexingService:
             raise DomainError(409, 'video_busy', 'Wait for the current operation to finish')
         with self.registry.db.connect() as conn:
             active = conn.execute("SELECT 1 FROM index_jobs WHERE video_id=? AND status IN ('queued','running')", (video_id,)).fetchone()
+        if self.pipeline is not None and self.pipeline.has_active(video_id):
+            active = True
         if active or row['status'] in {'deleting', 'delete_failed'}:
             raise DomainError(409, 'video_busy', 'Wait for processing or deletion to finish')
         self.registry.update_video(video_id, trashed_at=None if restore else time.time())

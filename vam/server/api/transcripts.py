@@ -24,7 +24,9 @@ async def list_transcripts(video_id: str, request: Request, kind: str = Query('c
 
 @router.post('/{video_id}/transcripts/index', status_code=202)
 async def index_transcripts(video_id: str, request: Request):
-    return {'video_id': video_id, 'job_id': request.app.state.indexing.schedule(video_id, kind='transcript')}
+    from vam.server.api.videos import idempotency_key
+    return {'video_id': video_id, 'job_id': request.app.state.indexing.schedule(
+        video_id, kind='transcript', request_id=idempotency_key(request))}
 
 
 @router.post('/{video_id}/transcripts/search')

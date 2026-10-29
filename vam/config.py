@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Literal, Optional
 from pydantic import Field
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -97,6 +97,21 @@ class Settings(BaseSettings):
     default_workspace_quota_bytes: int = Field(20 * 1024 ** 3, ge=0)
     auth_session_ttl_s: int = Field(7 * 24 * 3600, ge=300, le=90 * 24 * 3600)
     auth_cookie_secure: bool = False
+    # E2 durable pipeline (platform mode only). "inline" keeps the in-process indexer; "worker"
+    # records jobs in PostgreSQL and runs stages in Celery workers fed by the outbox dispatcher.
+    pipeline_mode: Literal["inline", "worker"] = "inline"
+    broker_url: str = ""                       # amqp://user:pass@host:5672/vhost (RabbitMQ)
+    pipeline_lease_s: int = Field(120, ge=5, le=3600)          # stage lease; heartbeat every lease/3
+    pipeline_stage_max_attempts: int = Field(4, ge=1, le=20)
+    pipeline_retry_base_s: float = Field(5, ge=0.1, le=600)
+    pipeline_retry_cap_s: float = Field(300, ge=1, le=3600)
+    pipeline_dispatch_interval_s: float = Field(1, ge=0.05, le=60)
+    pipeline_redispatch_after_s: float = Field(120, ge=1, le=3600)  # pending but never claimed
+    pipeline_task_time_limit_s: int = Field(3 * 3600, ge=30, le=24 * 3600)
+    pipeline_embed_batch: int = Field(32, ge=1, le=256)
+    pipeline_scratch: str = ""                 # worker scratch dir; default DATA_ROOT/.pipeline
+    # Test-only injection point ("module:function" returning (backend, transcriber)); never set in production.
+    pipeline_factory: str = ""
     app_version: str = "0.1.0"
     websocket_path: str = "/ws/agent"
     

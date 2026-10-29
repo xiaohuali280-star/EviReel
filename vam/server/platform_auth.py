@@ -19,7 +19,7 @@ from vam.video_registry import DomainError
 COOKIE = "evireel_session"
 PUBLIC = {"/api/auth/login", "/api/ui-config", "/api/health"}
 VIDEO_PATH = re.compile(r"^/api/videos/(v_[0-9a-f]{32})(?:/|$)")
-JOB_PATH = re.compile(r"^/api/jobs/([0-9a-f]{32})/?$")
+JOB_PATH = re.compile(r"^/api/jobs/([0-9a-f]{32})(?:/|$)")
 CONVERSATION_PATH = re.compile(r"^/api/conversations/(c_[0-9a-f]{32})(?:/|$)")
 
 
@@ -52,6 +52,12 @@ def resolve_owner_video(app, path: str, method: str, scope) -> str | None:
         return match.group(1)
     registry = app.state.indexing.registry
     if match := JOB_PATH.match(path):
+        pipeline = getattr(app.state, "pipeline", None)
+        if pipeline is not None:   # worker mode: the PostgreSQL ledger is the truth for jobs
+            try:
+                return pipeline.repo.job(match.group(1))["video_id"]
+            except DomainError:
+                pass   # jobs from before worker mode exist only in the SQLite registry
         with registry.db.connect() as conn:
             row = conn.execute("SELECT video_id FROM index_jobs WHERE job_id=?", (match.group(1),)).fetchone()
         if row is None:

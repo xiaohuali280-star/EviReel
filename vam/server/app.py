@@ -32,11 +32,16 @@ def create_app(*, settings=None, backend=None, indexer=None, transcriber=None, r
     @asynccontextmanager
     async def lifespan(app):
         platform = None
+        if settings.pipeline_mode == "worker" and not settings.platform_enabled:
+            raise RuntimeError("PIPELINE_MODE=worker requires platform mode (DATABASE_URL and object storage)")
         if settings.platform_enabled:
             from vam.platform import build_platform
             platform = await run_sync(build_platform, settings, store=object_store)
         service = IndexingService(settings, backend=backend, indexer=indexer, transcriber=transcriber, reranker=reranker)
         app.state.indexing = service
+        if platform is not None and service.worker_mode:
+            from vam.pipeline.api import PipelineClient
+            service.pipeline = app.state.pipeline = PipelineClient(platform.db, service.registry, settings)
         await service.start()
         try:
             if platform is not None:

@@ -1,0 +1,74 @@
+# E2 stack for Linux / WSL2: E1 middleware (PostgreSQL + MinIO) + RabbitMQ + API + outbox dispatcher
+# + separate Celery workers for long (media/asr) and short (embed/control) stages.
+#   cp deploy/e1/dev.env.example deploy/e1/dev.env      # dev credentials (also used here)
+#   cat deploy/e2/dev.env.example >> deploy/e1/dev.env   # broker credentials
+#   docker compose --env-file deploy/e1/dev.env -f deploy/e2/compose.yml up -d --build --wait
+# (the one-shot `migrate` service applies the PostgreSQL schema before API, dispatcher and workers start)
+# Development only: ports bind to 127.0.0.1; production needs managed/hardened services (E2_DELIVERY.md).
+name: evireel-e2
+include:
+  - ../e1/compose.yml
+x-app: &app
+  build: {context: ../.., dockerfile: deploy/e2/app.Dockerfile}
+  image: evireel-app:e2
+  environment: &app-env
+    DATABASE_URL: postgresql://${EVIREEL_PG_USER}:${EVIREEL_PG_PASSWORD}@postgres:5432/evireel
+    S3_ENDPOINT: http://minio:9000
+    S3_PUBLIC_ENDPOINT: http://127.0.0.1:${EVIREEL_S3_PORT:-9000}
+    S3_ACCESS_KEY: ${EVIREEL_S3_ACCESS_KEY}
+    S3_SECRET_KEY: ${EVIREEL_S3_SECRET_KEY}
+    S3_BUCKET: evireel
+    PIPELINE_MODE: worker
+    BROKER_URL: amqp://${EVIREEL_MQ_USER:?set in dev.env}:${EVIREEL_MQ_PASSWORD:?set in dev.env}@rabbitmq:5672/evireel
+    DATA_ROOT: /data/evireel
+  # API and workers share DATA_ROOT (published per-video indexes + SQLite read model): single host only.
+  volumes: [appdata:/data]
+  depends_on:
+    postgres: {condition: service_healthy}
+    minio: {condition: service_healthy}
+    rabbitmq: {condition: service_healthy}
+    migrate: {condition: service_completed_successfully}
+services:
+  migrate:
+    <<: *app
+    command: ["python", "-m", "vam.platform.migrate", "schema"]
+    restart: "no"
+    depends_on:
+      postgres: {condition: service_healthy}
+  rabbitmq:
+    image: rabbitmq:4.1.4-management-alpine
+    environment:
+      RABBITMQ_DEFAULT_USER: ${EVIREEL_MQ_USER:?set in dev.env}
+      RABBITMQ_DEFAULT_PASS: ${EVIREEL_MQ_PASSWORD:?set in dev.env}
+      RABBITMQ_DEFAULT_VHOST: evireel
+    ports: ["127.0.0.1:${EVIREEL_MQ_PORT:-5672}:5672", "127.0.0.1:15672:15672"]
+    volumes:
+      - mqdata:/var/lib/rabbitmq
+      - ./rabbitmq.conf:/etc/rabbitmq/conf.d/90-evireel.conf:ro
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "check_port_connectivity"]
+      interval: 5s
+      timeout: 10s
+      retries: 30
+  api:
+    <<: *app
+    ports: ["127.0.0.1:${EVIREEL_WEB_PORT:-8000}:8000"]
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:8000/api/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+  dispatcher:
+    <<: *app
+    command: ["python", "-m", "vam.pipeline.dispatcher"]
+  worker-long:     # media preparation, vision and ASR: long, CPU heavy
+    <<: *app
+    command: ["celery", "-A", "vam.pipeline.celery_app", "worker", "-Q", "media,asr", "-c", "1", "-n", "long@%h",
+              "--without-gossip", "--without-mingle", "-l", "INFO"]
+  worker-short:    # embeddings and publish/join: short, keeps the pipeline moving
+    <<: *app
+    command: ["celery", "-A", "vam.pipeline.celery_app", "worker", "-Q", "embed,control", "-c", "2", "-n", "short@%h",
+              "--without-gossip", "--without-mingle", "-l", "INFO"]
+volumes:
+  appdata:
+  mqdata:

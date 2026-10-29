@@ -1,6 +1,59 @@
 # 工程状态
 
-更新：2026-10-28　阶段：**E1 三轮独立验收发现的 5 项缺陷均已修复；本机回归与 `2466121` 的 GitHub CI 均通过**；内容秒传未做
+更新：2026-10-29　阶段：**E2 进行中**：代码与本机验证已完成，Linux 真实故障测试见下表 E2-C。E1 已验收（历史记录见下文）
+
+## E2：可靠异步处理（`12a16ee` 之后）
+设计、启动、迁移与回退见 `E2_DELIVERY.md`。
+
+### 完成项（代码）
+- PG 迁移 `004_pipeline.sql`：`jobs`、`job_stages`、`stage_attempts`（失败台账）、`outbox_events`、`checkpoints`，schema 版本 4。
+- `vam/pipeline/`：
+  - `repository.py`：受理、认领、心跳、条件提交、汇合、退避重试、恢复扫描、outbox 发布、检查点。
+  - `dispatcher.py`：发布器 + 恢复扫描，独立进程，publisher confirm。
+  - `celery_app.py`：acks_late、reject_on_worker_lost、prefetch=1、软/硬时限、4 个 durable 队列。
+  - `runner.py`：认领 → 心跳 → 执行 → 带 token 提交；错误分类。
+  - `stages.py`：prepare / asr / transcript_index / vision / publish；ASR 检查点、Embedding 批次检查点。
+  - `api.py`：持久受理、人工重试、任务描述、失败台账。
+- API：
+  - worker 模式下 `schedule` 只做持久受理，API 重启不再中断任务。
+  - `Idempotency-Key` 头（同一 key 参数不同返回 409）。
+  - 上传受理使用固定 request id。
+  - `GET /api/jobs/{id}` 附带 `pipeline.stages/attempts`；新增 `POST /api/jobs/{id}/retry`、`GET /api/pipeline/failures`。
+  - 删除/回收前检查 PG 中的活动任务。
+- 部署：
+  - `deploy/e2/compose.yml`：包含 E1 的 PG/MinIO，加上 RabbitMQ 4.1.4（健康检查、`consumer_timeout`）、一次性 `migrate`、`api`、`dispatcher`、`worker-long`、`worker-short`。
+  - `deploy/e2/app.Dockerfile`，`.env.example`，`pyproject` 新增 `pipeline` extra（Celery 5.5–5.6）。
+- CI：`.github/workflows/e2-pipeline.yml`，真实 PG + MinIO + RabbitMQ + 独立 Worker 进程 + 容器栈冒烟。
+
+### 未完成 / 未迁移（如实记录）
+- 笔记批次、导出、问答没有迁移到 Worker。worker 模式下，索引后自动生成笔记不会触发（需手动生成）。
+- 视觉阶段只有阶段级恢复。
+- 仍是单 API + 共享 DATA_ROOT；SQLite 中的视频元数据和发布指针没有迁入 PG。
+- 对象存储中失败尝试的产物没有自动清理。
+
+### 验证记录
+**E2-A 真实中间件（本机 Windows，PostgreSQL 16.4 + MinIO；没有 RabbitMQ，outbox 行在测试进程内交给真实 runner）**
+
+| 检查 | 结果 |
+| --- | --- |
+| E1 回归基线（改造前，`12a16ee`）`test_e1_unit` + `test_e1_platform` | 24 passed |
+| `tests/test_e2_pipeline.py`，11 个场景：<br>• 持久受理（API 不执行任何计算）<br>• request id 幂等、参数冲突返回 409、并发重复提交只建一个任务、每个视频只有一个活动任务<br>• 8 线程并发认领只有一个赢家；租约过期后接管，旧 token 的完成/失败/心跳全部被拒<br>• 两分支并发完成，汇合只激活一次（publish 的 outbox 只有 1 条）<br>• 退避窗口内不能认领；次数用尽后失败，依赖阶段被跳过，失败台账有记录<br>• 扫描能重新投递“已投递未消费”的阶段和租约过期的阶段<br>• broker 报错时 outbox 保留并退避；“已确认、未标记”后重发，重复投递只执行一次<br>• 两条分支端到端发布（播放/Range、字幕、视觉索引）；仅转写任务复用 ASR 检查点与全部 Embedding 批次（转写只调用 1 次）<br>• Embedding 第 3 批失败后重试，复用前 2 批（共 4 次调用）<br>• 视觉失败时任务为 partial，旧 `active_generation` 和字幕保留，失败代次被删除；人工重试幂等且成功；失败台账可查<br>• API 重启后任务仍为 queued，可继续完成；活动任务期间不能删除视频 | **11 passed**（69 s） |
+| 全量 `pytest tests` | **250 passed, 12 skipped**（12 个是 E2-C 的故障测试：本机不是 Linux，也没有 RabbitMQ） |
+
+**E2-B 测试替身**：模型由 `tests/e2_factory.py` 代替（颜色/关键词向量、固定 ASR 片段），只证明流水线逻辑，不代表真实模型的效果或成本。
+
+**E2-C 真实中间件 + 独立进程（GitHub Actions Linux：RabbitMQ 4.1.4 + PG + MinIO + 独立 dispatcher / Celery Worker，kill -9）**
+
+| 检查 | 结果 |
+| --- | --- |
+| `tests/test_e2_faults.py`，12 个场景（任务提交后、投递前发布器崩溃；broker 已确认但 outbox 未标记时发布器崩溃；ASR 提交后、ACK 前子进程被杀；ASR 上传后、提交前被杀；视觉产物写出后、提交前被杀，以及 prepare 提交后、ACK 前被杀；整个 Worker 在阶段中途被 SIGKILL；两个 Worker 并发消费重复消息；挂起的 Worker 被接管、旧结果被拒；RabbitMQ 停机后恢复；重试次数用尽；重新索引时一个分支失败、保留旧索引；软时限超时后重试） | 待 CI 运行（见下次更新） |
+| 容器栈冒烟（构建镜像、migrate、API 健康检查、Worker 连接 broker） | 待 CI 运行 |
+
+---
+
+# E1 记录（历史）
+
+E1 更新：2026-10-28　阶段：**E1 三轮独立验收发现的 5 项缺陷均已修复；本机回归与 `2466121` 的 GitHub CI 均通过**；内容秒传未做
 
 ## 当前提交
 基线 `3ede061`；E1 实现 `2991d2b`；本机验证修复 `4632b4f`；第一次独立验收（目标 `be66e7d`）整改 `04122c8`；第二次独立验收（目标 `55d4271`）整改 `1515c1e`；第三次独立验收（目标 `952247f`）整改 `2466121`。

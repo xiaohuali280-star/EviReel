@@ -52,6 +52,7 @@ class ObjectStore(Protocol):
     def head(self, key: str) -> ObjectInfo: ...
     def iter_object(self, key: str, chunk_size: int = 8 << 20) -> Iterator[bytes]: ...
     def delete(self, key: str) -> None: ...
+    def put_file(self, key: str, path, content_type: str = "application/octet-stream") -> ObjectInfo: ...
     def health(self) -> dict: ...
 
 
@@ -166,6 +167,19 @@ class S3ObjectStore:
 
     def delete(self, key):
         self._call(self.client.delete_object, Bucket=self.bucket, Key=key)
+
+    def put_file(self, key, path, content_type="application/octet-stream"):
+        """Single PUT of a server-side product; storage verifies Content-MD5 before accepting it."""
+        import base64
+        import hashlib
+        digest = hashlib.md5()
+        with open(path, "rb") as handle:
+            for block in iter(lambda: handle.read(1 << 20), b""):
+                digest.update(block)
+        with open(path, "rb") as handle:
+            self._call(self.client.put_object, Bucket=self.bucket, Key=key, Body=handle, ContentType=content_type,
+                       ContentMD5=base64.b64encode(digest.digest()).decode())
+        return self.head(key)
 
     def health(self):
         self._call(self.client.head_bucket, Bucket=self.bucket)

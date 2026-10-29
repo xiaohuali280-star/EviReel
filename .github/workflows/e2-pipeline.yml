@@ -1,0 +1,88 @@
+name: E2 pipeline (real PostgreSQL + MinIO + RabbitMQ + Celery workers)
+on:
+  push:
+    branches: ["main"]
+    paths: ["vam/**", "tests/**", "deploy/**", "pyproject.toml", "setup.cfg", ".github/workflows/e2-pipeline.yml"]
+  pull_request:
+    paths: ["vam/**", "tests/**", "deploy/**", "pyproject.toml", "setup.cfg", ".github/workflows/e2-pipeline.yml"]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  e2:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      SILICONFLOW_API_KEY: ""
+      OPENROUTER_API_KEY: ""
+      DASHSCOPE_API_KEY: ""
+      COMPOSE: docker compose --env-file deploy/e1/dev.env -f deploy/e2/compose.yml
+    steps:
+      - uses: actions/checkout@v4
+      - name: Throwaway CI credentials (never reused)
+        run: |
+          {
+            echo "EVIREEL_PG_USER=evireel"
+            echo "EVIREEL_PG_PASSWORD=ci-$(openssl rand -hex 12)"
+            echo "EVIREEL_S3_ACCESS_KEY=ci-$(openssl rand -hex 6)"
+            echo "EVIREEL_S3_SECRET_KEY=ci-$(openssl rand -hex 16)"
+            echo "EVIREEL_MQ_USER=evireel"
+            echo "EVIREEL_MQ_PASSWORD=ci-$(openssl rand -hex 12)"
+            echo "EVIREEL_WEB_ORIGINS=http://127.0.0.1:8000"
+          } > deploy/e1/dev.env
+      - name: Start middleware from the committed compose files (health-gated)
+        run: |
+          $COMPOSE up -d --wait --wait-timeout 300 postgres minio rabbitmq
+          $COMPOSE ps
+          $COMPOSE exec -T rabbitmq rabbitmq-diagnostics -q status | head -5
+          $COMPOSE exec -T rabbitmq rabbitmqctl eval 'application:get_env(rabbit, consumer_timeout).' | tee /dev/stderr | grep -q 14400000
+      - name: Export test endpoints
+        run: |
+          set -a; . deploy/e1/dev.env; set +a
+          echo "::add-mask::$EVIREEL_PG_PASSWORD"; echo "::add-mask::$EVIREEL_S3_SECRET_KEY"; echo "::add-mask::$EVIREEL_MQ_PASSWORD"
+          echo "EVIREEL_TEST_DATABASE_URL=postgresql://$EVIREEL_PG_USER:$EVIREEL_PG_PASSWORD@127.0.0.1:5432/postgres" >> "$GITHUB_ENV"
+          echo "EVIREEL_TEST_S3_ENDPOINT=http://127.0.0.1:9000" >> "$GITHUB_ENV"
+          echo "EVIREEL_TEST_S3_ACCESS_KEY=$EVIREEL_S3_ACCESS_KEY" >> "$GITHUB_ENV"
+          echo "EVIREEL_TEST_S3_SECRET_KEY=$EVIREEL_S3_SECRET_KEY" >> "$GITHUB_ENV"
+          echo "EVIREEL_TEST_BROKER_URL=amqp://$EVIREEL_MQ_USER:$EVIREEL_MQ_PASSWORD@127.0.0.1:5672/evireel" >> "$GITHUB_ENV"
+          echo "EVIREEL_TEST_BROKER_STOP=$COMPOSE stop rabbitmq" >> "$GITHUB_ENV"
+          echo "EVIREEL_TEST_BROKER_START=$COMPOSE up -d --wait rabbitmq" >> "$GITHUB_ENV"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install -e ".[dev,platform,pipeline]"
+          python -c "import celery, kombu; print('celery', celery.__version__, 'kombu', kombu.__version__)"
+      - name: Schema migration dry-run (fresh database)
+        run: python -m vam.platform.migrate --database-url "$EVIREEL_TEST_DATABASE_URL" schema --dry-run
+      - name: E2 ledger/stage tests (real PostgreSQL + MinIO, in-process runner)
+        run: python -m pytest tests/test_e2_pipeline.py -v -rs --junitxml=e2-pipeline-results.xml
+      - name: E2 failure tests (real RabbitMQ, separate dispatcher/Celery worker processes, kill -9)
+        run: python -m pytest tests/test_e2_faults.py -v -rs --junitxml=e2-fault-results.xml --basetemp=e2-fault-tmp
+      - name: E1 regression on the same middleware
+        run: python -m pytest tests/test_e1_unit.py tests/test_e1_platform.py -q -rs
+      - name: Container stack smoke (built image; migrate, API, dispatcher, long/short workers)
+        run: |
+          $COMPOSE up -d --build --wait --wait-timeout 600
+          $COMPOSE ps
+          curl -fsS http://127.0.0.1:8000/api/health
+          $COMPOSE exec -T worker-long celery -A vam.pipeline.celery_app inspect ping -t 20
+          $COMPOSE exec -T worker-short celery -A vam.pipeline.celery_app inspect active_queues -t 20
+      - name: Logs
+        if: always()
+        run: |
+          $COMPOSE logs --no-color > e2-stack.log 2>&1 || true
+          find e2-fault-tmp -name "*.log" -path "*logs*" -exec sh -c 'echo "=== $1"; tail -200 "$1"' _ {} \; > e2-fault-process-logs.txt 2>&1 || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: E2-validation
+          path: |
+            e2-pipeline-results.xml
+            e2-fault-results.xml
+            e2-stack.log
+            e2-fault-process-logs.txt
