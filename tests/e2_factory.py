@@ -85,5 +85,24 @@ class Transcriber:
         return Transcription([dict(s) for s in SEGMENTS], "zh")
 
 
+class StudyModel:
+    """Notes model double: one chapter per batch covering every source; E2_NOTES=fail_first fails the
+    first call (a retryable invalid output)."""
+    identity = "e2-test-notes-v1"
+
+    async def __call__(self, messages):
+        import json
+        n = count("notes")
+        if os.environ.get("E2_NOTES") == "fail_first" and n == 1:
+            return "not json"
+        sources = json.loads(messages[-1]["content"])
+        return json.dumps({"chapters": [{"title": f"章节 {n}", "points": ["要点：" + sources[0]["text"][:40]],
+                                         "source_ids": [s["source_id"] for s in sources]}]})
+
+
 def build(settings):
     return Backend(), Transcriber()
+
+
+def study_model(settings):
+    return StudyModel()

@@ -110,6 +110,8 @@ class Settings(BaseSettings):
     pipeline_task_time_limit_s: int = Field(3 * 3600, ge=30, le=24 * 3600)
     pipeline_embed_batch: int = Field(32, ge=1, le=256)
     pipeline_scratch: str = ""                 # worker scratch dir; default DATA_ROOT/.pipeline
+    pipeline_orphan_grace_s: float = Field(3600, ge=0, le=7 * 24 * 3600)   # unreferenced products kept this long
+    pipeline_sweep_interval_s: float = Field(600, ge=1, le=24 * 3600)
     # Test-only injection point ("module:function" returning (backend, transcriber)); never set in production.
     pipeline_factory: str = ""
     app_version: str = "0.1.0"

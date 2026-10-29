@@ -73,13 +73,18 @@ def execute(ctx, job_id, stage) -> str:
             logger.warning("stage_failed job_id=%s stage=%s code=%s transient=%s", job_id, stage, error.code, error.transient)
             if stage == "vision":
                 ctx.drop_generation(job["video_id"], token)
-            if stage == "publish" and not (error.transient and claim["stage"]["attempts"] < ctx.settings.pipeline_stage_max_attempts):
-                ctx.registry.update_job(job_id, status="failed", phase="failed", error_code=error.code, error=error.message)
-                ctx.registry.update_video(job["video_id"], status="failed", last_error="Indexing failed; see job details")
             outcome = ctx.repo.fail(job_id, stage, token, code=error.code, message=error.message, transient=error.transient)
+            # Read-model projections only after the ledger accepted the failure from the *current* attempt,
+            # and fenced by the job sequence, so a stale attempt never marks a newer result failed.
+            if outcome == "failed" and stage == "publish":
+                ctx.registry.publish_fenced(job["video_id"], job_id, fence=job["seq"], status="failed", result={},
+                                            error_code=error.code, error=error.message)
+            if outcome == "failed" and job["kind"] == "notes":
+                ctx.registry.progress_study_job(job_id, status="failed", phase="failed", error_code=error.code)
             return outcome
         fault(f"before_commit:{stage}")
-        committed = ctx.repo.complete(job_id, stage, token, result.output, skip=result.skip, job_result=result.job_result)
+        committed = ctx.repo.complete(job_id, stage, token, result.output, skip=result.skip, job_result=result.job_result,
+                                      follow_up=result.follow_up)
         if not committed:
             # Our lease was taken over: another attempt owns the stage. Discard our (attempt-keyed) products.
             logger.warning("stage_result_discarded job_id=%s stage=%s token=%s", job_id, stage, token)

@@ -53,6 +53,7 @@ class ObjectStore(Protocol):
     def iter_object(self, key: str, chunk_size: int = 8 << 20) -> Iterator[bytes]: ...
     def delete(self, key: str) -> None: ...
     def put_file(self, key: str, path, content_type: str = "application/octet-stream") -> ObjectInfo: ...
+    def list_objects(self, prefix: str) -> list[tuple[str, float, int]]: ...
     def health(self) -> dict: ...
 
 
@@ -167,6 +168,19 @@ class S3ObjectStore:
 
     def delete(self, key):
         self._call(self.client.delete_object, Bucket=self.bucket, Key=key)
+
+    def list_objects(self, prefix):
+        """[(key, last_modified_epoch, size)] under a prefix (paginated)."""
+        found, token = [], None
+        while True:
+            kwargs = {"Bucket": self.bucket, "Prefix": prefix}
+            if token:
+                kwargs["ContinuationToken"] = token
+            page = self._call(self.client.list_objects_v2, **kwargs)
+            found += [(o["Key"], o["LastModified"].timestamp(), int(o["Size"])) for o in page.get("Contents", [])]
+            if not page.get("IsTruncated"):
+                return found
+            token = page.get("NextContinuationToken")
 
     def put_file(self, key, path, content_type="application/octet-stream"):
         """Single PUT of a server-side product; storage verifies Content-MD5 before accepting it."""

@@ -107,7 +107,7 @@ def test_registry_migration_preserves_old_video(tmp_path, version):
         conn.execute(f'PRAGMA user_version={version}')
     db = Database(path)
     with db.connect() as conn:
-        assert conn.execute('PRAGMA user_version').fetchone()[0] == 4
+        assert conn.execute('PRAGMA user_version').fetchone()[0] == 5  # 005: E2 publication fence
         assert conn.execute('SELECT original_name FROM videos').fetchone()[0] == 'old.mp4'
         assert conn.execute('SELECT COUNT(*) FROM conversations').fetchone()[0] == 0
 

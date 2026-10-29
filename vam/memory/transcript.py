@@ -102,20 +102,49 @@ class TranscriptStore:
 
     def publish(self, version, *, vectors=None, dim=None, empty=False):
         with self.connect(write=True) as conn:
-            current = conn.execute('SELECT status FROM transcript_versions WHERE video_id=? AND version=?', (self.video_id, version)).fetchone()
-            if current is None:
-                raise RuntimeError('cannot publish missing transcript version')
-            docs = conn.execute('SELECT doc_id FROM transcript_chunks WHERE version=? ORDER BY doc_id', (version,)).fetchall()
-            if vectors is not None:
-                validate_embeddings(vectors, expected_count=len(docs), expected_dim=dim)
-                conn.executemany('UPDATE transcript_chunks SET embedding=? WHERE version=? AND doc_id=?',
-                                 [(struct.pack(f'<{dim}f', *vector), version, doc['doc_id']) for doc, vector in zip(docs, vectors)])
-            status = 'empty' if empty else ('search_ready' if vectors is not None or current['status'] == 'search_ready' else 'text_ready')
-            conn.execute('UPDATE transcript_versions SET status=?,dim=COALESCE(?,dim) WHERE version=?', (status, dim, version))
-            conn.execute('INSERT OR IGNORE INTO transcript_heads(video_id) VALUES(?)', (self.video_id,))
-            conn.execute('UPDATE transcript_heads SET text_version=? WHERE video_id=?', (version, self.video_id))
-            if status == 'search_ready' or empty:
-                conn.execute('UPDATE transcript_heads SET search_version=? WHERE video_id=?', (None if empty else version, self.video_id))
+            status = self._complete(conn, version, vectors, dim, empty)
+            self._move_heads(conn, version, status)
+
+    def complete_version(self, version, *, vectors=None, dim=None, empty=False):
+        """Pipeline staging: store vectors/status for a version without changing what readers see."""
+        with self.connect(write=True) as conn:
+            return self._complete(conn, version, vectors, dim, empty)
+
+    def publish_head(self, version, *, fence: int) -> bool:
+        """Pipeline publication: move the heads to a completed version, fenced by the job sequence.
+        Returns False (and changes nothing) when a newer job already published."""
+        with self.connect(write=True) as conn:
+            row = conn.execute('SELECT seq FROM transcript_fence WHERE video_id=?', (self.video_id,)).fetchone()
+            if row and row['seq'] > fence:
+                return False
+            current = conn.execute('SELECT status FROM transcript_versions WHERE video_id=? AND version=?',
+                                   (self.video_id, version)).fetchone()
+            if current is None or current['status'] == 'staged':
+                raise RuntimeError('cannot publish an incomplete transcript version')
+            conn.execute('INSERT INTO transcript_fence(video_id, seq) VALUES(?,?) '
+                         'ON CONFLICT(video_id) DO UPDATE SET seq=excluded.seq', (self.video_id, fence))
+            self._move_heads(conn, version, current['status'])
+            return True
+
+    def _complete(self, conn, version, vectors, dim, empty):
+        current = conn.execute('SELECT status FROM transcript_versions WHERE video_id=? AND version=?', (self.video_id, version)).fetchone()
+        if current is None:
+            raise RuntimeError('cannot publish missing transcript version')
+        docs = conn.execute('SELECT doc_id FROM transcript_chunks WHERE version=? ORDER BY doc_id', (version,)).fetchall()
+        if vectors is not None:
+            validate_embeddings(vectors, expected_count=len(docs), expected_dim=dim)
+            conn.executemany('UPDATE transcript_chunks SET embedding=? WHERE version=? AND doc_id=?',
+                             [(struct.pack(f'<{dim}f', *vector), version, doc['doc_id']) for doc, vector in zip(docs, vectors)])
+        status = 'empty' if empty else ('search_ready' if vectors is not None or current['status'] == 'search_ready' else 'text_ready')
+        conn.execute('UPDATE transcript_versions SET status=?,dim=COALESCE(?,dim) WHERE version=?', (status, dim, version))
+        return status
+
+    def _move_heads(self, conn, version, status):
+        conn.execute('INSERT OR IGNORE INTO transcript_heads(video_id) VALUES(?)', (self.video_id,))
+        conn.execute('UPDATE transcript_heads SET text_version=? WHERE video_id=?', (version, self.video_id))
+        if status in {'search_ready', 'empty'}:
+            conn.execute('UPDATE transcript_heads SET search_version=? WHERE video_id=?',
+                         (None if status == 'empty' else version, self.video_id))
 
     def list(self, *, kind='chunks', offset=0, limit=50, min_time=0., max_time=None):
         state = self.state()

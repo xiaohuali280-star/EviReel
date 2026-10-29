@@ -297,7 +297,7 @@ def test_schema3_upgrade_preserves_conversations(tmp_path):
         conn.execute('PRAGMA user_version=3')
     db = Database(path)
     with db.connect() as conn:
-        assert conn.execute('PRAGMA user_version').fetchone()[0] == 4
+        assert conn.execute('PRAGMA user_version').fetchone()[0] == 5  # 005: E2 publication fence
         assert conn.execute('SELECT video_id FROM conversations').fetchone()[0] == 'old'
         assert conn.execute('SELECT trashed_at FROM videos').fetchone()[0] is None
 

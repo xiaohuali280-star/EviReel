@@ -62,7 +62,8 @@ def test_upload_is_accepted_durably_without_running_anything_in_the_api(worker_a
         assert job["status"] == "queued" and job["request_id"] == f"upload:{view['upload_id']}"
         stages = stage_rows(app.state.pipeline.repo.db, view["job_id"])
         assert {s: r["status"] for s, r in stages.items()} == {
-            "prepare": "pending", "asr": "waiting", "transcript_index": "waiting", "vision": "waiting", "publish": "waiting"}
+            "prepare": "pending", "audio": "waiting", "asr": "waiting", "transcript_index": "waiting",
+            "vision": "waiting", "publish": "waiting"}
         with app.state.pipeline.repo.db.connect() as conn:
             outbox = conn.execute("SELECT dedupe_key, queue, status FROM outbox_events").fetchall()
         assert outbox == [{"dedupe_key": f"{view['job_id']}:prepare:1", "queue": "media", "status": "pending"}]
@@ -129,7 +130,7 @@ def test_parallel_branch_completion_activates_the_join_exactly_once(worker_app, 
     with TestClient(app) as client:
         _, view = accepted(client, app, media["red"])
         repo, job_id = app.state.pipeline.repo, view["job_id"]
-        for stage in ("prepare", "asr"):
+        for stage in ("prepare", "audio", "asr"):
             token = repo.claim(job_id, stage, "w")["stage"]["attempt_token"]
             assert repo.complete(job_id, stage, token, {})
         tokens = {s: repo.claim(job_id, s, f"w-{s}")["stage"]["attempt_token"] for s in ("transcript_index", "vision")}
@@ -150,8 +151,9 @@ def test_transient_failures_back_off_then_exhaust_and_skip_dependents(worker_app
     with TestClient(app) as client:
         _, view = accepted(client, app, media["red"])
         repo, job_id = app.state.pipeline.repo, view["job_id"]
-        token = repo.claim(job_id, "prepare", "w")["stage"]["attempt_token"]
-        repo.complete(job_id, "prepare", token, {})
+        for stage in ("prepare", "audio"):
+            token = repo.claim(job_id, stage, "w")["stage"]["attempt_token"]
+            repo.complete(job_id, stage, token, {})
         token = repo.claim(job_id, "asr", "w")["stage"]["attempt_token"]
         assert repo.fail(job_id, "asr", token, code="asr_timeout", message="slow", transient=True) == "retry"
         row = stage_rows(repo.db, job_id)["asr"]
@@ -252,8 +254,8 @@ def test_pipeline_publishes_both_branches_and_reuses_checkpoints(worker_app, med
         assert calls(worker_app.counters, "transcribe") == 1
         assert again["transcript_index"]["output"]["reused"] is True
         # Artifacts are attempt-keyed objects in storage, verified by sha256 on every read.
-        prep = stages["prepare"]["output"]["audio"]
-        assert f"/{stages['prepare']['attempt_token']}/audio.wav" in prep["key"]
+        prep = stages["audio"]["output"]["audio"]
+        assert f"/{stages['audio']['attempt_token']}/audio.wav" in prep["key"]
         assert ctx.store.head(prep["key"]).size == prep["size"]
 
 
@@ -340,4 +342,5 @@ def test_jobs_survive_an_api_restart_and_deletion_waits_for_them(worker_app, med
             assert conn.execute("SELECT status FROM index_jobs WHERE job_id=?", (view["job_id"],)).fetchone()[0] == "queued"
         ctx = make_ctx()
         assert drain_inline(ctx, view["job_id"])["status"] == "succeeded"
-        assert json.loads(json.dumps(stage_rows(ctx.db, view["job_id"])["publish"]["output"])) == {"status": "succeeded"}
+        assert stage_rows(ctx.db, view["job_id"])["publish"]["output"] == {
+            "status": "succeeded", "published": True, "transcript_heads_moved": True}

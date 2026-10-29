@@ -139,6 +139,66 @@ class VideoRegistry:
                          "VALUES(?,?,?,'queued','queued',?,?,?,?)", (job_id, video_id, job_id, attempt, now, now, kind))
             conn.execute("UPDATE videos SET status='queued',last_error=NULL WHERE video_id=?", (video_id,))
 
+    def publish_fenced(self, video_id, job_id, *, fence, status, result, error_code=None, error=None,
+                       vision_generation=None, fingerprint=None, playback_path=None, transcript_status=None,
+                       transcript_error=None) -> bool:
+        """Worker-mode publication: every user-visible field of the video plus the job's read-model row,
+        in one transaction, only if no newer job (higher fence) has published. Re-running the same job's
+        publication writes identical values (crash-recovery between this commit and the ledger commit)."""
+        with self.db.connect(write=True) as conn:
+            row = conn.execute("SELECT published_seq FROM videos WHERE video_id=?", (video_id,)).fetchone()
+            if row is None or row[0] > fence:
+                return False
+            fields = {"published_seq": fence, "status": status, "last_error": error}
+            if vision_generation:
+                fields |= {"active_generation": vision_generation, "model_fingerprint": fingerprint}
+            if playback_path:
+                fields["playback_path"] = playback_path
+            if transcript_status:
+                fields |= {"transcript_status": transcript_status, "transcript_error": transcript_error}
+            conn.execute("UPDATE videos SET " + ",".join(k + "=?" for k in fields) + " WHERE video_id=?",
+                         (*fields.values(), video_id))
+            conn.execute("UPDATE index_jobs SET status=?,phase=?,result=?,error_code=?,error=?,updated_at=? WHERE job_id=?",
+                         (status, 'done' if status in {'succeeded', 'partial'} else status,
+                          json.dumps(result, ensure_ascii=False), error_code, error, time.time(), job_id))
+            return True
+
+    # -- worker-mode notes jobs: study_jobs/study_artifacts are the read model of PostgreSQL notes jobs
+    def project_study_job(self, job_id, video_id, request_id):
+        now = time.time()
+        with self.db.connect(write=True) as conn:
+            conn.execute("INSERT OR IGNORE INTO study_jobs(job_id,video_id,request_id,options,status,phase,created_at,updated_at) "
+                         "VALUES(?,?,?,'{}','queued','queued',?,?)", (job_id, video_id, request_id, now, now))
+
+    def progress_study_job(self, job_id, **fields):
+        allowed = {"status", "phase", "current", "total", "error_code"}
+        if not fields or not fields.keys() <= allowed:
+            raise ValueError("invalid study job update")
+        fields["updated_at"] = time.time()
+        with self.db.connect(write=True) as conn:
+            conn.execute("UPDATE study_jobs SET " + ",".join(k + "=?" for k in fields) +
+                         " WHERE job_id=? AND status IN ('queued','running')", (*fields.values(), job_id))
+
+    def publish_study_artifact(self, video_id, job_id, *, artifact_id, versions, content, created_at):
+        """Idempotent (deterministic id); ordered by the job's creation time, so a late publication of
+        an older notes job can never become the "latest" artifact."""
+        with self.db.connect(write=True) as conn:
+            conn.execute("INSERT OR IGNORE INTO study_artifacts VALUES(?,?,?,?,?,?)",
+                         (artifact_id, video_id, job_id, json.dumps(versions), json.dumps(content, ensure_ascii=False),
+                          created_at))
+            conn.execute("UPDATE study_jobs SET status='succeeded',phase='done',artifact_id=?,updated_at=? WHERE job_id=?",
+                         (artifact_id, time.time(), job_id))
+
+    def progress_job(self, job_id, **fields):
+        """Worker progress: never reopens a job row that already reached a final state."""
+        allowed = {"status", "phase", "current", "total", "error", "error_code"}
+        if not fields or not fields.keys() <= allowed:
+            raise ValueError("invalid job update")
+        fields["updated_at"] = time.time()
+        with self.db.connect(write=True) as conn:
+            conn.execute("UPDATE index_jobs SET " + ",".join(k + "=?" for k in fields) +
+                         " WHERE job_id=? AND status IN ('queued','running')", (*fields.values(), job_id))
+
     def finish(self, video_id, job_id, *, status, result, error_code=None, error=None, vision_generation=None, fingerprint=None):
         with self.db.connect(write=True) as conn:
             if vision_generation:

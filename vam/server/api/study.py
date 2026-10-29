@@ -29,6 +29,30 @@ async def job(video_id: str, job_id: str, request: Request):
     return request.app.state.study.job(video_id, job_id)
 
 
+def _pipeline(request):
+    pipeline = getattr(request.app.state, 'pipeline', None)
+    if pipeline is None:
+        raise DomainError(404, 'pipeline_disabled', 'Export jobs require PIPELINE_MODE=worker; use the direct export')
+    return pipeline
+
+
+@router.post('/{video_id}/study/artifacts/{artifact_id}/exports', status_code=202)
+async def create_export(video_id: str, artifact_id: str, request: Request,
+                        format: str = Query('md', pattern='^(md|pptx|pdf)$')):
+    """Worker mode: render the export in a pipeline worker into object storage (durable, retryable)."""
+    from vam.server.api.videos import idempotency_key
+    request.app.state.study.artifact(video_id, artifact_id)   # exists and belongs to this (authorized) video
+    job_id = await run_sync(_pipeline(request).export, video_id, artifact_id, format, idempotency_key(request))
+    return {'video_id': video_id, 'artifact_id': artifact_id, 'format': format, 'job_id': job_id}
+
+
+@router.get('/{video_id}/study/exports/{job_id}/download')
+async def download_export(video_id: str, job_id: str, request: Request):
+    data, media, filename = await run_sync(_pipeline(request).export_download, video_id, job_id,
+                                           request.app.state.platform.store)
+    return Response(data, media_type=media, headers={'Content-Disposition': f'attachment; filename="{filename}"'})
+
+
 @router.get('/{video_id}/study/artifacts/{artifact_id}/export')
 async def export(video_id: str, artifact_id: str, request: Request, format: str = Query('md', pattern='^(md|pptx|pdf)$')):
     study = request.app.state.study

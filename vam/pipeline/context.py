@@ -86,9 +86,12 @@ class WorkerContext:
         self.scratch.mkdir(parents=True, exist_ok=True)
         self.worker_id = f"{socket.gethostname()}:{os.getpid()}:{uuid.uuid4().hex[:6]}"
         self.prefix = settings.s3_key_prefix.strip("/") + "/" if settings.s3_key_prefix.strip("/") else ""
+        self.study_model = None
         if settings.pipeline_factory:  # explicit test injection (never set in production config)
             module, name = settings.pipeline_factory.split(":")
-            backend, transcriber = getattr(importlib.import_module(module), name)(settings)
+            factory = importlib.import_module(module)
+            backend, transcriber = getattr(factory, name)(settings)
+            self.study_model = getattr(factory, "study_model", lambda s: None)(settings)
         if backend is None:
             from vam.vision.backends import get_backend
             backend = get_backend()
@@ -163,9 +166,14 @@ class WorkerContext:
     # ------------------------------------------------------------------ registry read model (single writer: workers)
     def project(self, job, **fields):
         """Mirror job progress into SQLite index_jobs, which the existing UI/API read. Never a source of truth."""
-        self.registry.project_job(job["job_id"], job["video_id"], job["kind"])
-        if fields:
-            self.registry.update_job(job["job_id"], **fields)
+        if job["kind"] in {"video", "transcript"}:
+            self.registry.project_job(job["job_id"], job["video_id"], job["kind"])
+            if fields:
+                self.registry.progress_job(job["job_id"], **fields)
+        elif job["kind"] == "notes":
+            self.registry.project_study_job(job["job_id"], job["video_id"], job["request_id"] or job["job_id"])
+            if fields:
+                self.registry.progress_study_job(job["job_id"], **fields)
 
     def transcript_store(self, video_id, candidate):
         row = self.registry.get(video_id)
@@ -176,6 +184,22 @@ class WorkerContext:
         if not row["transcript_generation"]:
             self.registry.update_video(video_id, transcript_generation=generation)
         return store
+
+    # ------------------------------------------------------------------ study notes
+    @property
+    def study_model_configured(self):
+        return bool(self.study_model or self.settings.api_key)
+
+    def study_identity(self) -> str:
+        """Model identity for notes checkpoints: a different model/endpoint never reuses old batches."""
+        s = self.settings
+        if self.study_model is not None:
+            return json.dumps({"model": getattr(self.study_model, "identity", type(self.study_model).__name__)})
+        return json.dumps({"provider": s.provider_name, "base_url": s.chat_base_url, "model": s.model_id,
+                           "stream": s.study_stream}, sort_keys=True)
+
+    def study_indexing(self):
+        return _StudyIndexing(self)
 
     def drop_generation(self, video_id, generation):
         """Delete a local index generation that is not published (attempt-keyed, safe to remove)."""
@@ -188,3 +212,35 @@ class WorkerContext:
         assets = self.registry.asset(video_id, f"cache/{generation}")
         if assets.exists():
             shutil.rmtree(assets, ignore_errors=True)
+
+
+class _StudyIndexing:
+    """The slice of IndexingService that StudyService reads (corpus/artifacts), for worker processes.
+    Read-only over published generations; no OwnerLock, no in-process leases."""
+
+    def __init__(self, ctx):
+        self.registry, self.settings, self.backend = ctx.registry, ctx.settings, ctx.backend
+        self.memory_locks = {}
+
+    def _usable_video(self, video_id):
+        row = self.registry.get(video_id)
+        if row["trashed_at"] is not None:
+            raise DomainError(409, "video_trashed", "Restore the video before using it")
+        if row["status"] in {"deleting", "delete_failed"}:
+            raise DomainError(409, "video_deleting", "Video is being deleted")
+        return row
+
+    def _retain(self, video_id):
+        return lambda: None
+
+    def _transcript_store(self, video_id):
+        row = self.registry.get(video_id)
+        return TranscriptStore(self.registry.asset(video_id, f"memory/{row['transcript_generation']}.sqlite3"), video_id)
+
+    def _store(self, video_id, generation):
+        from vam.retrieval.frame_store import FrameStore
+        if not re.fullmatch(r"[0-9a-f]{32}", generation):
+            raise DomainError(409, "invalid_index_version", "Invalid stored index version")
+        store = FrameStore(backend=self.backend, persist_path=str(self.registry.asset(video_id, f"memory/{generation}.sqlite3")))
+        store.asset_root = str(self.registry.asset(video_id, f"cache/{generation}"))
+        return store

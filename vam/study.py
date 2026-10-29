@@ -40,6 +40,8 @@ class StudyService:
         self.closed = False
 
     def start(self):
+        if getattr(self.indexing, 'pipeline', None) is not None:
+            return  # worker mode: notes jobs live in the PostgreSQL pipeline and survive API restarts
         with self.registry.db.connect(write=True) as conn:
             conn.execute("UPDATE study_jobs SET status='interrupted',phase='interrupted',error_code='server_restart',updated_at=? WHERE status IN ('queued','running')", (time.time(),))
 
@@ -69,6 +71,9 @@ class StudyService:
         if self.closed:
             raise DomainError(503, 'server_stopping', 'Server is stopping')
         self.indexing._usable_video(video_id)
+        pipeline = getattr(self.indexing, 'pipeline', None)
+        if pipeline is not None:
+            return self._submit_worker(video_id, request_id, pipeline)
         now, jid = time.time(), uuid.uuid4().hex
         with self.registry.db.connect(write=True) as conn:
             previous = conn.execute('SELECT * FROM study_jobs WHERE video_id=? AND request_id=?', (video_id, request_id)).fetchone()
@@ -84,6 +89,20 @@ class StudyService:
         release = self.indexing._retain(video_id)
         self.tasks[jid] = asyncio.create_task(self._run(video_id, jid, release))
         return self.job(video_id, jid)
+
+    def _submit_worker(self, video_id, request_id, pipeline):
+        """Worker mode: durable acceptance of a notes job (batches run in pipeline workers)."""
+        with self.registry.db.connect() as conn:
+            previous = conn.execute('SELECT * FROM study_jobs WHERE video_id=? AND request_id=?', (video_id, request_id)).fetchone()
+        if previous:
+            return dict(previous)
+        active = pipeline.repo.active_for_video(video_id)
+        if active is not None and active['request_id'] != f'notes:{request_id}':
+            if active['kind'] == 'notes':
+                raise DomainError(409, 'study_running', 'Study generation is already running')
+            raise DomainError(409, 'index_running', 'Wait for video processing before generating notes')
+        job_id = pipeline.submit(video_id, kind='notes', request_id=f'notes:{request_id}')
+        return self.job(video_id, job_id)
 
     def update(self, job_id, **fields):
         allowed = {'status', 'phase', 'current', 'total', 'error_code'}

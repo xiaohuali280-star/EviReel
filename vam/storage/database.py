@@ -13,7 +13,7 @@ class Database:
         with self.connect() as conn:
             conn.execute("PRAGMA journal_mode=WAL")
             version = conn.execute("PRAGMA user_version").fetchone()[0]
-            if version > 4:
+            if version > 5:
                 raise RuntimeError("unsupported EviReel registry schema")
             if version < 1:
                 sql = (Path(__file__).parent / "migrations/001_registry.sql").read_text(encoding="utf-8")
@@ -27,6 +27,9 @@ class Database:
             if version < 4:
                 sql = (Path(__file__).parent / "migrations/004_study.sql").read_text(encoding="utf-8")
                 conn.executescript("BEGIN IMMEDIATE;\n" + sql + "\nPRAGMA user_version=4; COMMIT;")
+            if version < 5:
+                sql = (Path(__file__).parent / "migrations/005_publication_fence.sql").read_text(encoding="utf-8")
+                conn.executescript("BEGIN IMMEDIATE;\n" + sql + "\nPRAGMA user_version=5; COMMIT;")
 
     @contextmanager
     def connect(self, *, write=False):

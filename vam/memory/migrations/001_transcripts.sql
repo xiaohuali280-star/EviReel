@@ -26,3 +26,6 @@ CREATE TABLE IF NOT EXISTS transcript_heads (
  text_version TEXT REFERENCES transcript_versions(version),
  search_version TEXT REFERENCES transcript_versions(version)
 );
+-- E2: the sequence of the pipeline job that last moved the heads; head moves from pipeline workers
+-- are conditional on it, so a stale older job cannot roll the published transcript back.
+CREATE TABLE IF NOT EXISTS transcript_fence (video_id TEXT PRIMARY KEY, seq INTEGER NOT NULL);

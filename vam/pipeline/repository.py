@@ -99,19 +99,7 @@ class JobRepository:
                                 raise DomainError(409, "request_conflict",
                                                   "This request id was already used with different parameters")
                             return existing, False
-                    job_id = uuid.uuid4().hex
-                    job = conn.execute(
-                        "INSERT INTO jobs(job_id, workspace_id, video_id, kind, request_id, params, params_digest, status) "
-                        "VALUES (%s,%s,%s,%s,%s,%s,%s,'queued') RETURNING *",
-                        (job_id, workspace_id, video_id, kind, request_id, json.dumps(params), digest)).fetchone()
-                    graph = GRAPHS[kind]
-                    for stage, deps in graph.items():
-                        conn.execute("INSERT INTO job_stages(job_id, stage, status) VALUES (%s,%s,%s)",
-                                     (job_id, stage, "waiting" if deps else "pending"))
-                    for stage, deps in graph.items():
-                        if not deps:
-                            self._dispatch(conn, job_id, stage)
-                    return job, True
+                    return self._insert_job(conn, video_id, kind, workspace_id, request_id, params, digest), True
             except psycopg.errors.UniqueViolation as exc:
                 # With a request id, a concurrent twin may have won either index: look it up once more.
                 if request_id is not None and attempt == 0:
@@ -120,6 +108,37 @@ class JobRepository:
                     raise DomainError(409, "index_running", "This video already has an indexing job") from exc
                 raise
         raise DomainError(409, "request_conflict", "Concurrent submission with this request id; retry")
+
+    def _insert_job(self, conn, video_id, kind, workspace_id, request_id, params, digest):
+        job_id = uuid.uuid4().hex
+        job = conn.execute(
+            "INSERT INTO jobs(job_id, workspace_id, video_id, kind, request_id, params, params_digest, status) "
+            "VALUES (%s,%s,%s,%s,%s,%s,%s,'queued') RETURNING *",
+            (job_id, workspace_id, video_id, kind, request_id, json.dumps(params), digest)).fetchone()
+        graph = GRAPHS[kind]
+        for stage, deps in graph.items():
+            conn.execute("INSERT INTO job_stages(job_id, stage, status) VALUES (%s,%s,%s)",
+                         (job_id, stage, "waiting" if deps else "pending"))
+        for stage, deps in graph.items():
+            if not deps:
+                self._dispatch(conn, job_id, stage)
+        return job
+
+    def _follow_up(self, conn, job_id, follow):
+        """A job created by a stage completion (e.g. auto notes after publish), in the same transaction.
+        Runs in a savepoint: a conflict (request id reused, another active job) never aborts the commit."""
+        import psycopg
+        parent = conn.execute("SELECT video_id, workspace_id FROM jobs WHERE job_id=%s", (job_id,)).fetchone()
+        params = {"kind": follow["kind"], "video_id": parent["video_id"], **follow.get("params", {})}
+        try:
+            with conn.transaction():
+                if conn.execute("SELECT 1 FROM jobs WHERE COALESCE(workspace_id,'')=COALESCE(%s,'') AND request_id=%s",
+                                (parent["workspace_id"], follow["request_id"])).fetchone():
+                    return
+                self._insert_job(conn, parent["video_id"], follow["kind"], parent["workspace_id"], follow["request_id"],
+                                 params, sha256_hex(canonical(params)))
+        except psycopg.errors.UniqueViolation:
+            pass   # another job is active for this video; the user can start notes later
 
     # ------------------------------------------------------------------ claim / heartbeat
     def claim(self, job_id, stage, worker_id):
@@ -174,7 +193,7 @@ class JobRepository:
                          "error_code=COALESCE(error_code,'lease_lost') WHERE attempt_token=%s AND outcome='running'", (token,))
         return row
 
-    def complete(self, job_id, stage, token, output, *, skip=(), job_result=None) -> bool:
+    def complete(self, job_id, stage, token, output, *, skip=(), job_result=None, follow_up=()) -> bool:
         """Commit a stage result, activate successors and record their dispatch, atomically."""
         with self.db.transaction() as conn:
             if self._owned(conn, job_id, stage, token) is None:
@@ -188,6 +207,8 @@ class JobRepository:
             if job_result is not None:
                 self._finish_job(conn, job_id, job_result)
             self._advance(conn, job_id)
+            for follow in follow_up:
+                self._follow_up(conn, job_id, follow)
             return True
 
     def fail(self, job_id, stage, token, *, code, message, transient) -> str:
@@ -247,15 +268,27 @@ class JobRepository:
                     conn.execute("UPDATE job_stages SET status='skipped', error_code='dependency_not_succeeded', "
                                  "finished_at=now() WHERE job_id=%s AND stage=%s AND status='waiting'", (job_id, stage))
                 changed = True
+        # Graphs without a join (notes, export) end when every stage is terminal.
+        rows = conn.execute("SELECT stage, status, error_code, error FROM job_stages WHERE job_id=%s ORDER BY finished_at",
+                            (job_id,)).fetchall()
+        if all(r["status"] in TERMINAL for r in rows):
+            failed = next((r for r in rows if r["status"] == "failed"), None)
+            self._finish_job(conn, job_id, {"status": "failed", "error_code": failed["error_code"], "error": failed["error"]}
+                             if failed else {"status": "succeeded"})
 
     # ------------------------------------------------------------------ recovery
-    def scan(self) -> dict:
-        """Re-dispatch stalled work; fail stages that used up their attempts. Safe to run anywhere, repeatedly."""
+    def scan(self, _after_select=None) -> dict:
+        """Re-dispatch stalled work; fail stages that used up their attempts. Safe to run anywhere, repeatedly.
+
+        Candidates are only hints read without locks: every decision is re-checked under the row locks
+        (still running, same attempt token, lease still expired / still undelivered), so a heartbeat or
+        a takeover that happens after the candidate read is never overruled. `_after_select` is a test
+        hook that runs between the candidate read and the locked re-check."""
         s = self.settings
         summary = {"lease_expired": 0, "redispatched": 0, "exhausted": 0}
         with self.db.connect() as conn:
             expired = conn.execute(
-                "SELECT job_id, stage, attempts FROM job_stages WHERE status='running' AND lease_until < now() "
+                "SELECT job_id, stage, attempts, attempt_token FROM job_stages WHERE status='running' AND lease_until < now() "
                 "AND (last_dispatch_at IS NULL OR last_dispatch_at < now() - make_interval(secs => %s))",
                 (s.pipeline_lease_s,)).fetchall()
             stale = conn.execute(
@@ -264,13 +297,18 @@ class JobRepository:
                 "AND NOT EXISTS (SELECT 1 FROM outbox_events o WHERE o.job_id=job_stages.job_id "
                 "                AND o.stage=job_stages.stage AND o.status='pending')",
                 (s.pipeline_redispatch_after_s,)).fetchall()
+        if _after_select:
+            _after_select(expired, stale)
         for row in expired:
             with self.db.transaction() as conn:
                 conn.execute("SELECT 1 FROM jobs WHERE job_id=%s FOR UPDATE", (row["job_id"],))
-                current = conn.execute("SELECT * FROM job_stages WHERE job_id=%s AND stage=%s FOR UPDATE",
-                                       (row["job_id"], row["stage"])).fetchone()
-                if current["status"] != "running":
-                    continue
+                current = conn.execute(
+                    "SELECT * FROM job_stages WHERE job_id=%s AND stage=%s AND status='running' AND attempt_token=%s "
+                    "AND lease_until < now() AND (last_dispatch_at IS NULL OR last_dispatch_at < now() - "
+                    "make_interval(secs => %s)) FOR UPDATE",
+                    (row["job_id"], row["stage"], row["attempt_token"], s.pipeline_lease_s)).fetchone()
+                if current is None:
+                    continue   # renewed, taken over, finished or already re-dispatched since the candidate read
                 if current["attempts"] >= s.pipeline_stage_max_attempts:
                     conn.execute("UPDATE stage_attempts SET outcome='lease_lost', ended_at=now(), error_code='lease_expired' "
                                  "WHERE attempt_token=%s AND outcome='running'", (current["attempt_token"],))
@@ -283,8 +321,12 @@ class JobRepository:
         for row in stale:
             with self.db.transaction() as conn:
                 conn.execute("SELECT 1 FROM jobs WHERE job_id=%s FOR UPDATE", (row["job_id"],))
-                if conn.execute("SELECT 1 FROM job_stages WHERE job_id=%s AND stage=%s AND status='pending' FOR UPDATE",
-                                (row["job_id"], row["stage"])).fetchone():
+                if conn.execute(
+                        "SELECT 1 FROM job_stages WHERE job_id=%s AND stage=%s AND status='pending' "
+                        "AND (last_dispatch_at IS NULL OR last_dispatch_at < now() - make_interval(secs => %s)) "
+                        "AND NOT EXISTS (SELECT 1 FROM outbox_events o WHERE o.job_id=%s AND o.stage=%s AND o.status='pending') "
+                        "FOR UPDATE", (row["job_id"], row["stage"], s.pipeline_redispatch_after_s,
+                                       row["job_id"], row["stage"])).fetchone():
                     self._dispatch(conn, row["job_id"], row["stage"])
                     summary["redispatched"] += 1
         return summary

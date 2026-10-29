@@ -21,8 +21,31 @@ class PipelineClient:
         job, _ = self.repo.submit(video_id=video_id, kind=kind, workspace_id=owned["workspace_id"] if owned else None,
                                   request_id=request_id, params=params)
         # Read-model mirror. If this process dies right here, the worker's first claim re-creates it.
-        self.registry.project_job(job["job_id"], video_id, kind)
+        if kind in {"video", "transcript"}:
+            self.registry.project_job(job["job_id"], video_id, kind)
+        elif kind == "notes":
+            self.registry.project_study_job(job["job_id"], video_id, (request_id or job["job_id"]).removeprefix("notes:"))
         return job["job_id"]
+
+    def export(self, video_id, artifact_id, fmt, request_id=None) -> str:
+        """Durable export job; the same artifact+format (or Idempotency-Key) returns the same job."""
+        return self.submit(video_id, kind="export", params={"artifact_id": artifact_id, "format": fmt},
+                           request_id=request_id or f"export:{artifact_id}:{fmt}")
+
+    def export_download(self, video_id, job_id, store):
+        """(bytes, content type, filename) of a finished export job of this video, verified by sha256."""
+        import hashlib
+        from vam.video_registry import DomainError
+        job = self.repo.job(job_id)
+        if job["video_id"] != video_id or job["kind"] != "export":
+            raise DomainError(404, "export_not_found", "Export not found")
+        if job["status"] != "succeeded":
+            raise DomainError(409, "export_not_ready", f"Export is {job['status']}")
+        out = self.repo.stages(job_id)["export"]["output"]
+        data = b"".join(store.iter_object(out["export"]["key"]))
+        if hashlib.sha256(data).hexdigest() != out["export"]["sha256"]:
+            raise DomainError(500, "export_corrupt", "Stored export does not match its checksum")
+        return data, out["content_type"], out["filename"]
 
     def retry(self, job_id) -> str:
         """Manual retry: a new job for the same video/kind. Idempotent per failed job; verified

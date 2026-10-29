@@ -371,3 +371,28 @@ def test_long_stage_hits_the_soft_time_limit_and_is_retried(stack, video):
         vision = s.attempts(view["job_id"], "vision")
         assert [(a["outcome"], a["error_code"]) for a in vision] == [("retry", "stage_timeout"), ("succeeded", None)]
         assert "SoftTimeLimitExceeded" in s.log("worker") or "soft time limit" in s.log("worker").lower()
+
+
+# Notes batches in worker processes: auto notes follow publication; a worker killed right after a
+# verified batch checkpoint resumes without calling the model for that batch again.
+def test_auto_notes_resume_from_batch_checkpoint_after_worker_kill(stack, video):
+    s = stack(study_auto_generate=True)
+    with TestClient(s.app) as client:
+        alice, view = submit(s, client, video)
+        s.worker(VAM_PIPELINE_FAULT="after_notes_batch:0")
+        s.dispatcher()
+        assert s.wait_job(view["job_id"])["status"] == "succeeded"
+        repo = s.app.state.pipeline.repo
+        notes = s.wait(lambda: repo.active_for_video(view["video_id"]) or _notes_job(repo), 60, "the auto notes job")
+        assert s.wait_job(notes["job_id"])["status"] == "succeeded"
+        attempts = s.attempts(notes["job_id"], "notes_draft")
+        assert [a["outcome"] for a in attempts] == ["lease_lost", "succeeded"]
+        assert s.stage(notes["job_id"], "notes_draft")["output"]["batches"] == {"reused": 1, "computed": 0}
+        assert calls(s.counters, "notes") == 1
+        state = alice.get(f"/api/videos/{view['video_id']}/study").json()
+        assert state["artifact"]["artifact_id"] == "a_" + notes["job_id"]
+
+
+def _notes_job(repo):
+    with repo.db.connect() as conn:
+        return conn.execute("SELECT * FROM jobs WHERE kind='notes'").fetchone()

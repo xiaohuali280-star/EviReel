@@ -1,10 +1,15 @@
-"""Stage bodies. Each returns StageResult(output, skip, job_result); side effects are either
-immutable (attempt-keyed objects / index generations) or content-addressed (transcript versions),
-so a re-run or a stale attempt cannot corrupt a published result. Publication of anything the
-user sees happens only in `publish`, after the ledger says which products won."""
+"""Stage bodies. Each returns StageResult(output, skip, job_result, follow_up).
+
+Side effects before publication are immutable (attempt-keyed objects / index generations) or
+content-addressed (staged transcript versions), never visible to readers. Everything a user sees -
+active visual generation, playback path, transcript heads, video/job status, study artifacts - is
+written only by `publish` / `notes_publish`, fenced by the job's sequence number (`jobs.seq`): a
+stale attempt of an older job cannot overwrite a newer publication, and a re-run of the same job
+writes identical values (which is how the PostgreSQL/SQLite commit window recovers)."""
 from __future__ import annotations
 
 import asyncio
+import json
 import math
 from dataclasses import dataclass, field
 
@@ -18,7 +23,7 @@ from vam.video_registry import DomainError
 from vam.vision.backends import validate_embeddings
 
 # Bump when a stage's product format/semantics change: part of every checkpoint reuse key.
-STAGE_CODE_VERSION = {"asr": 1, "embed": 1}
+STAGE_CODE_VERSION = {"asr": 1, "embed": 1, "notes": 1}
 
 
 @dataclass
@@ -26,6 +31,7 @@ class StageResult:
     output: dict
     skip: dict = field(default_factory=dict)
     job_result: dict | None = None
+    follow_up: list = field(default_factory=list)
 
 
 def _chunk_config(cfg):
@@ -40,42 +46,54 @@ def _outputs(ctx, job_id):
 
 # ---------------------------------------------------------------------------------------------
 def prepare(ctx, claim):
-    """Media/audio preparation: playback file (video jobs) and the 16 kHz mono PCM audio artifact."""
+    """Source validation shared by both branches, plus the playback file for video jobs.
+    A source that is not a usable video fails here, which correctly stops both branches."""
     job, token = claim["job"], claim["stage"]["attempt_token"]
     video_id, cfg = job["video_id"], ctx.settings
     source = ctx.source(video_id, token)
+    output = {}
     try:
         from vam.video import _probe_video_metadata
-        duration = _probe_video_metadata(str(source))["duration"]
+        output["duration"] = _probe_video_metadata(str(source))["duration"]
         if job["kind"] == "video":
+            # prepare_playback writes playback.mp4 atomically from the immutable source (identical
+            # content on any re-run); readers only see it once publish sets playback_path.
             playback = prepare_playback(source, ctx.registry.directory(video_id), cfg)
             if playback == source:  # already browser-playable: point at the registry's own copy
                 playback = ctx.registry.asset(video_id, ctx.registry.get(video_id)["source_path"])
-            ctx.registry.update_video(video_id, playback_path=playback.name)
+            output["playback_path"] = playback.name
     except DomainError as exc:
         raise StageError(exc.code, exc.message, transient=False) from exc
-    source_sha = sha256_file(source)
-    output = {"source_sha256": source_sha, "duration": duration, "audio": None}
+    output["source_sha256"] = sha256_file(source)
+    return StageResult(output)
+
+
+def audio(ctx, claim):
+    """Speech-branch only: 16 kHz mono PCM audio artifact. Its failures never block the visual branch."""
+    job, token = claim["job"], claim["stage"]["attempt_token"]
+    cfg = ctx.settings
     if not cfg.asr_enabled:
-        return StageResult(output | {"audio_reason": "disabled"},
+        return StageResult({"audio": None, "reason": "disabled"},
                            skip={"asr": "asr_disabled", "transcript_index": "asr_disabled"})
+    source = ctx.source(job["video_id"], token)
     try:
-        audio = extract_audio(source, ctx.workdir(token) / "audio.wav", cfg)
+        result = extract_audio(source, ctx.workdir(token) / "audio.wav", cfg)
     except ASRError as exc:
         raise StageError(exc.code, str(exc), transient=exc.code == "audio_timeout") from exc
-    if audio is None:
-        return StageResult(output | {"audio_reason": "no_audio"},
+    if result is None:
+        return StageResult({"audio": None, "reason": "no_audio"},
                            skip={"asr": "no_audio", "transcript_index": "no_audio"})
-    ref = ctx.put_artifact(ctx.artifact_key(job, "prepare", token, "audio.wav"), audio.path, "audio/wav")
-    output["audio"] = ref | {"offset_s": audio.offset_s, "duration_s": audio.duration_s, "sample_rate": audio.sample_rate}
-    return StageResult(output)
+    ref = ctx.put_artifact(ctx.artifact_key(job, "audio", token, "audio.wav"), result.path, "audio/wav")
+    return StageResult({"audio": ref | {"offset_s": result.offset_s, "duration_s": result.duration_s,
+                                        "sample_rate": result.sample_rate}})
 
 
 # ---------------------------------------------------------------------------------------------
 def asr(ctx, claim):
     """Speech recognition with a content-addressed checkpoint (source sha + ASR identity + chunk rules)."""
     job, token = claim["job"], claim["stage"]["attempt_token"]
-    prep = _outputs(ctx, job["job_id"])["prepare"]["output"]
+    outputs = _outputs(ctx, job["job_id"])
+    prep, sound = outputs["prepare"]["output"], outputs["audio"]["output"]["audio"]
     asr_identity = canonical(ctx.transcriber.fingerprint())
     transcription_key = sha256_hex(canonical([prep["source_sha256"], asr_identity, _chunk_config(ctx.settings)]))
     reuse_key = "asr:" + sha256_hex(canonical([transcription_key, STAGE_CODE_VERSION["asr"]]))
@@ -91,14 +109,14 @@ def asr(ctx, claim):
             if exc.transient:
                 raise
             ctx.repo.drop_checkpoint(reuse_key, hit["object_key"])  # corrupt/missing product: recompute
-    audio = ctx.fetch(prep["audio"], work / "audio.wav")
+    wav = ctx.fetch(sound, work / "audio.wav")
     try:
-        result = ctx.transcriber.transcribe(audio)
+        result = ctx.transcriber.transcribe(wav)
     except ASRError as exc:
         transient = exc.code in {"asr_timeout", "asr_worker_failed"}
         raise StageError(exc.code, str(exc), transient=transient) from exc
-    payload = {"segments": result.segments, "language": result.language, "offset_s": prep["audio"]["offset_s"],
-               "audio_duration_s": prep["audio"]["duration_s"], "sample_rate": prep["audio"]["sample_rate"],
+    payload = {"segments": result.segments, "language": result.language, "offset_s": sound["offset_s"],
+               "audio_duration_s": sound["duration_s"], "sample_rate": sound["sample_rate"],
                "duration": prep["duration"]}
     ref = ctx.put_json(ctx.artifact_key(job, "asr", token, "segments.json"), payload, work / "segments.json")
     fault("after_asr_upload")
@@ -109,7 +127,8 @@ def asr(ctx, claim):
 
 # ---------------------------------------------------------------------------------------------
 def transcript_index(ctx, claim):
-    """Chunking + text embeddings with per-batch checkpoints, then (content-addressed) local publish."""
+    """Chunking + text embeddings with per-batch checkpoints into a content-addressed transcript version.
+    Readers do not see it until `publish` moves the heads (fenced)."""
     job, stage, token = claim["job"], claim["stage"], claim["stage"]["attempt_token"]
     video_id, cfg, backend = job["video_id"], ctx.settings, ctx.backend
     outputs = _outputs(ctx, job["job_id"])
@@ -129,17 +148,15 @@ def transcript_index(ctx, claim):
     transcription_key = asr_out["transcription_key"]
     version = sha256_hex(canonical([transcription_key, identity]))
     store = ctx.transcript_store(video_id, job["job_id"])
-    ctx.registry.update_video(video_id, transcript_status="running", transcript_error=None)
     existing = store.version(version)
     if existing and existing["status"] in {"search_ready", "empty"}:
-        store.publish(version, empty=existing["status"] == "empty")
         return StageResult({"status": "empty" if existing["status"] == "empty" else "ready", "version": version,
                             "reused": True, "batches": {"reused": 0, "computed": 0}})
     store.stage(version=version, transcription_key=transcription_key, source_sha256=prep["source_sha256"],
                 asr_fingerprint=asr_out["asr_identity"], chunk_config=_chunk_config(cfg), embedding_identity=identity,
                 segments=segments, chunks=chunks, language=payload["language"], metadata=metadata)
     if not chunks:
-        store.publish(version, empty=True)
+        store.complete_version(version, empty=True)
         return StageResult({"status": "empty", "reason": "empty_transcription", "version": version})
     vectors, dim, stats = [], None, {"reused": 0, "computed": 0}
     size = cfg.pipeline_embed_batch
@@ -181,13 +198,11 @@ def transcript_index(ctx, claim):
         # degrade exactly like the inline indexer did - publish the text, report "partial".
         if stage["attempts"] < cfg.pipeline_stage_max_attempts:
             raise StageError("transcript_embedding_failed", f"{type(exc).__name__}: {exc}", transient=True) from exc
-        store.publish(version)
+        store.complete_version(version)
         message = "Transcript text is available; semantic embedding failed. Retry the transcript job."
-        ctx.registry.update_video(video_id, transcript_status="partial", transcript_error=message)
         return StageResult({"status": "partial", "error_code": "transcript_embedding_failed", "error": message,
                             "version": version, "batches": stats})
-    store.publish(version, vectors=vectors, dim=dim)
-    ctx.registry.update_video(video_id, transcript_status="ready", transcript_error=None)
+    store.complete_version(version, vectors=vectors, dim=dim)
     return StageResult({"status": "ready", "version": version, "batches": stats})
 
 
@@ -202,8 +217,8 @@ class _VisionProgress:
 
     def progress(self, job_id, *, phase=None, current=None, total=None):
         fields = {k: v for k, v in {"phase": phase, "current": current, "total": total}.items() if v is not None}
-        if fields:
-            self.ctx.registry.update_job(self.job["job_id"], status="running", **fields)
+        if fields:   # never reopens a finished row (a stale attempt keeps reporting progress)
+            self.ctx.registry.progress_job(self.job["job_id"], status="running", **fields)
 
     def done(self, job_id, *, result):
         self.result = result
@@ -264,16 +279,18 @@ def _branch(stages, name, fallback_reason):
             "error": row["error"] or f"{name} failed; previous published results are retained"}
 
 
+
+
 def _speech(stages):
-    """Outcome of the speech branch (prepare -> asr -> transcript_index): the first real failure wins;
-    a skip caused by a failed dependency is that failure, not "no speech"."""
-    for name in ("prepare", "asr", "transcript_index"):
+    """Outcome of the speech branch (prepare -> audio -> asr -> transcript_index): the first real failure
+    wins; a skip caused by a failed dependency is that failure, not "no speech"."""
+    for name in ("prepare", "audio", "asr", "transcript_index"):
         row = stages[name]
         if row["status"] == "failed":
             return {"status": "failed", "error_code": row["error_code"] or f"{name}_failed",
                     "error": row["error"] or "Transcript indexing failed; previous published text/index is retained"}
-        if name == "prepare" and row["status"] == "succeeded" and row["output"].get("audio_reason"):
-            return {"status": "skipped", "reason": row["output"]["audio_reason"]}
+        if name == "audio" and row["status"] == "succeeded" and row["output"].get("reason"):
+            return {"status": "skipped", "reason": row["output"]["reason"]}
     final = stages["transcript_index"]
     if final["status"] == "succeeded":
         return final["output"]
@@ -281,9 +298,9 @@ def _speech(stages):
 
 
 def publish(ctx, claim):
-    """Join: publish whatever branch succeeded into the read model; failed branches keep the old index."""
+    """Join + the only visible publication of a video/transcript job, fenced by jobs.seq."""
     job = claim["job"]
-    job_id, video_id = job["job_id"], job["video_id"]
+    job_id, video_id, fence = job["job_id"], job["video_id"], job["seq"]
     stages = ctx.repo.stages(job_id)
     vis = _branch(stages, "vision", "dependency_not_succeeded") if job["kind"] == "video" else None
     transcript = _speech(stages)
@@ -295,31 +312,138 @@ def publish(ctx, claim):
         status = "partial" if vis["status"] == "partial" or t in {"failed", "partial"} else "succeeded"
     else:
         status = "partial" if t in {"ready", "partial", "empty"} else "failed"
-    if t == "failed":
-        ctx.registry.update_video(video_id, transcript_status="failed", transcript_error=transcript.get("error"))
     error = transcript if t in {"failed", "partial"} else (vis if vis and vis.get("status") == "failed" else {})
     result = dict(vis["result"]) if vision_ok else {}
-    vision_state = ({"status": vis["status"]} if vision_ok else
-                    (vis if vis else {"status": "not_requested"}))
+    vision_state = ({"status": vis["status"]} if vision_ok else (vis if vis else {"status": "not_requested"}))
     result.update(video_id=video_id, stages={"vision": vision_state, "transcript": transcript})
     row = ctx.registry.get(video_id)
     if vision_ok:
         row["active_generation"] = vis["generation"]
+    prep = stages["prepare"]
+    playback = prep["output"].get("playback_path") if prep["status"] == "succeeded" else None
+    if playback:
+        row["playback_path"] = playback
     result["capabilities"] = ctx.registry.public(row)["capabilities"]
-    # Idempotent: a re-run of publish (crash before the ledger commit) writes the same values.
     ctx.project(job)
-    ctx.registry.finish(video_id, job_id, status=status, result=result,
-                        error_code=error.get("error_code"), error=error.get("error"),
-                        vision_generation=vis["generation"] if vision_ok else None,
-                        fingerprint=vis["fingerprint"] if vision_ok else None)
+    # 1) transcript heads (their own fence), 2) every visible video field + the job row (registry fence).
+    #    Each store only moves forward in job order; a crash between them is repaired by re-running
+    #    this same publication, which writes identical values.
+    heads_moved = None
+    if t in {"ready", "partial", "empty"}:
+        heads_moved = ctx.transcript_store(video_id, job_id).publish_head(transcript["version"], fence=fence)
+    published = ctx.registry.publish_fenced(
+        video_id, job_id, fence=fence, status=status, result=result, error_code=error.get("error_code"),
+        error=error.get("error"), vision_generation=vis["generation"] if vision_ok else None,
+        fingerprint=vis["fingerprint"] if vision_ok else None, playback_path=playback,
+        transcript_status=t, transcript_error=transcript.get("error"))
+    if not published:
+        # A newer job already published: this (necessarily stale) attempt changes nothing visible.
+        ctx.registry.progress_job(job_id, status=status, phase="superseded")
     # Deferred cleanup: generations of vision attempts that did not win are never published.
     for attempt in ctx.repo.attempts(job_id):
         if attempt["stage"] == "vision" and not (vision_ok and attempt["attempt_token"] == vis["generation"]):
             ctx.drop_generation(video_id, attempt["attempt_token"])
     if job["kind"] == "video" and t in {"failed", "skipped"}:
         ctx.drop_generation(video_id, job_id)  # a transcript file this job created but never published
-    return StageResult({"status": status}, job_result={
-        "status": status, "result": result, "error_code": error.get("error_code"), "error": error.get("error")})
+    follow = []
+    if (published and job["kind"] == "video" and status in {"succeeded", "partial"}
+            and ctx.settings.study_auto_generate and ctx.study_model_configured):
+        follow.append({"kind": "notes", "request_id": f"auto-notes:{job_id}"})   # same transaction as the result
+    return StageResult({"status": status, "published": published, "transcript_heads_moved": heads_moved},
+                       job_result={"status": status, "result": result, "error_code": error.get("error_code"),
+                                   "error": error.get("error")},
+                       follow_up=follow)
 
 
-STAGES = {"prepare": prepare, "asr": asr, "transcript_index": transcript_index, "vision": vision, "publish": publish}
+# ---------------------------------------------------------------------------------------------
+def _study(ctx):
+    from vam.study import StudyService
+    return StudyService(ctx.study_indexing(), model=ctx.study_model)
+
+
+def notes_draft(ctx, claim):
+    """Study notes, one model call per batch; every validated batch is a checkpoint, so an interrupted
+    job resumes at the first missing batch (and never pays twice for a verified batch)."""
+    job, token = claim["job"], claim["stage"]["attempt_token"]
+    video_id = job["video_id"]
+    study = _study(ctx)
+    try:
+        row, versions, records = asyncio.run(study.corpus(video_id))
+        batches = study.batches(records)
+    except DomainError as exc:
+        raise StageError(exc.code, exc.message, transient=False) from exc
+    ctx.project(job, status="running", phase="generating", total=len(batches))
+    identity = ctx.study_identity()
+    work, chapters, stats = ctx.workdir(token), [], {"reused": 0, "computed": 0}
+    for index, batch in enumerate(batches):
+        reuse_key = "notes:" + sha256_hex(canonical([identity, STAGE_CODE_VERSION["notes"],
+                                                     [(e["evidence_id"], e["text"]) for e in batch]]))
+        hit, drafted = ctx.repo.checkpoint(reuse_key), None
+        if hit:
+            try:
+                drafted = ctx.fetch_json({"key": hit["object_key"], "sha256": hit["sha256"]}, work / f"notes-{index}.json")
+                stats["reused"] += 1
+            except StageError as exc:
+                if exc.transient:
+                    raise
+                ctx.repo.drop_checkpoint(reuse_key, hit["object_key"])
+        if drafted is None:
+            try:
+                drafted = asyncio.run(study.draft(batch))
+            except ValueError as exc:   # invalid/incomplete model output: a new attempt may succeed
+                raise StageError("study_invalid_output", str(exc)[:300], transient=True) from exc
+            except DomainError as exc:
+                raise StageError(exc.code, exc.message, transient=exc.status >= 500) from exc
+            ref = ctx.put_json(ctx.artifact_key(job, "notes_draft", token, f"batch-{index}.json"), drafted,
+                               work / f"notes-{index}.json")
+            ctx.repo.save_checkpoint(reuse_key, ref["key"], ref["sha256"], ref["size"], token)
+            stats["computed"] += 1
+            fault(f"after_notes_batch:{index}")
+        chapters.extend(drafted)
+        ctx.project(job, current=index + 1)
+    chapters.sort(key=lambda c: (c["start_t"], c["end_t"]))
+    content = {"title": row["original_name"], "chapters": chapters, "evidence": records,
+               "warnings": ["AI 生成笔记，请结合原视频核对；语音文稿可能存在识别误差。"]}
+    ref = ctx.put_json(ctx.artifact_key(job, "notes_draft", token, "notes.json"),
+                       {"versions": versions, "content": content}, work / "notes.json")
+    return StageResult({"notes": ref, "batches": stats})
+
+
+def notes_publish(ctx, claim):
+    """Idempotent publication of the notes artifact (deterministic id, ordered by job creation time)."""
+    job, token = claim["job"], claim["stage"]["attempt_token"]
+    draft = ctx.repo.stages(job["job_id"])["notes_draft"]["output"]
+    payload = ctx.fetch_json(draft["notes"], ctx.workdir(token) / "notes.json")
+    ctx.project(job)
+    artifact_id = "a_" + job["job_id"]
+    ctx.registry.publish_study_artifact(job["video_id"], job["job_id"], artifact_id=artifact_id,
+                                        versions=payload["versions"], content=payload["content"],
+                                        created_at=job["created_at"].timestamp())
+    return StageResult({"artifact_id": artifact_id})
+
+
+EXPORT_TYPES = {"md": "text/markdown; charset=utf-8", "pdf": "application/pdf",
+                "pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation"}
+
+
+def export(ctx, claim):
+    """Render a finished study artifact into object storage; the API serves it by reference."""
+    from vam.study_exports import export_study
+    job, token = claim["job"], claim["stage"]["attempt_token"]
+    params = job["params"] if isinstance(job["params"], dict) else json.loads(job["params"])
+    artifact_id, fmt = params["artifact_id"], params["format"]
+    try:
+        artifact = _study(ctx).artifact(job["video_id"], artifact_id)
+        content = export_study(artifact, fmt, ctx.settings.study_max_export_pages)
+    except DomainError as exc:
+        raise StageError(exc.code, exc.message, transient=False) from exc
+    path = ctx.workdir(token) / f"export.{fmt}"
+    path.write_bytes(content.encode("utf-8") if isinstance(content, str) else content)
+    ref = ctx.put_artifact(ctx.artifact_key(job, "export", token, f"EviReel-{artifact_id}.{fmt}"), path, EXPORT_TYPES[fmt])
+    return StageResult({"export": ref, "format": fmt, "content_type": EXPORT_TYPES[fmt],
+                        "filename": f"EviReel-{artifact_id}.{fmt}"},
+                       job_result={"status": "succeeded", "result": {"artifact_id": artifact_id, "format": fmt}})
+
+
+STAGES = {"prepare": prepare, "audio": audio, "asr": asr, "transcript_index": transcript_index, "vision": vision,
+          "publish": publish, "notes_draft": notes_draft, "notes_publish": notes_publish, "export": export}

@@ -23,12 +23,15 @@ logger = logging.getLogger(__name__)
 class Dispatcher:
     def __init__(self, settings, app=None):
         from vam.pipeline.celery_app import app as default_app
+        from vam.platform import build_platform
         self.settings = settings
-        db = PlatformDB(settings.database_url)
-        db.require_schema()
-        self.repo = JobRepository(db, settings)
+        platform = build_platform(settings)
+        self.db, self.store = platform.db, platform.store
+        self.prefix = (settings.s3_key_prefix.strip("/") + "/" if settings.s3_key_prefix.strip("/") else "") + "pipeline/"
+        self.repo = JobRepository(self.db, settings)
         self.app = app or default_app
         self.last_scan = 0.0
+        self.last_sweep = time.monotonic()
 
     def send(self, row):
         fault("dispatcher_before_publish")
@@ -42,6 +45,13 @@ class Dispatcher:
         if time.monotonic() - self.last_scan >= max(self.settings.pipeline_dispatch_interval_s * 5, 2):
             summary |= self.repo.scan()
             self.last_scan = time.monotonic()
+        if time.monotonic() - self.last_sweep >= self.settings.pipeline_sweep_interval_s:
+            from vam.pipeline.sweep import sweep_orphans
+            summary |= {"orphans": sweep_orphans(self.db, self.store, self.prefix,
+                                                 self.settings.pipeline_orphan_grace_s)["orphans"]}
+            from vam.platform.cleanup import ObjectCleaner
+            summary["objects_deleted"] = ObjectCleaner(self.db, self.store).drain()
+            self.last_sweep = time.monotonic()
         return summary
 
     def run(self):
@@ -63,7 +73,7 @@ def main(argv=None):
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
     dispatcher = Dispatcher(get_settings())
     if args.once:
-        dispatcher.last_scan = -1e9
+        dispatcher.last_scan = dispatcher.last_sweep = -1e9
         print(dispatcher.once())
     else:
         dispatcher.run()
