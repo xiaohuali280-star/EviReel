@@ -46,7 +46,8 @@ services:
       - mqdata:/var/lib/rabbitmq
       - ./rabbitmq.conf:/etc/rabbitmq/conf.d/90-evireel.conf:ro
     healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "-q", "check_port_connectivity"]
+      # Port open is not enough after a restart: also require the app and the vhosts to be running.
+      test: ["CMD-SHELL", "rabbitmq-diagnostics -q check_running && rabbitmq-diagnostics -q check_port_connectivity && rabbitmq-diagnostics -q check_virtual_hosts"]
       interval: 5s
       timeout: 10s
       retries: 30

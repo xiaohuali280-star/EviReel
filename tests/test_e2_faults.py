@@ -42,9 +42,9 @@ class Stack:
         from vam.config import Settings
         from vam.server.app import create_app
         self.tmp = tmp_path
-        self.values = e2_values(tmp_path, infra, broker_url=BROKER, pipeline_lease_s=6, pipeline_redispatch_after_s=5,
-                                pipeline_dispatch_interval_s=0.2, pipeline_retry_base_s=0.5, pipeline_retry_cap_s=2,
-                                **overrides)
+        values = dict(broker_url=BROKER, pipeline_lease_s=6, pipeline_redispatch_after_s=5, pipeline_dispatch_interval_s=0.2,
+                      pipeline_retry_base_s=0.5, pipeline_retry_cap_s=2)
+        self.values = e2_values(tmp_path, infra, **(values | overrides))
         self.settings = Settings(**self.values)
         monkeypatch.setattr(config, "_settings", self.settings)
         self.counters = tmp_path / "counters"
@@ -57,8 +57,16 @@ class Stack:
         self._purge()
 
     def _purge(self):
+        """Drop leftovers of earlier tests (they would only be no-ops: their jobs are in other databases).
+        Retried: right after a broker restart the port is open before the vhost accepts connections."""
         from vam.pipeline.celery_app import make_app
-        make_app(self.settings).control.purge()   # leftovers of earlier tests never reach this test's DB anyway
+        for attempt in range(30):
+            try:
+                make_app(self.settings).control.purge()
+                return
+            except Exception:
+                time.sleep(1)
+        raise RuntimeError("RabbitMQ did not accept connections for queue purge")
 
     def env(self, extra=None):
         env = dict(os.environ) | env_for(self.values)
@@ -192,18 +200,33 @@ def test_asr_result_is_kept_when_the_worker_dies_after_commit_before_ack(stack, 
         assert re.search(r"WorkerLostError|Process .* exited", s.log("worker"))
 
 
-# 3b/4a. ASR output uploaded, worker killed before the ledger commit: the restart reuses the checkpoint.
+# 3b/4a. ASR product uploaded and its checkpoint recorded, worker killed before the stage commit:
+#        the restart reuses the verified checkpoint instead of transcribing again.
 def test_asr_checkpoint_is_reused_after_a_kill_between_upload_and_commit(stack, video):
     s = stack()
     with TestClient(s.app) as client:
         _, view = submit(s, client, video)
-        s.worker(VAM_PIPELINE_FAULT="after_asr_upload")
+        s.worker(VAM_PIPELINE_FAULT="before_commit:asr")
         s.dispatcher()
         assert s.wait_job(view["job_id"])["status"] == "succeeded"
         attempts = s.attempts(view["job_id"], "asr")
         assert [a["outcome"] for a in attempts] == ["lease_lost", "succeeded"]
         assert calls(s.counters, "transcribe") == 1                      # ASR ran once in total
         assert s.stage(view["job_id"], "asr")["output"]["reused"] is True
+
+
+# The narrower window between the object upload and the checkpoint row: no reusable product is
+# recorded, so ASR runs again (bounded extra cost); the unreferenced object is cleanup debt.
+def test_kill_between_asr_upload_and_checkpoint_recomputes_once(stack, video):
+    s = stack()
+    with TestClient(s.app) as client:
+        _, view = submit(s, client, video)
+        s.worker(VAM_PIPELINE_FAULT="after_asr_upload")
+        s.dispatcher()
+        assert s.wait_job(view["job_id"])["status"] == "succeeded"
+        assert [a["outcome"] for a in s.attempts(view["job_id"], "asr")] == ["lease_lost", "succeeded"]
+        assert calls(s.counters, "transcribe") == 2
+        assert s.stage(view["job_id"], "asr")["output"]["reused"] is False
 
 
 # 4b. Vision index written (attempt-keyed generation), worker killed before commit; and a kill after
