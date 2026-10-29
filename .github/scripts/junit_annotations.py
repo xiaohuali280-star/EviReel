@@ -10,7 +10,24 @@ def emit(title, text, limit=3500):
     print(f"::error title={title}::{text}")
 
 
+def summary(paths, require_no_skips):
+    """Publish executed/failed/skipped counts as notices; optionally fail when anything was skipped."""
+    bad = False
+    for path in map(Path, paths):
+        root = ET.parse(path).getroot()
+        suite = root if root.tag == "testsuite" else root.find("testsuite")
+        counts = {k: int(suite.get(k, 0)) for k in ("tests", "failures", "errors", "skipped")}
+        print(f"::notice title=junit {path.name}::" + " ".join(f"{k}={v}" for k, v in counts.items()))
+        bad |= require_no_skips and counts["skipped"] > 0
+    if bad:
+        print("::error title=skipped tests::fault tests must run, not skip, in this job")
+        sys.exit(1)
+
+
 def main():
+    if sys.argv[1] == "--summary":
+        args = [a for a in sys.argv[2:] if a != "--no-skips"]
+        return summary(args, "--no-skips" in sys.argv)
     result, log_root = Path(sys.argv[1]), Path(sys.argv[2]) if len(sys.argv) > 2 else None
     if not result.exists():
         emit("junit", f"{result} missing")

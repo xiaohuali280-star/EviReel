@@ -72,6 +72,11 @@ jobs:
       - name: Report failures as annotations
         if: failure() && steps.faults.outcome == 'failure'
         run: python .github/scripts/junit_annotations.py e2-fault-results.xml e2-fault-tmp
+      - name: Executed-test counts (public notices); fault tests must not be skipped
+        if: ${{ !cancelled() }}
+        run: |
+          python .github/scripts/junit_annotations.py --summary e2-pipeline-results.xml
+          python .github/scripts/junit_annotations.py --summary --no-skips e2-fault-results.xml
       - name: E1 regression on the same middleware
         if: ${{ !cancelled() }}
         run: python -m pytest tests/test_e1_unit.py tests/test_e1_platform.py -q -rs
