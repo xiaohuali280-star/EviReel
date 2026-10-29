@@ -121,6 +121,8 @@ def asr(ctx, claim):
     ref = ctx.put_json(ctx.artifact_key(job, "asr", token, "segments.json"), payload, work / "segments.json")
     fault("after_asr_upload")
     winner = ctx.repo.save_checkpoint(reuse_key, ref["key"], ref["sha256"], ref["size"], token)
+    if winner is None:   # our upload was claimed by the orphan sweep while we were paused: never reference it
+        raise StageError("artifact_reclaimed", "The uploaded ASR product was reclaimed; re-running", transient=True)
     ref = {"key": winner["object_key"], "sha256": winner["sha256"]}
     return StageResult({"asr": ref, "transcription_key": transcription_key, "asr_identity": asr_identity, "reused": False})
 
@@ -184,6 +186,8 @@ def transcript_index(ctx, claim):
                 batch = {"dim": batch_dim, "vectors": batch_vectors}
                 ref = ctx.put_json(ctx.artifact_key(job, "transcript_index", token, f"emb-{index}.json"), batch,
                                    work / f"emb-{index}.json")
+                # None = the object was reclaimed meanwhile: the vectors in hand are still valid, only
+                # not reusable later (the object is not referenced and will be deleted).
                 ctx.repo.save_checkpoint(reuse_key, ref["key"], ref["sha256"], ref["size"], token)
                 stats["computed"] += 1
                 fault(f"after_embed_batch:{index}")
@@ -298,9 +302,10 @@ def _speech(stages):
 
 
 def publish(ctx, claim):
-    """Join + the only visible publication of a video/transcript job, fenced by jobs.seq."""
+    """Join: DECIDE the job's outcome. Writes nothing visible: the decision becomes the job's final state
+    through the attempt-token-guarded ledger commit, and only `project` applies it to the read model."""
     job = claim["job"]
-    job_id, video_id, fence = job["job_id"], job["video_id"], job["seq"]
+    job_id, video_id = job["job_id"], job["video_id"]
     stages = ctx.repo.stages(job_id)
     vis = _branch(stages, "vision", "dependency_not_succeeded") if job["kind"] == "video" else None
     transcript = _speech(stages)
@@ -324,35 +329,70 @@ def publish(ctx, claim):
     if playback:
         row["playback_path"] = playback
     result["capabilities"] = ctx.registry.public(row)["capabilities"]
+    decision = {"status": status, "error_code": error.get("error_code"), "error": error.get("error"),
+                "vision_generation": vis["generation"] if vision_ok else None,
+                "fingerprint": vis["fingerprint"] if vision_ok else None, "playback_path": playback,
+                "transcript": {"status": t, "version": transcript.get("version"), "error": transcript.get("error")}}
+    follow = []
+    if (job["kind"] == "video" and status in {"succeeded", "partial"}
+            and ctx.settings.study_auto_generate and ctx.study_model_configured):
+        follow.append({"kind": "notes", "request_id": f"auto-notes:{job_id}"})   # same transaction as the decision
+    return StageResult({"decision": decision}, follow_up=follow,
+                       job_result={"status": status, "result": result, "error_code": error.get("error_code"),
+                                   "error": error.get("error")})
+
+
+def job_fence(job) -> int:
+    """Projection fence: jobs.seq. Projections are derived only from the committed ledger, so every
+    attempt of one job writes identical values; the fence only has to order different jobs."""
+    return int(job["seq"])
+
+
+def project(ctx, claim):
+    """Final stage of every video/transcript/notes job: apply the ledger's committed outcome to the
+    read model (SQLite registry, transcript heads, study_jobs). Runs after publish whatever happened
+    (succeeded, failed, or failed by the scanner after a lost worker); idempotent and fenced by job order."""
+    job = claim["job"]
+    job_id, video_id, fence = job["job_id"], job["video_id"], job_fence(job)
+    stages = ctx.repo.stages(job_id)
+    if job["kind"] == "notes":
+        published = stages["notes_publish"]
+        if published["status"] == "succeeded":
+            ctx.registry.publish_study_artifact_state(job_id, published["output"]["artifact_id"])
+            return StageResult({"status": "succeeded"})
+        failed = next((s for s in (stages["notes_draft"], published) if s["status"] == "failed"), None)
+        code = failed["error_code"] if failed else "study_generation_failed"
+        ctx.project(job)
+        ctx.registry.finish_study_job(job_id, status="failed", error_code=code)
+        return StageResult({"status": "failed", "error_code": code})
     ctx.project(job)
-    # 1) transcript heads (their own fence), 2) every visible video field + the job row (registry fence).
-    #    Each store only moves forward in job order; a crash between them is repaired by re-running
-    #    this same publication, which writes identical values.
+    decided = stages["publish"]
+    if decided["status"] != "succeeded":   # the ledger failed the job (worker error or attempts exhausted)
+        ledger = ctx.repo.job(job_id)
+        published = ctx.registry.publish_fenced(video_id, job_id, fence=fence, status="failed", result={},
+                                                error_code=ledger["error_code"] or decided["error_code"],
+                                                error=ledger["error"] or decided["error"])
+        return StageResult({"status": "failed", "published": published})
+    d = decided["output"]["decision"]
     heads_moved = None
-    if t in {"ready", "partial", "empty"}:
-        heads_moved = ctx.transcript_store(video_id, job_id).publish_head(transcript["version"], fence=fence)
+    if d["transcript"]["status"] in {"ready", "partial", "empty"}:
+        heads_moved = ctx.transcript_store(video_id, job_id).publish_head(d["transcript"]["version"], fence=fence)
+    ledger = ctx.repo.job(job_id)
     published = ctx.registry.publish_fenced(
-        video_id, job_id, fence=fence, status=status, result=result, error_code=error.get("error_code"),
-        error=error.get("error"), vision_generation=vis["generation"] if vision_ok else None,
-        fingerprint=vis["fingerprint"] if vision_ok else None, playback_path=playback,
-        transcript_status=t, transcript_error=transcript.get("error"))
+        video_id, job_id, fence=fence, status=d["status"], result=ledger["result"] or {}, error_code=d["error_code"],
+        error=d["error"], vision_generation=d["vision_generation"], fingerprint=d["fingerprint"],
+        playback_path=d["playback_path"], transcript_status=d["transcript"]["status"],
+        transcript_error=d["transcript"]["error"])
     if not published:
-        # A newer job already published: this (necessarily stale) attempt changes nothing visible.
-        ctx.registry.progress_job(job_id, status=status, phase="superseded")
+        ctx.registry.progress_job(job_id, status=d["status"], phase="superseded")   # a newer job already published
     # Deferred cleanup: generations of vision attempts that did not win are never published.
     for attempt in ctx.repo.attempts(job_id):
-        if attempt["stage"] == "vision" and not (vision_ok and attempt["attempt_token"] == vis["generation"]):
+        if attempt["stage"] == "vision" and attempt["attempt_token"] != d["vision_generation"]:
             ctx.drop_generation(video_id, attempt["attempt_token"])
-    if job["kind"] == "video" and t in {"failed", "skipped"}:
+    if job["kind"] == "video" and d["transcript"]["status"] in {"failed", "skipped"}:
         ctx.drop_generation(video_id, job_id)  # a transcript file this job created but never published
-    follow = []
-    if (published and job["kind"] == "video" and status in {"succeeded", "partial"}
-            and ctx.settings.study_auto_generate and ctx.study_model_configured):
-        follow.append({"kind": "notes", "request_id": f"auto-notes:{job_id}"})   # same transaction as the result
-    return StageResult({"status": status, "published": published, "transcript_heads_moved": heads_moved},
-                       job_result={"status": status, "result": result, "error_code": error.get("error_code"),
-                                   "error": error.get("error")},
-                       follow_up=follow)
+    return StageResult({"status": d["status"], "published": published, "transcript_heads_moved": heads_moved})
+
 
 
 # ---------------------------------------------------------------------------------------------
@@ -396,7 +436,7 @@ def notes_draft(ctx, claim):
                 raise StageError(exc.code, exc.message, transient=exc.status >= 500) from exc
             ref = ctx.put_json(ctx.artifact_key(job, "notes_draft", token, f"batch-{index}.json"), drafted,
                                work / f"notes-{index}.json")
-            ctx.repo.save_checkpoint(reuse_key, ref["key"], ref["sha256"], ref["size"], token)
+            ctx.repo.save_checkpoint(reuse_key, ref["key"], ref["sha256"], ref["size"], token)  # None: not reusable
             stats["computed"] += 1
             fault(f"after_notes_batch:{index}")
         chapters.extend(drafted)
@@ -446,4 +486,4 @@ def export(ctx, claim):
 
 
 STAGES = {"prepare": prepare, "audio": audio, "asr": asr, "transcript_index": transcript_index, "vision": vision,
-          "publish": publish, "notes_draft": notes_draft, "notes_publish": notes_publish, "export": export}
+          "publish": publish, "project": project, "notes_draft": notes_draft, "notes_publish": notes_publish, "export": export}

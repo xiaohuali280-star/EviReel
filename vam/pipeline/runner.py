@@ -74,11 +74,8 @@ def execute(ctx, job_id, stage) -> str:
             if stage == "vision":
                 ctx.drop_generation(job["video_id"], token)
             outcome = ctx.repo.fail(job_id, stage, token, code=error.code, message=error.message, transient=error.transient)
-            # Read-model projections only after the ledger accepted the failure from the *current* attempt,
-            # and fenced by the job sequence, so a stale attempt never marks a newer result failed.
-            if outcome == "failed" and stage == "publish":
-                ctx.registry.publish_fenced(job["video_id"], job_id, fence=job["seq"], status="failed", result={},
-                                            error_code=error.code, error=error.message)
+            # Terminal read-model state is written by the final `project` stage from the ledger (also when
+            # the scanner ends a job); this is only an early progress hint from the current attempt.
             if outcome == "failed" and job["kind"] == "notes":
                 ctx.registry.progress_study_job(job_id, status="failed", phase="failed", error_code=error.code)
             return outcome

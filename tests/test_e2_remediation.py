@@ -37,17 +37,18 @@ def test_stale_publish_of_an_older_job_cannot_roll_back_a_newer_publication(work
         assert drain_inline(ctx, second)["status"] == "succeeded"
         second_gen = alice.get(f"/api/videos/{view['video_id']}").json()["active_generation"]
         assert second_gen != first_gen
-        # The old publish executor (job 1) resumes now, after job 2 published: exactly the review scenario.
-        from vam.pipeline.stages import publish
-        old_claim = {"job": job_row(ctx.db, first), "stage": stage_rows(ctx.db, first)["publish"]}
-        result = publish(ctx, old_claim)
+        # Old executors of job 1 resume now, after job 2 published: publish only decides (writes nothing
+        # visible, and its ledger commit is rejected); a stale projection of job 1 is fenced out.
+        from vam.pipeline.stages import project, publish
+        old = publish(ctx, {"job": job_row(ctx.db, first), "stage": stage_rows(ctx.db, first)["publish"]})
+        assert ctx.repo.complete(first, "publish", "f" * 32, old.output) is False
+        assert alice.get(f"/api/videos/{view['video_id']}").json()["active_generation"] == second_gen
+        result = project(ctx, {"job": job_row(ctx.db, first), "stage": stage_rows(ctx.db, first)["project"]})
         assert result.output["published"] is False
         assert result.output["transcript_heads_moved"] is False
         assert alice.get(f"/api/videos/{view['video_id']}").json()["active_generation"] == second_gen
-        # ...and its ledger commit is rejected too (its token is no longer current).
-        assert ctx.repo.complete(first, "publish", "f" * 32, result.output) is False
-        # A re-run of the CURRENT job's publication is idempotent (PG/SQLite window recovery).
-        again = publish(ctx, {"job": job_row(ctx.db, second), "stage": stage_rows(ctx.db, second)["publish"]})
+        # A re-run of the CURRENT job's projection is idempotent (PG/SQLite window recovery).
+        again = project(ctx, {"job": job_row(ctx.db, second), "stage": stage_rows(ctx.db, second)["project"]})
         assert again.output["published"] is True
         assert alice.get(f"/api/videos/{view['video_id']}").json()["active_generation"] == second_gen
 
@@ -80,7 +81,7 @@ def test_audio_failure_does_not_stop_the_visual_branch(worker_app, media, monkey
         rows = stage_rows(app.state.pipeline.repo.db, view["job_id"])
         assert {s: r["status"] for s, r in rows.items()} == {
             "prepare": "succeeded", "audio": "failed", "asr": "skipped", "transcript_index": "skipped",
-            "vision": "succeeded", "publish": "succeeded"}
+            "vision": "succeeded", "publish": "succeeded", "project": "succeeded"}
         assert rows["audio"]["attempts"] == 2 and rows["vision"]["attempts"] == 1
         assert job["status"] == "partial" and job["error_code"] == "audio_timeout"
         detail = alice.get(f"/api/videos/{view['video_id']}").json()

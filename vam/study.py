@@ -65,7 +65,26 @@ class StudyService:
             row = conn.execute('SELECT * FROM study_jobs WHERE job_id=? AND video_id=?', (job_id, video_id)).fetchone()
         if not row:
             raise DomainError(404, 'study_job_not_found', 'Study job not found')
-        return dict(row)
+        return self._with_ledger(dict(row))
+
+    def _with_ledger(self, job):
+        """Worker mode: the PostgreSQL ledger decides the outcome; the SQLite row is a projection that the
+        final `project` stage writes. Until it has, a terminal ledger state overrides a stale mirror."""
+        pipeline = getattr(self.indexing, 'pipeline', None)
+        if pipeline is None or job['status'] not in ('queued', 'running'):
+            return job
+        try:
+            ledger = pipeline.repo.job(job['job_id'])
+            stages = pipeline.repo.stages(job['job_id'])
+        except DomainError:
+            return job
+        failed = next((s for s in stages.values() if s['status'] == 'failed'), None)
+        if ledger['status'] == 'failed' or failed:   # a failed notes stage already decides the outcome
+            code = (failed or {}).get('error_code') or ledger['error_code'] or 'study_generation_failed'
+            return job | {'status': 'failed', 'phase': 'failed', 'error_code': code}
+        if ledger['status'] == 'succeeded':
+            return job | {'status': 'succeeded', 'phase': 'done'}
+        return job
 
     def submit(self, video_id, request_id):
         if self.closed:
@@ -120,7 +139,7 @@ class StudyService:
         with self.registry.db.connect() as conn:
             job = conn.execute('SELECT * FROM study_jobs WHERE video_id=? ORDER BY created_at DESC LIMIT 1', (video_id,)).fetchone()
             artifact = conn.execute('SELECT * FROM study_artifacts WHERE video_id=? ORDER BY created_at DESC LIMIT 1', (video_id,)).fetchone()
-        return {'video_id': video_id, 'job': dict(job) if job else None,
+        return {'video_id': video_id, 'job': self._with_ledger(dict(job)) if job else None,
                 'artifact': self.public_artifact(artifact, row) if artifact else None,
                 'auto_enabled': self.settings.study_auto_generate,
                 'model_configured': bool(self.settings.api_key or self.model)}

@@ -24,34 +24,64 @@ def enqueue(conn, object_key, reason, *, video_id=None, upload_id=None):
         (object_key, reason, video_id, upload_id))
 
 
+def lock_key(conn, object_key):
+    """Per-object mutual exclusion (transaction-scoped): new references (checkpoint registration),
+    deletion intents (sweep enqueue) and the final delete of one key are serialized by this lock."""
+    conn.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s, 7031))", (object_key,))
+
+
+def referenced(conn, object_key) -> str | None:
+    """Why an object must not be deleted, or None. Checked under lock_key, so it cannot change before
+    the delete completes (checkpoint registration takes the same lock and refuses queued keys)."""
+    if conn.execute("SELECT 1 FROM video_ownership WHERE object_key=%s", (object_key,)).fetchone():
+        return "video_ownership"
+    if conn.execute("SELECT 1 FROM checkpoints WHERE object_key=%s", (object_key,)).fetchone():
+        return "checkpoint"
+    if conn.execute("SELECT 1 FROM job_stages WHERE output IS NOT NULL AND strpos(output::text, %s) > 0 LIMIT 1",
+                    (f'"{object_key}"',)).fetchone():
+        return "stage_output"
+    return None
+
+
+def deletion_blocked(conn, object_key) -> bool:
+    """For new references: a key that is queued for deletion (or already deleted) must not be reused."""
+    return bool(conn.execute("SELECT 1 FROM object_deletions WHERE object_key=%s AND state IN ('pending','done')",
+                             (object_key,)).fetchone())
+
+
 class ObjectCleaner:
     def __init__(self, db, store):
         self.db, self.store = db, store
 
     def delete_now(self, object_key) -> bool:
-        """Try one deletion of a queued key; on failure the row stays pending for drain()."""
-        with self.db.connect() as conn:
-            if conn.execute("SELECT 1 FROM video_ownership WHERE object_key=%s", (object_key,)).fetchone():
-                # Never delete an object that some video still references.
-                self._finish(object_key, "skipped", "still_referenced")
+        """Try one deletion of a queued key; on failure the row stays pending for drain().
+
+        Runs entirely under the key's lock: re-check that nothing references the object, delete it,
+        record the outcome. A reference that appears later is impossible (registration of a queued
+        key is refused) and one that appeared earlier is seen here, so the row is skipped instead."""
+        with self.db.transaction() as conn:
+            lock_key(conn, object_key)
+            row = conn.execute("SELECT state FROM object_deletions WHERE object_key=%s FOR UPDATE", (object_key,)).fetchone()
+            if row is None or row["state"] != "pending":
                 return False
-        try:
-            self.store.delete(object_key)  # S3 DELETE is idempotent: a missing key also succeeds
-        except ObjectStoreError as exc:
-            with self.db.transaction() as conn:
+            reason = referenced(conn, object_key)
+            if reason:
+                note = "still_referenced" if reason == "video_ownership" else f"still_referenced:{reason}"
+                conn.execute("UPDATE object_deletions SET state='skipped', last_error=%s, attempts=attempts+1, done_at=now() "
+                             "WHERE object_key=%s", (note, object_key))
+                return False
+            try:
+                self.store.delete(object_key)  # S3 DELETE is idempotent: a missing key also succeeds
+            except ObjectStoreError as exc:
                 conn.execute(
                     "UPDATE object_deletions SET attempts=attempts+1, last_error=%s, next_attempt_at=now() + "
-                    "make_interval(secs => LEAST(%s, 5 * power(2, LEAST(attempts, 12)))) "
-                    "WHERE object_key=%s AND state='pending'", (str(exc)[:500] or type(exc).__name__, MAX_BACKOFF_S, object_key))
-            logger.warning("object_delete_deferred key=%s error=%s", object_key, type(exc).__name__)
-            return False
-        self._finish(object_key, "done", None)
-        return True
-
-    def _finish(self, object_key, state, note):
-        with self.db.transaction() as conn:
-            conn.execute("UPDATE object_deletions SET state=%s, last_error=COALESCE(%s, last_error), attempts=attempts+1, "
-                         "done_at=now() WHERE object_key=%s AND state='pending'", (state, note, object_key))
+                    "make_interval(secs => LEAST(%s, 5 * power(2, LEAST(attempts, 12)))) WHERE object_key=%s",
+                    (str(exc)[:500] or type(exc).__name__, MAX_BACKOFF_S, object_key))
+                logger.warning("object_delete_deferred key=%s error=%s", object_key, type(exc).__name__)
+                return False
+            conn.execute("UPDATE object_deletions SET state='done', attempts=attempts+1, done_at=now() WHERE object_key=%s",
+                         (object_key,))
+            return True
 
     def drain(self, limit=100) -> int:
         with self.db.connect() as conn:

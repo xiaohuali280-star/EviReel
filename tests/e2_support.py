@@ -91,7 +91,9 @@ def drain_inline(ctx, job_id, *, timeout=120, before_execute=None):
                 before_execute(row)
             execute(ctx, row["job_id"], row["stage"])
         job = job_row(ctx.db, job_id)
-        if job["status"] in {"succeeded", "partial", "failed"}:
+        # The ledger decides at publish; the final `project` stage then applies it to the read model.
+        if job["status"] in {"succeeded", "partial", "failed"} and all(
+                s["status"] in {"succeeded", "failed", "skipped"} for s in stage_rows(ctx.db, job_id).values()):
             return job
         if not sent:
             ctx.repo.scan()

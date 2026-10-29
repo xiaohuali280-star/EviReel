@@ -3,6 +3,8 @@ its stages and the first outbox row in one PostgreSQL transaction, mirrors the j
 SQLite read model, and returns. Nothing here runs media or model work."""
 from __future__ import annotations
 
+import json
+
 from vam.pipeline.repository import JobRepository
 
 
@@ -54,7 +56,11 @@ class PipelineClient:
         if job["status"] not in {"failed", "partial"}:
             from vam.video_registry import DomainError
             raise DomainError(409, "job_not_retryable", "Only failed or partial jobs can be retried")
-        return self.submit(job["video_id"], kind=job["kind"], request_id=f"retry:{job_id}")
+        # Business parameters of the original job (e.g. an export's artifact and format) carry over;
+        # kind/video_id are re-derived by submit(), never copied from the stored params.
+        params = job["params"] if isinstance(job["params"], dict) else json.loads(job["params"])
+        business = {k: v for k, v in params.items() if k not in {"kind", "video_id"}}
+        return self.submit(job["video_id"], kind=job["kind"], request_id=f"retry:{job_id}", params=business or None)
 
     def describe(self, job_id) -> dict:
         job = self.repo.job(job_id)

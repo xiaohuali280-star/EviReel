@@ -189,6 +189,18 @@ class VideoRegistry:
             conn.execute("UPDATE study_jobs SET status='succeeded',phase='done',artifact_id=?,updated_at=? WHERE job_id=?",
                          (artifact_id, time.time(), job_id))
 
+    def publish_study_artifact_state(self, job_id, artifact_id):
+        """Ledger-derived terminal state of a successful notes job (idempotent)."""
+        with self.db.connect(write=True) as conn:
+            conn.execute("UPDATE study_jobs SET status='succeeded',phase='done',artifact_id=?,error_code=NULL,updated_at=? "
+                         "WHERE job_id=?", (artifact_id, time.time(), job_id))
+
+    def finish_study_job(self, job_id, *, status, error_code=None):
+        """Ledger-derived terminal state of a notes job that did not publish (idempotent)."""
+        with self.db.connect(write=True) as conn:
+            conn.execute("UPDATE study_jobs SET status=?,phase=?,error_code=?,updated_at=? WHERE job_id=?",
+                         (status, status, error_code, time.time(), job_id))
+
     def progress_job(self, job_id, **fields):
         """Worker progress: never reopens a job row that already reached a final state."""
         allowed = {"status", "phase", "current", "total", "error", "error_code"}

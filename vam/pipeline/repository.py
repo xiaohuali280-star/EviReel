@@ -361,9 +361,16 @@ class JobRepository:
         with self.db.connect() as conn:
             return conn.execute("SELECT * FROM checkpoints WHERE reuse_key=%s", (reuse_key,)).fetchone()
 
-    def save_checkpoint(self, reuse_key, object_key, sha256, size, token) -> dict:
-        """First verified product wins; returns the winning row (a loser's object becomes cleanup debt)."""
+    def save_checkpoint(self, reuse_key, object_key, sha256, size, token) -> dict | None:
+        """First verified product wins; returns the winning row (a loser's object becomes cleanup debt).
+        Returns None when this object is already queued for deletion (e.g. a paused attempt resumed after
+        the orphan sweep claimed its upload): the caller must re-produce the product under a new key.
+        Serialized with the sweep and the final delete by the object's lock (vam.platform.cleanup)."""
+        from vam.platform.cleanup import deletion_blocked, lock_key
         with self.db.transaction() as conn:
+            lock_key(conn, object_key)
+            if deletion_blocked(conn, object_key):
+                return None
             conn.execute("INSERT INTO checkpoints(reuse_key, object_key, sha256, size_bytes, attempt_token) "
                          "VALUES (%s,%s,%s,%s,%s) ON CONFLICT (reuse_key) DO NOTHING",
                          (reuse_key, object_key, sha256, size, token))

@@ -115,8 +115,13 @@ class Stack:
 
     def wait_job(self, job_id, timeout=240):
         db = self.app.state.pipeline.repo.db
-        return self.wait(lambda: (row := job_row(db, job_id)) and row["status"] in {"succeeded", "partial", "failed"} and row,
-                         timeout, f"job {job_id} -> {stage_rows(db, job_id)}")
+
+        def done():   # decided by the ledger AND projected (every stage terminal, incl. `project`)
+            row = job_row(db, job_id)
+            stages = stage_rows(db, job_id).values()
+            return row["status"] in {"succeeded", "partial", "failed"} and all(
+                s["status"] in {"succeeded", "failed", "skipped"} for s in stages) and row
+        return self.wait(done, timeout, f"job {job_id} -> {stage_rows(db, job_id)}")
 
     def stage(self, job_id, name):
         return stage_rows(self.app.state.pipeline.repo.db, job_id)[name]

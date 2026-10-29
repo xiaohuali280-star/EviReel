@@ -8,13 +8,19 @@ the pipeline prefix only when ALL hold:
   * not referenced by any stage output (the products of every committed stage);
   * not produced by an attempt whose stage is still running (its token is part of the key).
 Deletion goes through the durable queue (vam.platform.cleanup), so a storage failure retries.
+
+Protocol per key (all under the key's advisory lock, see vam.platform.cleanup.lock_key):
+  enqueue      only if still unreferenced at that moment;
+  checkpoint   registration is refused once the key is queued (the caller re-produces elsewhere);
+  delete       re-checks references, deletes and records the outcome in one locked transaction.
+So no reference can be added to a key that is being reclaimed, and a referenced key is never deleted.
 """
 from __future__ import annotations
 
 import re
 import time
 
-from vam.platform.cleanup import ObjectCleaner, enqueue
+from vam.platform.cleanup import ObjectCleaner, enqueue, lock_key, referenced
 
 TOKEN = re.compile(r"/([0-9a-f]{32})/[^/]+$")
 
@@ -41,11 +47,20 @@ def sweep_orphans(db, store, prefix, grace_s, now=None) -> dict:
         if token and token.group(1) in running:
             continue
         orphans.append(key)
-    if orphans:
+    queued = []
+    for key in orphans:
+        # The snapshot above is only a candidate list: re-check under the key's lock (the same lock a
+        # checkpoint registration takes), so a reference committed since the snapshot wins.
         with db.transaction() as conn:
-            for key in orphans:
-                enqueue(conn, key, "pipeline_orphan")
-        cleaner = ObjectCleaner(db, store)
-        for key in orphans:
-            cleaner.delete_now(key)
-    return {"listed": len(listed), "orphans": len(orphans)}
+            lock_key(conn, key)
+            token = TOKEN.search(key)
+            live = token and conn.execute("SELECT 1 FROM job_stages WHERE status='running' AND attempt_token=%s",
+                                          (token.group(1),)).fetchone()
+            if referenced(conn, key) or live:
+                continue
+            enqueue(conn, key, "pipeline_orphan")
+            queued.append(key)
+    cleaner = ObjectCleaner(db, store)
+    for key in queued:
+        cleaner.delete_now(key)
+    return {"listed": len(listed), "orphans": len(queued)}

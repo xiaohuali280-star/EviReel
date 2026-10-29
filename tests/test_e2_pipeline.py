@@ -63,7 +63,7 @@ def test_upload_is_accepted_durably_without_running_anything_in_the_api(worker_a
         stages = stage_rows(app.state.pipeline.repo.db, view["job_id"])
         assert {s: r["status"] for s, r in stages.items()} == {
             "prepare": "pending", "audio": "waiting", "asr": "waiting", "transcript_index": "waiting",
-            "vision": "waiting", "publish": "waiting"}
+            "vision": "waiting", "publish": "waiting", "project": "waiting"}
         with app.state.pipeline.repo.db.connect() as conn:
             outbox = conn.execute("SELECT dedupe_key, queue, status FROM outbox_events").fetchall()
         assert outbox == [{"dedupe_key": f"{view['job_id']}:prepare:1", "queue": "media", "status": "pending"}]
@@ -342,5 +342,6 @@ def test_jobs_survive_an_api_restart_and_deletion_waits_for_them(worker_app, med
             assert conn.execute("SELECT status FROM index_jobs WHERE job_id=?", (view["job_id"],)).fetchone()[0] == "queued"
         ctx = make_ctx()
         assert drain_inline(ctx, view["job_id"])["status"] == "succeeded"
-        assert stage_rows(ctx.db, view["job_id"])["publish"]["output"] == {
-            "status": "succeeded", "published": True, "transcript_heads_moved": True}
+        stages = stage_rows(ctx.db, view["job_id"])
+        assert stages["publish"]["output"]["decision"]["status"] == "succeeded"
+        assert stages["project"]["output"] == {"status": "succeeded", "published": True, "transcript_heads_moved": True}

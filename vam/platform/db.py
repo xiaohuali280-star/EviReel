@@ -9,7 +9,7 @@ from contextlib import contextmanager
 from pathlib import Path
 import re
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 MIGRATIONS = Path(__file__).parent / "migrations"
 
 
