@@ -60,12 +60,23 @@ jobs:
       - name: Schema migration dry-run (fresh database)
         run: python -m vam.platform.migrate --database-url "$EVIREEL_TEST_DATABASE_URL" schema --dry-run
       - name: E2 ledger/stage tests (real PostgreSQL + MinIO, in-process runner)
+        id: ledger
         run: python -m pytest tests/test_e2_pipeline.py -v -rs --junitxml=e2-pipeline-results.xml
+      - name: Report ledger failures as annotations
+        if: failure() && steps.ledger.outcome == 'failure'
+        run: python .github/scripts/junit_annotations.py e2-pipeline-results.xml
       - name: E2 failure tests (real RabbitMQ, separate dispatcher/Celery worker processes, kill -9)
+        id: faults
+        if: ${{ !cancelled() }}
         run: python -m pytest tests/test_e2_faults.py -v -rs --junitxml=e2-fault-results.xml --basetemp=e2-fault-tmp
+      - name: Report failures as annotations
+        if: failure() && steps.faults.outcome == 'failure'
+        run: python .github/scripts/junit_annotations.py e2-fault-results.xml e2-fault-tmp
       - name: E1 regression on the same middleware
+        if: ${{ !cancelled() }}
         run: python -m pytest tests/test_e1_unit.py tests/test_e1_platform.py -q -rs
       - name: Container stack smoke (built image; migrate, API, dispatcher, long/short workers)
+        if: ${{ !cancelled() }}
         run: |
           $COMPOSE up -d --build --wait --wait-timeout 600
           $COMPOSE ps
