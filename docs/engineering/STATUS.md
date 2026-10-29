@@ -1,6 +1,8 @@
 # 工程状态
 
-更新：2026-10-29　阶段：**E2 进行中**：代码与本机验证已完成，Linux 真实故障测试见下表 E2-C。E1 已验收（历史记录见下文）
+更新：2026-10-29　阶段：**E2 已交付**：本机真实 PG/MinIO 验证通过；Linux 真实 RabbitMQ + 独立 Worker 的 13 个故障场景全部执行并通过。未迁移项见下文，待独立验收。E1 已验收（历史记录见下文）
+
+当前提交：E2 实现 `866e8bf` → 修复 `2d8309f` → CI 计数 `85a8278`，文档见其后的提交。
 
 ## E2：可靠异步处理（`12a16ee` 之后）
 设计、启动、迁移与回退见 `E2_DELIVERY.md`。
@@ -37,8 +39,8 @@
 | 检查 | 结果 |
 | --- | --- |
 | E1 回归基线（改造前，`12a16ee`）`test_e1_unit` + `test_e1_platform` | 24 passed |
-| `tests/test_e2_pipeline.py`，11 个场景：<br>• 持久受理（API 不执行任何计算）<br>• request id 幂等、参数冲突返回 409、并发重复提交只建一个任务、每个视频只有一个活动任务<br>• 8 线程并发认领只有一个赢家；租约过期后接管，旧 token 的完成/失败/心跳全部被拒<br>• 两分支并发完成，汇合只激活一次（publish 的 outbox 只有 1 条）<br>• 退避窗口内不能认领；次数用尽后失败，依赖阶段被跳过，失败台账有记录<br>• 扫描能重新投递“已投递未消费”的阶段和租约过期的阶段<br>• broker 报错时 outbox 保留并退避；“已确认、未标记”后重发，重复投递只执行一次<br>• 两条分支端到端发布（播放/Range、字幕、视觉索引）；仅转写任务复用 ASR 检查点与全部 Embedding 批次（转写只调用 1 次）<br>• Embedding 第 3 批失败后重试，复用前 2 批（共 4 次调用）<br>• 视觉失败时任务为 partial，旧 `active_generation` 和字幕保留，失败代次被删除；人工重试幂等且成功；失败台账可查<br>• API 重启后任务仍为 queued，可继续完成；活动任务期间不能删除视频 | **11 passed**（69 s） |
-| 全量 `pytest tests` | **250 passed, 12 skipped**（12 个是 E2-C 的故障测试：本机不是 Linux，也没有 RabbitMQ） |
+| `tests/test_e2_pipeline.py`，12 个场景（包括 CI 发现缺陷后补的“ASR 失败时任务为 partial、保留视觉”）：<br>• 持久受理（API 不执行任何计算）<br>• request id 幂等、参数冲突返回 409、并发重复提交只建一个任务、每个视频只有一个活动任务<br>• 8 线程并发认领只有一个赢家；租约过期后接管，旧 token 的完成/失败/心跳全部被拒<br>• 两分支并发完成，汇合只激活一次（publish 的 outbox 只有 1 条）<br>• 退避窗口内不能认领；次数用尽后失败，依赖阶段被跳过，失败台账有记录<br>• 扫描能重新投递“已投递未消费”的阶段和租约过期的阶段<br>• broker 报错时 outbox 保留并退避；“已确认、未标记”后重发，重复投递只执行一次<br>• 两条分支端到端发布（播放/Range、字幕、视觉索引）；仅转写任务复用 ASR 检查点与全部 Embedding 批次（转写只调用 1 次）<br>• Embedding 第 3 批失败后重试，复用前 2 批（共 4 次调用）<br>• 视觉失败时任务为 partial，旧 `active_generation` 和字幕保留，失败代次被删除；人工重试幂等且成功；失败台账可查<br>• API 重启后任务仍为 queued，可继续完成；活动任务期间不能删除视频 | **12 passed**（75 s） |
+| 全量 `pytest tests`（最终代码） | **251 passed, 13 skipped**（13 个是 E2-C 的故障测试：本机不是 Linux，也没有 RabbitMQ，所以跳过；这些测试在 CI 上执行） |
 
 **E2-B 测试替身**：模型由 `tests/e2_factory.py` 代替（颜色/关键词向量、固定 ASR 片段），只证明流水线逻辑，不代表真实模型的效果或成本。
 
@@ -46,8 +48,18 @@
 
 | 检查 | 结果 |
 | --- | --- |
-| `tests/test_e2_faults.py`，12 个场景（任务提交后、投递前发布器崩溃；broker 已确认但 outbox 未标记时发布器崩溃；ASR 提交后、ACK 前子进程被杀；ASR 上传后、提交前被杀；视觉产物写出后、提交前被杀，以及 prepare 提交后、ACK 前被杀；整个 Worker 在阶段中途被 SIGKILL；两个 Worker 并发消费重复消息；挂起的 Worker 被接管、旧结果被拒；RabbitMQ 停机后恢复；重试次数用尽；重新索引时一个分支失败、保留旧索引；软时限超时后重试） | 待 CI 运行（见下次更新） |
-| 容器栈冒烟（构建镜像、migrate、API 健康检查、Worker 连接 broker） | 待 CI 运行 |
+| `tests/test_e2_faults.py`，13 个场景：<br>1. 任务提交后、投递前发布器崩溃 → 重启后完成<br>2. broker 已确认但 outbox 未标记时发布器崩溃 → 重复消息被 Worker 记为 `not_runnable`，每个阶段只执行一次<br>3. ASR 提交后、ACK 前 pool 子进程被杀（日志有 WorkerLostError，消息重投）→ 转写只调用 1 次<br>4. ASR 检查点已登记、阶段未提交时被杀 → 复用检查点，转写只调用 1 次<br>5. 对象已上传、检查点未写入时被杀 → 重新转写 1 次（共 2 次）<br>6. 视觉产物写出后、提交前被杀，以及 prepare 提交后、ACK 前被杀 → 收敛；被杀尝试的代次被删除<br>7. 整个 Worker 在阶段中途被 SIGKILL → 未确认的消息重投，最终完成<br>8. 两个 Worker 并发消费 6 条重复的 prepare 消息 → 只执行 1 次<br>9. 挂起的 Worker 被接管 → 旧结果被拒（`stage_result_discarded`），发布的是新代次<br>10. RabbitMQ 停机 → outbox 退避重试；broker 恢复后完成<br>11. 重试次数用尽 → ASR 记为 retry→failed，任务 partial，视觉可用，失败台账可查<br>12. 重新索引时视觉分支失败 → 保留旧索引与能力，进度可查<br>13. 软时限超时 → 记为 `stage_timeout` 并重试成功 | `85a8278`：E2 工作流 run 40853028005 **success**；JUnit 计数公开注释：**tests=13 failures=0 errors=0 skipped=0** |
+| `tests/test_e2_pipeline.py`（同一 Linux 作业，真实 PG + MinIO） | tests=12 failures=0 errors=0 skipped=0 |
+| 容器栈冒烟（构建 `deploy/e2/app.Dockerfile`；`migrate`、API 健康检查、dispatcher；`worker-long` 响应 `inspect ping`，`worker-short` 列出 active_queues） | success |
+| 同一中间件上的 E1 回归 | success |
+| 当前代码 `2d8309f` 的三个工作流（E1 platform、EviReel CPU tests、E2 pipeline） | 均 success（`85a8278` 只改了 CI 计数步骤） |
+
+**CI 抓到的真实缺陷**：ASR 重试用尽后，`publish` 只看 `transcript_index`（状态为 skipped），把只有视觉的结果报成 succeeded。已在 `2d8309f` 修复：语音分支按 prepare → asr → transcript_index 取第一个失败，任务为 partial。另补了进程内回归测试。
+
+**本轮修正的测试本身问题**：
+- 故障测试参数冲突。
+- broker 重启后 vhost 未就绪时清空队列失败：清空改为重试，健康检查增加 `check_running`、`check_virtual_hosts`。
+- ASR 检查点故障点放错了位置：现在分别测试“检查点已登记”和“对象已上传、检查点未写入”两个窗口。
 
 ---
 
