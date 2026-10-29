@@ -1,8 +1,27 @@
 # 工程状态
 
-更新：2026-10-29　阶段：**E2 第二次独立验收的 5 项问题（P1×1、P2×4）已整改**：本机真实 PG/MinIO 与 Linux 真实 RabbitMQ + 独立 Worker 全部通过，待复验。E1 已验收（历史记录见下文）
+更新：2026-10-29　阶段：**E2 整改复验的 4 项问题（P1×1、P2×3）已修复**：本机与 Linux CI 全部通过，待再次复验。E1 已验收（历史记录见下文）
 
-当前提交：E2 实现 `866e8bf` → 修复 `2d8309f` → CI 计数 `85a8278` → 验收整改 `afd21ee` → CI/文档 `8f8ce44`，状态记录见其后的提交。
+当前提交：E2 实现 `866e8bf` → 修复 `2d8309f` → CI 计数 `85a8278` → 验收整改 `afd21ee` → CI/文档 `8f8ce44` → 复验整改 `d662b61`，状态记录见其后的提交。
+
+## E2 整改复验修复（`e001459` 之后，`d662b61`）
+
+| 发现 | 修复 | 回归测试（真实 PG + MinIO，`tests/test_e2_rereview.py`） |
+| --- | --- | --- |
+| [P1] 孤儿清理会删除后来被合法检查点引用的对象 | 同一对象键的三件事都在该键的 PG advisory 事务锁下串行：检查点登记（键已入删除队列时拒绝）、清理入队（持锁重核无引用）、最终删除（持锁重核检查点、阶段输出、视频归属后，在同一事务内删除）。ASR 遇到拒绝时以新键重做 | 复现审查方顺序：上传 → 清理判为孤儿且删除失败（pending）→ 登记检查点被拒，检查点不存在 → 存储恢复后删除。反向顺序：先登记，清理不入队。已入队但随后被引用：删除时跳过（`still_referenced:checkpoint`），对象保留 |
+| [P2] 导出人工重试丢失 artifact_id/format | retry 继承原任务的业务参数，kind/video_id 重新推导 | 注入永久失败的 pdf 导出 → 人工重试（幂等）→ 新任务参数完整 → 成功，下载内容以 `%PDF` 开头 |
+| [P2] 同一任务的旧 attempt 能在接管者失败后写入成功 | 先决定、后投影：publish 只做决定（带 attempt_token 的账本提交，不写可见状态）；新增最终 `project` 阶段（迁移 006），从账本推导读模型并按 `jobs.seq` fencing。任何 attempt 写入的都相同，因此旧 attempt 无法违背账本 | 旧 publish 认领后暂停 → 接管者永久失败 → 可见状态为 failed → 旧 attempt 恢复：其决定提交被拒，任何 project 重放仍是 failed，PG 与 `/api/jobs` 一致为 failed |
+| [P2] 笔记被扫描终结后前端一直显示运行中 | `project` 写入 study_jobs 终态；`StudyService.job/state` 在投影完成前以账本的失败阶段覆盖旧镜像 | 最后一次 attempt 失联 → 扫描判次数用尽 → 读取接口立刻返回 failed/attempts_exhausted → project 执行后 study_jobs 也为 failed |
+
+| 类别 | 检查 | 结果 |
+| --- | --- | --- |
+| 真实中间件（本机） | `test_e2_pipeline` + `test_e2_remediation` + `test_e2_rereview` | **24 passed** |
+| 真实中间件（本机） | 全量 `pytest tests` | **263 passed, 14 skipped**（14 个故障测试需要 Linux 和 RabbitMQ，在 CI 上执行） |
+| GitHub CI（Linux，`d662b61`） | E2 pipeline run 40890260277：故障测试 tests=14 failures=0 skipped=0；账本/整改/复验测试 tests=24 failures=0 skipped=0；容器栈冒烟；E1 回归 | success |
+| GitHub CI（`d662b61`） | E1 platform run 40890260175；EviReel CPU tests run 40890260227 | 均 success |
+| 历史 | `afd21ee` 上 CPU tests 的浏览器步骤失败过一次（原因未查明，按偶发记录），`8f8ce44` 与 `d662b61` 上均通过 | — |
+| 未运行 | 真实模型、真实网关故障、本机 Linux 容器 | — |
+| 说明 | 跨 PG、SQLite registry、转写库的一致性依靠“单调序号 + 可重放投影”，**不是跨库原子提交** | — |
 
 ## E2 第二次独立验收整改（`a224201` 之后）
 

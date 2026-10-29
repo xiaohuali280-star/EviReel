@@ -62,12 +62,13 @@
 
 ## 5. 阶段与检查点（`vam/pipeline/stages.py`）
 
-图（第二次验收后）：
-- `video`：`prepare → {audio → asr → transcript_index, vision} → publish`
+图（整改复验后）：
+- `video`：`prepare → {audio → asr → transcript_index, vision} → publish → project`
 - `transcript`：同上，但没有 vision
-- `notes`：`notes_draft → notes_publish`
+- `notes`：`notes_draft → notes_publish → project`
 - `export`：只有 `export` 一个阶段
-- 没有 join 阶段的图（notes、export）在全部阶段到终态时结束。
+- `publish` 与 `project` 都是 join 阶段：依赖到终态即运行，不论成败。
+- 任务的最终状态由账本决定：video/transcript 在 publish 提交时决定，notes/export 在全部阶段到终态时决定。`project` 随后把这个状态写入读模型。
 
 | 阶段 | 队列 | 内容 | 恢复粒度 |
 | --- | --- | --- | --- |
@@ -76,18 +77,21 @@
 | `asr` | asr | 语音识别，输出原始片段 JSON | **检查点**：`asr:` + sha256(转写键 = 源 sha256 + ASR 身份 + 分块规则, 代码版本)。上传并校验后先登记检查点、再提交阶段。所以“检查点已登记、阶段未提交”时被杀，可以复用。更窄的窗口“对象已上传、检查点行未写入”时被杀会重新识别一次（有测试覆盖），未被引用的对象成为待清理的负债 |
 | `transcript_index` | embed | 片段规范化（时间轴偏移、裁剪规则不变）→ 分块 → 按批 Embedding → 按内容寻址的转写版本发布 | **批次检查点**：`emb:` + sha256(Embedding 身份, 指令, 本批文本, 代码版本)。中断后只算缺的批次。最后一次尝试仍然失败时，与原行为一致：只发布文本，状态 partial |
 | `vision` | media | 抽帧、筛选、图像 Embedding、事件整理（沿用 `index_video_async`），写入 `memory/<attempt_token>.sqlite3` | 阶段级（不可变代次） |
-| `publish` | control | 汇合：两条分支都到终态后，**唯一一次**写入用户可见状态，并由任务序号 fencing（见下）；清理失败尝试的代次；需要时在同一提交事务里创建自动笔记任务 | 幂等重放（同值写入） |
+| `publish` | control | 汇合：两条分支都到终态后**只做决定**（状态、错误、要发布的代次/转写版本/播放路径），不写任何可见状态。决定随带 attempt_token 的账本提交生效；同一事务里按需创建自动笔记任务 | 账本条件提交 |
+| `project` | control | 最终阶段：把账本**已提交**的决定写入读模型（转写 head、registry 中的视频与任务行；笔记则写 study_jobs 终态），由 `jobs.seq` fencing；清理未胜出尝试的代次。publish 失败（包括被扫描判定次数用尽）时，写入失败状态 | 幂等：每次执行都从账本推导出相同的值 |
 | `notes_draft` | embed | 读取已发布的字幕/事件语料，按批调用笔记模型 | **批次检查点**：`notes:` + sha256(模型身份, 代码版本, 本批 evidence_id 与文本)。无效输出按可重试处理 |
 | `notes_publish` | control | 写入 study_artifacts（确定性 id `a_<job_id>`，`created_at` 取任务创建时间），并更新 study_jobs 读模型 | 幂等 |
 | `export` | control | 把笔记产物渲染为 md/pdf/pptx 并上传对象存储；`GET …/study/exports/{job_id}/download` 按引用下载，读取时校验 sha256 | 阶段级 |
 
-**可见发布的 fencing（第二次验收 P1）**：
-- **序号来源**：每个任务有单调递增的 `jobs.seq`（迁移 005）。
-- **可见写入只在 publish 里发生**，分两处，各自带 fence：
-  - SQLite registry：`publish_fenced` 在一个事务里写 `active_generation`、`playback_path`、视频状态、转写状态、任务读模型行，条件是 `videos.published_seq ≤ seq`。
+**先决定、后投影（第二次验收 P1 + 复验 P2）**：
+- **决定在 PG**：同一任务内由谁说了算，取决于 attempt_token 条件提交。旧执行者的决定无法提交，而且 publish 本身不写任何可见内容，所以它恢复后什么也改变不了。这也覆盖了“接管者失败、旧 attempt 恢复”的情形：可见状态始终跟随账本的 failed。
+- **投影由 project 执行**：值完全由账本推导，任何 attempt、任何重放写入的都相同。跨任务的先后由 `jobs.seq` fencing（迁移 005），分两处：
+  - SQLite registry：`publish_fenced` 在一个事务里写代次、播放路径、视频状态、转写状态和任务行，条件是 `published_seq ≤ seq`。
   - 转写库：`publish_head` 移动 head，条件是 `transcript_fence.seq ≤ seq`。
-- **效果**：旧任务的执行者晚于新任务恢复时，写入被拒（`published=false`），可见状态不会回退；同一任务的重放写入相同的值，从而修复 PG/SQLite 提交窗口。
-- **其他阶段不写可见状态**：`transcript_index` 只完成版本，不移动 head；失败投影在账本接受失败之后才执行，也带 fence；Worker 的进度更新不会重新打开已终结的任务行。
+
+  旧任务的投影晚到时被拒；同一任务的重放用来修复 PG/SQLite 提交窗口。这是“单调序号 + 可重放投影”，**不是跨库原子提交**。
+- **任务被扫描终结后**：失败或次数用尽的任务同样经过 project 写入终态。笔记的 `job`/`state` 读取在投影完成前也以账本的终态（失败阶段）覆盖旧镜像。
+- **其他阶段不写可见状态**：`transcript_index` 只完成版本；Worker 的进度更新不会重新打开已终结的任务行。
 
 - **检查点只指向已验证的完整产物**：上传后核对大小。读取时按 sha256 校验，不一致就删除检查点、重新计算。
 - **partial 语义保留**：语音、视觉分支互不影响；失败分支不覆盖旧的已发布索引（`active_generation`、转写 head 都只在成功时移动）。
@@ -119,9 +123,15 @@
   - 未知异常：按可重试处理，但受次数上限约束。
 - **退避**：`min(cap, base·2^(n−1))`，取一半固定、一半随机（equal jitter）。延迟写在 outbox 的 `next_attempt_at` 上。
 - **失败台账**：`stage_attempts`（每次尝试一行：结果为 succeeded/retry/failed/lease_lost，附错误码）。`GET /api/pipeline/failures` 按调用者空间过滤。
-- **人工重试**：`POST /api/jobs/{id}/retry`，只允许 failed/partial 任务，`retry:<id>` 保证幂等。新任务会复用已验证的检查点。
+- **人工重试**：`POST /api/jobs/{id}/retry`，只允许 failed/partial 任务，`retry:<id>` 保证幂等。新任务继承原任务的业务参数（例如导出的 artifact_id 和 format），kind 和 video_id 重新推导；新任务会复用已验证的检查点。
 - **恢复扫描**：发布器进程每 5 次轮询扫描一次（见第 4 节）。消息只是提示，扫描才是保证进度的机制。
   - 无锁读出的候选只是线索。持锁后会重新核对：仍在运行、attempt_token 相同、租约仍已过期、未被再次投递，全部满足才动作。所以候选读出之后发生的续租或接管不会被扫描否决（第二次验收 P2）。
+- **对象回收与新引用的互斥（复验 P1）**：同一个对象键的三件事都在该键的 PG advisory 事务锁下串行执行：
+  - **检查点登记**：键已在删除队列（pending/done）时拒绝。ASR 会以新 attempt 键重新产出；Embedding 和笔记批次的结果仍可用于本次，只是不登记为检查点。
+  - **清理入队**：持锁重新确认无引用后才入队。
+  - **最终删除**：持锁重核检查点、阶段输出、视频归属，然后在同一个持锁事务里删除并记录结果；被引用则标记为 skipped。
+
+  因此“已入删除队列的对象又被登记为检查点、随后被重试删除”的窗口不存在了。
 - **孤儿对象清理**（`vam/pipeline/sweep.py`，发布器每 `PIPELINE_SWEEP_INTERVAL_S` 执行一次）：`pipeline/` 前缀下的对象满足以下全部条件才会进入持久删除队列（`object_deletions`，原因 `pipeline_orphan`）：
   - 早于 `PIPELINE_ORPHAN_GRACE_S`（默认 1 h）；
   - 不被检查点引用；
@@ -163,9 +173,10 @@ docker compose --env-file deploy/e1/dev.env -f deploy/e2/compose.yml exec api \
 
 ## 10. 迁移与回退
 
-- **迁移**：`python -m vam.platform.migrate schema` 应用两份迁移，schema 版本为 5：
+- **迁移**：`python -m vam.platform.migrate schema` 应用三份迁移，schema 版本为 6：
   - `004_pipeline.sql`：只新建 5 张表；
-  - `005_pipeline_fencing.sql`：新增 `jobs.seq`，扩展任务种类、阶段、删除原因的约束，导出任务不计入“每个视频只能有一个活动任务”。
+  - `005_pipeline_fencing.sql`：新增 `jobs.seq`，扩展任务种类、阶段、删除原因的约束，导出任务不计入“每个视频只能有一个活动任务”；
+  - `006_projection_stage.sql`：阶段约束加入 `project`。迁移前已建、尚未完成的任务没有 project 阶段，由 publish 结束；建议在没有活动任务时升级。
 
   SQLite registry 自动升级到版本 5（`videos.published_seq`，默认 0）；转写库新增 `transcript_fence` 表（`IF NOT EXISTS`）。
 - **启用**：设置 `PIPELINE_MODE=worker` 和 `BROKER_URL`，启动 dispatcher 与 Worker。已有视频、已发布的索引和 SQLite 历史任务不受影响。

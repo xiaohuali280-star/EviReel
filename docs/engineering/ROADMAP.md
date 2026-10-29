@@ -5,7 +5,7 @@
 | 阶段 | 主题 | 状态 | 交付记录 |
 | --- | --- | --- | --- |
 | E1 | 分片直传与断点续传；PostgreSQL 平台元数据；对象存储适配层；用户/空间归属与最小授权；配额 | 已验收（本机 + CI，见 STATUS）；内容秒传留作后续 | `E1_DELIVERY.md` |
-| E2 | 可靠异步流水线：任务表 + Outbox、独立 Worker（Celery + RabbitMQ）、阶段检查点、租约/attempt token、重启续跑 | 第二次验收问题已整改，待复验（见 STATUS；问答未迁移） | `E2_DELIVERY.md` |
+| E2 | 可靠异步流水线：任务表 + Outbox、独立 Worker（Celery + RabbitMQ）、阶段检查点、租约/attempt token、重启续跑 | 复验问题已修复，待再次复验（见 STATUS；问答未迁移） | `E2_DELIVERY.md` |
 | E3 | 并发与隔离：版本快照读、缩短检索锁、跨实例状态、全局限流与模型预算、多 API 实例 | 未开始 | — |
 | E4 | AI 评测与检索演进：证据评测集、检索方案对照、成本/延迟取舍 | 未开始 | — |
 
