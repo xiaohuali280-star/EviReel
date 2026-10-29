@@ -23,7 +23,21 @@ export interface Transport {
   md5(blob: Blob): Promise<string>;
   sleep(ms: number, signal: AbortSignal): Promise<void>;
 }
-export class UploadError extends Error {constructor(public code: string, message: string) {super(message)}}
+// `status` is the HTTP status when the error is an HTTP answer; absent for local errors.
+export class UploadError extends Error {constructor(public code: string, message: string, public status?: number) {super(message)}}
+
+/**
+ * Did this create attempt certainly create nothing? Only when our API answered with a 4xx: every
+ * create rejection is raised before the session row is inserted, and a replay looks the request id
+ * up (under the workspace lock) before any other check, so its 4xx also means "no such session".
+ * Auth failures on a replay say nothing about the original request; 408/499, every 5xx (the row
+ * may be committed before a later step fails), gateway errors, and no answer at all are unknown.
+ */
+function certainlyNotCreated(e: unknown, replay: boolean) {
+  if (!(e instanceof UploadError) || e.status === undefined || e.status < 400 || e.status >= 500) return false;
+  if ([408, 499].includes(e.status)) return false;
+  return !(replay && [401, 403].includes(e.status));
+}
 class Halted extends Error {}  // internal: the run was paused/cancelled while awaiting
 
 function newRequestId() {
@@ -113,16 +127,17 @@ export class ResumableUpload {
       // The create request may already have reached the server: settle it before claiming anything.
       try {this.session = await this.creating}
       catch (e) {
-        if (!(e instanceof UploadError)) {
-          // No answer at all: replay the same request id; the server returns the session if one exists.
+        if (!certainlyNotCreated(e, false)) {
+          // Outcome unknown: replay the same request id; the server returns the session if one exists.
           try {this.session = await this.createRequest()}
           catch (again) {
-            if (!(again instanceof UploadError)) {
-              this.emit({phase: 'cancel_unconfirmed', errorCode: 'network', error: again instanceof Error ? again.message : String(again)});
+            if (!certainlyNotCreated(again, true)) {
+              this.emit({phase: 'cancel_unconfirmed', errorCode: again instanceof UploadError ? again.code : 'network',
+                error: again instanceof Error ? again.message : String(again)});
               return 'unconfirmed';
             }
           }
-        }  // an error answer from the server means no session was created
+        }
       }
     }
     if (!this.session) {this.emit({phase: 'cancelled'}); return 'cancelled'}  // nothing ever reached the server

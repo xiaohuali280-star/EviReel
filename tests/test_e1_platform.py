@@ -619,3 +619,43 @@ def test_create_is_idempotent_per_request_id_and_replay_finds_cancelled_session(
         bob, _ = users(client, app, "bob")["bob"]
         mine = bob.post("/api/uploads", json=body)
         assert mine.status_code == 201 and mine.json()["upload_id"] != upload_id
+
+
+class CreateCrash(DeleteOutage):
+    """The REAL S3 store; CreateMultipartUpload crashes once with a non-storage error -> HTTP 500
+    after the session row and quota reservation were already committed."""
+    def __init__(self, infra):
+        super().__init__(infra)
+        self.down, self.crashes = False, 1
+
+    def create_multipart(self, key, content_type):
+        if self.crashes:
+            self.crashes -= 1
+            raise RuntimeError("injected: crash after the session was committed")
+        return self.real.create_multipart(key, content_type)
+
+
+def test_create_500_after_commit_is_found_by_replay_and_cancelled_with_quota_released_once(platform_app, infra, video_file):
+    _, app = platform_app(object_store=CreateCrash(infra))
+    data = video_file.read_bytes()
+    body = {"filename": "lecture.mp4", "size": len(data), "fingerprint": fingerprint(data), "content_type": "video/mp4",
+            "client_request_id": "cr-" + "c" * 32}
+    with TestClient(app, raise_server_exceptions=False) as client:
+        alice, _ = users(client, app, "alice")["alice"]
+        crashed = alice.post("/api/uploads", json=body)
+        assert crashed.status_code == 500                       # outcome unknown to the client...
+        row = pg(app, "SELECT upload_id, state, quota_state FROM upload_sessions")
+        assert len(row) == 1 and row[0]["state"] == "initiated"  # ...but the session exists
+        assert pg(app, "SELECT reserved_bytes FROM workspaces")[0]["reserved_bytes"] == len(data)
+        replay = alice.post("/api/uploads", json=body)          # what the client does before claiming a cancel
+        assert replay.status_code == 201 and replay.json()["upload_id"] == row[0]["upload_id"]
+        assert pg(app, "SELECT reserved_bytes FROM workspaces")[0]["reserved_bytes"] == len(data)  # reserved once
+        cancelled = alice.delete(f"/api/uploads/{row[0]['upload_id']}")
+        assert cancelled.status_code == 200 and cancelled.json()["state"] == "aborted"
+        assert pg(app, "SELECT reserved_bytes, used_bytes FROM workspaces")[0] == {"reserved_bytes": 0, "used_bytes": 0}
+        # A later reconcile (which fails stuck initiations) must not release the reservation a second time.
+        asyncio.run(app.state.platform.uploads.reconcile())
+        assert pg(app, "SELECT reserved_bytes FROM workspaces")[0]["reserved_bytes"] == 0
+        assert pg(app, "SELECT state, quota_state FROM upload_sessions")[0] == {"state": "aborted", "quota_state": "released"}
+        assert alice.delete(f"/api/uploads/{row[0]['upload_id']}").json()["state"] == "aborted"   # repeat cancel is a no-op
+        assert pg(app, "SELECT reserved_bytes FROM workspaces")[0]["reserved_bytes"] == 0

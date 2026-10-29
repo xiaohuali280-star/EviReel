@@ -230,7 +230,7 @@ export default function App() {
     setError(''); setTrash(false); chooseVideo(''); setUploadName(selected.name);
     const json = async <T,>(url: string, init: {method?: string; body?: unknown} = {}) => {
       try {return await api<T>(url, {method: init.method, body: init.body === undefined ? undefined : JSON.stringify(init.body)})}
-      catch (e) {throw e instanceof ApiError ? new UploadError(e.code, e.message) : e}
+      catch (e) {throw e instanceof ApiError ? new UploadError(e.code, e.message, e.status) : e}
     };
     const upload = new ResumableUpload(selected, browserTransport(json), setUploadState);
     uploader.current = upload;

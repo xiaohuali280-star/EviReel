@@ -58,7 +58,7 @@
 - 取消：`cancel()` 返回 `cancelled | unconfirmed | continuing`。只有服务端确认后才显示已取消。网络失败时进入 `cancel_unconfirmed`，提示会话可能仍占用配额，并提供“重试取消”和“继续上传”。与完成竞争失败（409）时转为跟随服务端的合并/校验阶段。
 - 会话尚未建立时的取消（第二次独立验收）：
   - **幂等创建**：每次新上传生成随机 `client_request_id`，随 `POST /api/uploads` 发送。服务端在锁定空间行后，按（空间, request id）查找已有会话；找到就原样返回，不再预占配额（迁移 `003_upload_request_id.sql`，唯一索引）。
-  - **取消时如何确认**：创建请求在途时，`cancel()` 先等它出结果。服务端返回了错误说明没有创建；拿到会话就补发 `DELETE`；完全没有回音时，用同一个 request id 重放创建来查明结果，仍失败则报告 `unconfirmed`。
+  - **取消时如何确认**：创建请求在途时，`cancel()` 先等它出结果。拿到会话就补发 `DELETE`。失败时按 HTTP 状态判断（第三次独立验收）：只有本 API 返回的 4xx（排除 408/499）证明会话一定没有创建，因为 create 的 4xx 都在插入会话行之前抛出；重放请求的 401/403 不算。5xx（例如会话已提交，之后的 multipart 创建失败）、网关 502、没有状态码的错误、没有响应，都视为结果未知。这时用同一个 request id 重放来查明，找到会话就 `DELETE`；仍然无法确定则报告 `unconfirmed`，不会虚报取消成功。
   - **防止旧流程继续**：`run()` 在每个 `await` 之后（指纹、创建、读取会话、核对分片）以及启动分片之前，都检查取消信号和代次（generation），被取消或被新一轮替代就立即停止，不再签名、上传或修改界面状态。另外，向已中止的信号添加监听不会触发回调，所以启动分片时会显式检查一次。
 - 三阶段分开显示：上传分片 → 服务器校验 → 视频处理（沿用现有处理中界面）。
 
@@ -111,7 +111,7 @@ python -m vam.platform.migrate rollback-legacy --workspace <ws_id> [--dry-run]
 | CI（Linux） | `4632b4f`：`E1 platform`（compose 中的真实 PG + MinIO，后端验收 + 浏览器验收）与 `EviReel CPU tests` | 均 success |
 | 未运行 | Linux compose 只在 CI 上运行过，本机无 Docker；真实模型调用 | — |
 
-独立验收（目标 `be66e7d`）发现 3 项缺陷：续传文件内容一致性、对象删除的持久补偿、取消状态失真。它们的修复和回归结果见 STATUS“独立验收整改”：真实 PG+MinIO 下 22 passed（全量 237 passed）、E1 浏览器 2/2、vitest 30/30、P5 21/21。第二次独立验收（目标 `55d4271`）发现会话未建立时取消的时序缺陷。修复方式是幂等创建、取消前先确认、每个 await 之后检查取消，见 3.4。修复后本机结果：真实 PG+MinIO 下 23 passed，全量 238 passed，vitest 34/34，P5 21/21，E1 浏览器 2/2。
+独立验收（目标 `be66e7d`）发现 3 项缺陷：续传文件内容一致性、对象删除的持久补偿、取消状态失真。它们的修复和回归结果见 STATUS“独立验收整改”：真实 PG+MinIO 下 22 passed（全量 237 passed）、E1 浏览器 2/2、vitest 30/30、P5 21/21。第二次独立验收（目标 `55d4271`）发现会话未建立时取消的时序缺陷。修复方式是幂等创建、取消前先确认、每个 await 之后检查取消，见 3.4。修复后本机结果：真实 PG+MinIO 下 23 passed，全量 238 passed，vitest 34/34，P5 21/21，E1 浏览器 2/2。第三次独立验收（目标 `952247f`）发现创建失败时没有区分 HTTP 错误、可能虚报取消成功，修复见 3.4 和 STATUS。
 
 ## 7. 交接给 E2
 - **接口**：`UploadService`（create/get/sign/complete/cancel/reconcile/accept_processing），`ObjectStore`（见 3.1），`ObjectCleaner`（`enqueue` 在调用方事务内，`delete_now`/`drain`）。`object_deletions` 已经是一张持久任务表，E2 可以把它并入通用任务表或交给 Worker 消费。

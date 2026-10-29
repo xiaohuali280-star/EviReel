@@ -29,6 +29,8 @@ class FakeServer implements Transport {
   loseCreateResponse = 0;                   // remaining creates whose response is lost (session IS created)
   failPost = 0;                             // remaining POSTs that never reach the server
   byRequest = new Map<string, UploadSession>();
+  // Per-POST outcome queue: null = normal; otherwise throw `error` before or after the session is created.
+  createOutcomes: ({afterCreate: boolean; error: Error} | null)[] = [];
   clock = 0;
   session!: UploadSession;
   constructor(public partSize: number, public expiresIn = 900) {}
@@ -44,6 +46,8 @@ class FakeServer implements Transport {
     if (url === '/api/uploads' && init.method === 'POST') {
       this.posts++;
       if (this.failPost > 0) {this.failPost--; throw new TypeError('Failed to fetch')}
+      const outcome = this.createOutcomes.shift() ?? null;
+      if (outcome && !outcome.afterCreate) throw outcome.error;
       const replay = this.byRequest.get(init.body.client_request_id);  // idempotent, like the server
       if (!replay) {
         const size = init.body.size;
@@ -56,6 +60,7 @@ class FakeServer implements Transport {
       }
       if (this.createGate) await this.createGate;
       if (this.loseCreateResponse > 0) {this.loseCreateResponse--; throw new TypeError('Failed to fetch')}
+      if (outcome) throw outcome.error;
       return this.view() as T;
     }
     if (url.endsWith('/parts/sign')) {
@@ -245,6 +250,57 @@ describe('resumable upload client', () => {
     expect(await upload.cancel()).toBe('cancelled');   // retry: the replay now finds the session and DELETEs it
     expect(server.session.state).toBe('aborted');
     expect(server.creates).toBe(1);
+  });
+
+  // HTTP errors from create: only a 4xx from our API proves nothing was created.
+  const http = (status: number, code = 'http_error') => new UploadError(code, `HTTP ${status}`, status);
+  async function cancelDuringCreate(server: FakeServer, states: UploadState[]) {
+    let release!: () => void; server.createGate = new Promise(r => {release = r});
+    const upload = run(makeFile(3 * MiB), server, states);
+    const running = upload.start().catch(() => undefined);
+    await vi.waitFor(() => expect(server.posts).toBe(1));
+    const cancelling = upload.cancel();
+    server.createGate = undefined; release();
+    const outcome = await cancelling; await running;
+    return {upload, outcome};
+  }
+
+  it.each([
+    ['a 500 after the session was durably created', http(500, 'internal_error')],
+    ['a gateway 502 after the session was created', http(502)],
+    ['an HTTP error without a status (unknown origin)', new UploadError('http_error', 'no status')],
+  ])('cancel after %s replays the request id and cancels the real session', async (_, error) => {
+    const server = new FakeServer(MiB), states: UploadState[] = [];
+    server.createOutcomes = [{afterCreate: true, error}];
+    const {outcome} = await cancelDuringCreate(server, states);
+    expect(outcome).toBe('cancelled');
+    expect([server.posts, server.creates, server.deleteCalls]).toEqual([2, 1, 1]);
+    expect(server.session.state).toBe('aborted');
+    expect([server.signCalls, server.puts.length]).toEqual([0, 0]);
+  });
+
+  it.each([
+    ['a lost response whose replay gets 503', [{afterCreate: true, error: new TypeError('Failed to fetch')}, {afterCreate: false, error: http(503)}]],
+    ['a 500 whose replay gets 401', [{afterCreate: true, error: http(500)}, {afterCreate: false, error: http(401, 'unauthenticated')}]],
+  ])('%s stays unconfirmed until the session is found, then cancels it once', async (_, outcomes) => {
+    const server = new FakeServer(MiB), states: UploadState[] = [];
+    server.createOutcomes = [...outcomes];
+    const {upload, outcome} = await cancelDuringCreate(server, states);
+    expect(outcome).toBe('unconfirmed');
+    expect(states.at(-1)?.phase).toBe('cancel_unconfirmed');
+    expect(states.some(s => s.phase === 'cancelled')).toBe(false);
+    expect(server.session.state).toBe('uploading');       // the session the server created still exists
+    expect(await upload.cancel()).toBe('cancelled');      // service recovers: replay finds it, DELETE confirms
+    expect(server.session.state).toBe('aborted');
+    expect([server.creates, server.deleteCalls, server.signCalls, server.puts.length]).toEqual([1, 1, 0, 0]);
+  });
+
+  it('a 4xx rejection from the API proves nothing was created: cancelled without replay or DELETE', async () => {
+    const server = new FakeServer(MiB), states: UploadState[] = [];
+    server.createOutcomes = [{afterCreate: false, error: http(413, 'quota_exceeded')}];
+    const {outcome} = await cancelDuringCreate(server, states);
+    expect(outcome).toBe('cancelled');
+    expect([server.posts, server.creates, server.deleteCalls]).toEqual([1, 0, 0]);
   });
 
   it('re-signs expired URLs and retries transient failures', async () => {
