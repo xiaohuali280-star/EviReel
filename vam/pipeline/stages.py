@@ -264,17 +264,29 @@ def _branch(stages, name, fallback_reason):
             "error": row["error"] or f"{name} failed; previous published results are retained"}
 
 
+def _speech(stages):
+    """Outcome of the speech branch (prepare -> asr -> transcript_index): the first real failure wins;
+    a skip caused by a failed dependency is that failure, not "no speech"."""
+    for name in ("prepare", "asr", "transcript_index"):
+        row = stages[name]
+        if row["status"] == "failed":
+            return {"status": "failed", "error_code": row["error_code"] or f"{name}_failed",
+                    "error": row["error"] or "Transcript indexing failed; previous published text/index is retained"}
+        if name == "prepare" and row["status"] == "succeeded" and row["output"].get("audio_reason"):
+            return {"status": "skipped", "reason": row["output"]["audio_reason"]}
+    final = stages["transcript_index"]
+    if final["status"] == "succeeded":
+        return final["output"]
+    return {"status": "skipped", "reason": final["error_code"] or "dependency_not_succeeded"}
+
+
 def publish(ctx, claim):
     """Join: publish whatever branch succeeded into the read model; failed branches keep the old index."""
     job = claim["job"]
     job_id, video_id = job["job_id"], job["video_id"]
     stages = ctx.repo.stages(job_id)
     vis = _branch(stages, "vision", "dependency_not_succeeded") if job["kind"] == "video" else None
-    transcript = _branch(stages, "transcript_index", "dependency_not_succeeded") or {"status": "skipped"}
-    if stages["prepare"]["status"] == "failed":
-        transcript = {"status": "failed", "error_code": stages["prepare"]["error_code"], "error": stages["prepare"]["error"]}
-    elif stages["prepare"]["status"] == "succeeded" and stages["prepare"]["output"].get("audio_reason"):
-        transcript = {"status": "skipped", "reason": stages["prepare"]["output"]["audio_reason"]}
+    transcript = _speech(stages)
     vision_ok = bool(vis and vis.get("generation"))
     t = transcript.get("status")
     if job["kind"] == "transcript":

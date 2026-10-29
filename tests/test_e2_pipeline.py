@@ -313,6 +313,21 @@ def test_failed_branch_keeps_the_previous_index_and_reports_partial(worker_app, 
         assert any(f["job_id"] == job_id and f["stage"] == "vision" for f in failures)
 
 
+def test_failed_asr_makes_the_job_partial_and_keeps_vision(worker_app, media, monkeypatch):
+    settings, app, make_ctx = worker_app(pipeline_stage_max_attempts=2)
+    monkeypatch.setenv("E2_ASR", "transient")
+    with TestClient(app) as client:
+        alice, view = accepted(client, app, media["red"])
+        ctx = make_ctx()
+        job = drain_inline(ctx, view["job_id"])
+        stages = stage_rows(ctx.db, view["job_id"])
+        assert (stages["asr"]["status"], stages["transcript_index"]["status"]) == ("failed", "skipped")
+        assert job["status"] == "partial" and job["error_code"] == "asr_timeout"
+        detail = alice.get(f"/api/videos/{view['video_id']}").json()
+        assert detail["capabilities"]["vision"] is True and detail["capabilities"]["transcript"] is False
+        assert detail["transcript"]["status"] == "failed"
+
+
 def test_jobs_survive_an_api_restart_and_deletion_waits_for_them(worker_app, media):
     settings, app, make_ctx = worker_app()
     with TestClient(app) as client:
