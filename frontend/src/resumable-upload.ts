@@ -24,6 +24,11 @@ export interface Transport {
   sleep(ms: number, signal: AbortSignal): Promise<void>;
 }
 export class UploadError extends Error {constructor(public code: string, message: string) {super(message)}}
+class Halted extends Error {}  // internal: the run was paused/cancelled while awaiting
+
+function newRequestId() {
+  return 'cr-' + Array.from(crypto.getRandomValues(new Uint8Array(16)), b => b.toString(16).padStart(2, '0')).join('');
+}
 
 // Quick identity check of a *local* file: size + sampled SHA-256. Sampling misses edits elsewhere,
 // so a resume additionally hashes every already-uploaded part (see verifyUploadedParts). The server
@@ -58,6 +63,13 @@ export class ResumableUpload {
   private queue: number[] = [];
   private session?: UploadSession;
   private finished?: Promise<UploadSession>;
+  // Create-session bookkeeping: the request id makes the POST replayable (idempotent on the server),
+  // and `creating` lets cancel() settle an in-flight create instead of assuming nothing was created.
+  private readonly requestId = newRequestId();
+  private fp?: string;
+  private creating?: Promise<UploadSession>;
+  // Bumped by cancel(): a run() from an older generation must not touch state after its next await.
+  private generation = 0;
 
   constructor(private file: File, private transport: Transport, private onState: (s: UploadState) => void,
               private options = {concurrency: 3, maxRetries: 6, signBatch: 6, pollMs: 1500, now: () => Date.now()}) {
@@ -95,8 +107,25 @@ export class ResumableUpload {
 
   /** Stop locally, then report what the server actually did; only 'cancelled' is final. */
   async cancel(): Promise<CancelOutcome> {
+    this.generation++;
     this.abort.abort();
-    if (!this.session) {this.emit({phase: 'cancelled'}); return 'cancelled'}
+    if (!this.session && this.creating) {
+      // The create request may already have reached the server: settle it before claiming anything.
+      try {this.session = await this.creating}
+      catch (e) {
+        if (!(e instanceof UploadError)) {
+          // No answer at all: replay the same request id; the server returns the session if one exists.
+          try {this.session = await this.createRequest()}
+          catch (again) {
+            if (!(again instanceof UploadError)) {
+              this.emit({phase: 'cancel_unconfirmed', errorCode: 'network', error: again instanceof Error ? again.message : String(again)});
+              return 'unconfirmed';
+            }
+          }
+        }  // an error answer from the server means no session was created
+      }
+    }
+    if (!this.session) {this.emit({phase: 'cancelled'}); return 'cancelled'}  // nothing ever reached the server
     const id = this.session.upload_id;
     try {
       this.session = await this.transport.json<UploadSession>(`/api/uploads/${id}`, {method: 'DELETE'});
@@ -132,19 +161,30 @@ export class ResumableUpload {
     }
   }
 
+  private createRequest() {
+    return this.transport.json<UploadSession>('/api/uploads', {method: 'POST', body: {filename: this.file.name,
+      size: this.file.size, fingerprint: this.fp!, content_type: this.file.type, client_request_id: this.requestId}});
+  }
+
   private async run(existing?: UploadSession): Promise<UploadSession> {
-    const signal = this.abort.signal;
+    const signal = this.abort.signal, generation = this.generation;
+    // After every await: a pause/cancel (or a newer run) may have happened while we were waiting.
+    const halt = () => {if (signal.aborted || generation !== this.generation) throw new Halted()};
     try {
+      if (existing) this.session = existing;  // known server session: a cancel from here on can DELETE it
       this.emit({phase: 'hashing', error: undefined, errorCode: undefined});
-      const fp = await fingerprint(this.file);
+      const fp = await fingerprint(this.file); halt();
+      this.fp = fp;
       if (existing) {
         if (existing.declared_size !== this.file.size || existing.client_fingerprint !== fp)
           throw new UploadError('file_mismatch', '所选文件与未完成的上传不是同一个文件，请选择原文件或放弃该上传。');
-        this.session = await this.transport.json<UploadSession>(`/api/uploads/${existing.upload_id}`);
-        if (this.session.state === 'uploading') await this.verifyUploadedParts(this.session);
+        const current = await this.transport.json<UploadSession>(`/api/uploads/${existing.upload_id}`); halt();
+        this.session = current;
+        if (current.state === 'uploading') {await this.verifyUploadedParts(current); halt()}
       } else {
-        this.session = await this.transport.json<UploadSession>('/api/uploads', {method: 'POST',
-          body: {filename: this.file.name, size: this.file.size, fingerprint: fp, content_type: this.file.type}});
+        this.creating = this.createRequest();
+        const created = await this.creating; halt();
+        this.session = created;
       }
       remember(this.session);
       if (['completing', 'verifying', 'completed'].includes(this.session.state)) return await this.waitVerified(signal);
@@ -154,9 +194,11 @@ export class ResumableUpload {
         this.queue = this.session.missing_parts.filter(n => !this.done.has(n));
         this.emit({phase: 'uploading'});
         // One failing part stops its siblings; a user pause/cancel (outer signal) stops all.
+        halt();
         const round = new AbortController();
         const stop = () => round.abort();
         signal.addEventListener('abort', stop, {once: true});
+        if (signal.aborted) round.abort();  // a listener added to an already-aborted signal never fires
         try {
           await Promise.all(Array.from({length: Math.min(this.options.concurrency, Math.max(1, this.queue.length))}, () => this.worker(round.signal)));
         } catch (e) {round.abort(); throw e}
@@ -177,7 +219,8 @@ export class ResumableUpload {
         return await this.waitVerified(signal);
       }
     } catch (e) {
-      if (signal.aborted) return this.session!;
+      // Stopped by the user (or superseded): cancel()/pause() own the state from here.
+      if (e instanceof Halted || signal.aborted || generation !== this.generation) return this.session!;
       const code = e instanceof UploadError ? e.code : 'network';
       this.emit({phase: 'failed', errorCode: code, error: e instanceof Error ? e.message : String(e)});
       throw e;

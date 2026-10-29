@@ -590,3 +590,32 @@ def test_cleanup_never_deletes_an_object_that_is_still_owned(platform_app, video
         assert app.state.platform.uploads.cleaner.delete_now(key) is False
         assert _object_exists(app.state.platform.store, key)
         assert pg(app, "SELECT state, last_error FROM object_deletions")[0] == {"state": "skipped", "last_error": "still_referenced"}
+
+
+# Idempotent create: a lost or cancelled-in-flight POST can be settled by replaying its request id.
+def test_create_is_idempotent_per_request_id_and_replay_finds_cancelled_session(platform_app, video_file):
+    _, app = platform_app()
+    data = video_file.read_bytes()
+    body = {"filename": "lecture.mp4", "size": len(data), "fingerprint": fingerprint(data), "content_type": "video/mp4",
+            "client_request_id": "cr-" + "a" * 32}
+    with TestClient(app) as client:
+        alice, _ = users(client, app, "alice")["alice"]
+        with ThreadPoolExecutor(4) as pool:   # concurrent replays of one request: one session, one reservation
+            responses = list(pool.map(lambda _: alice.post("/api/uploads", json=body), range(4)))
+        assert {r.status_code for r in responses} == {201}
+        assert len({r.json()["upload_id"] for r in responses}) == 1
+        upload_id = responses[0].json()["upload_id"]
+        assert pg(app, "SELECT COUNT(*) AS n FROM upload_sessions")[0]["n"] == 1
+        assert pg(app, "SELECT reserved_bytes FROM workspaces")[0]["reserved_bytes"] == len(data)
+        assert alice.delete(f"/api/uploads/{upload_id}").json()["state"] == "aborted"
+        replay = alice.post("/api/uploads", json=body)     # after the cancel: reports it, creates nothing
+        assert replay.json()["upload_id"] == upload_id and replay.json()["state"] == "aborted"
+        assert pg(app, "SELECT COUNT(*) AS n FROM upload_sessions")[0]["n"] == 1
+        assert pg(app, "SELECT reserved_bytes FROM workspaces")[0]["reserved_bytes"] == 0
+        fresh = alice.post("/api/uploads", json=body | {"client_request_id": "cr-" + "b" * 32})
+        assert fresh.status_code == 201 and fresh.json()["upload_id"] != upload_id
+        assert alice.post("/api/uploads", json=body | {"client_request_id": "bad id!"}).status_code == 422
+        # Request ids are scoped to the workspace: bob reusing alice's id gets his own session.
+        bob, _ = users(client, app, "bob")["bob"]
+        mine = bob.post("/api/uploads", json=body)
+        assert mine.status_code == 201 and mine.json()["upload_id"] != upload_id

@@ -18,6 +18,8 @@ class CreateUpload(StrictSchemaModel):
     size: int = Field(gt=0)
     fingerprint: str = Field(min_length=8, max_length=128)
     content_type: str = Field("", max_length=120)
+    # Random per upload attempt; replaying the same id returns the same session (idempotent create).
+    client_request_id: str | None = Field(None, pattern=r"^[A-Za-z0-9-]{8,64}$")
 
 
 class PartToSign(StrictSchemaModel):
@@ -41,7 +43,8 @@ def _uploads(request: Request):
 @router.post("", status_code=201)
 async def create(body: CreateUpload, request: Request):
     return await run_sync(_uploads(request).create, principal_of(request), name=body.filename, size=body.size,
-                          fingerprint=body.fingerprint, content_type=body.content_type)
+                          fingerprint=body.fingerprint, content_type=body.content_type,
+                          request_id=body.client_request_id)
 
 
 @router.get("")

@@ -184,7 +184,10 @@ class UploadService:
         return bool(updated)
 
     # ------------------------------------------------------------------ create
-    def create(self, principal, *, name, size, fingerprint, content_type=""):
+    def create(self, principal, *, name, size, fingerprint, content_type="", request_id=None):
+        if request_id is not None and not (isinstance(request_id, str) and 8 <= len(request_id) <= 64
+                                           and all(c.isalnum() or c == "-" for c in request_id) and request_id.isascii()):
+            raise DomainError(422, "invalid_request_id", "client_request_id must be 8-64 letters, digits or '-'")
         name = _safe_name(name)
         ext = Path(name).suffix.lower()
         if not name or ext not in ALLOWED_EXTENSIONS:
@@ -203,6 +206,13 @@ class UploadService:
         with self.db.transaction() as conn:
             ws = conn.execute("SELECT * FROM workspaces WHERE workspace_id=%s FOR UPDATE",
                               (principal.workspace_id,)).fetchone()
+            if request_id is not None:
+                # Replay of the same create (the workspace lock serializes it): return that session,
+                # whatever state it is in now, without reserving quota again.
+                existing = conn.execute("SELECT * FROM upload_sessions WHERE workspace_id=%s AND client_request_id=%s",
+                                        (principal.workspace_id, request_id)).fetchone()
+                if existing is not None:
+                    return self.view(existing, self._parts(conn, existing["upload_id"]))
             active = conn.execute("SELECT COUNT(*) AS n FROM upload_sessions WHERE workspace_id=%s AND state = ANY(%s)",
                                   (principal.workspace_id, list(ACTIVE_STATES))).fetchone()["n"]
             if active >= self.settings.upload_max_active_sessions:
@@ -213,11 +223,12 @@ class UploadService:
                          (size, principal.workspace_id))
             conn.execute(
                 "INSERT INTO upload_sessions(upload_id, workspace_id, created_by, video_id, original_name, extension, "
-                "content_type, object_key, declared_size, part_size, part_count, client_fingerprint, state, quota_state, "
-                "expires_at, lease_until) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'initiated','reserved', "
-                "now() + make_interval(secs => %s), now() + make_interval(secs => %s))",
+                "content_type, object_key, declared_size, part_size, part_count, client_fingerprint, client_request_id, "
+                "state, quota_state, expires_at, lease_until) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'initiated',"
+                "'reserved', now() + make_interval(secs => %s), now() + make_interval(secs => %s))",
                 (upload_id, principal.workspace_id, principal.user_id, video_id, name, ext, CONTENT_TYPES[ext], key,
-                 size, part_size, part_count, fingerprint, self.settings.upload_session_ttl_s, self.settings.upload_lease_s))
+                 size, part_size, part_count, fingerprint, request_id, self.settings.upload_session_ttl_s,
+                 self.settings.upload_lease_s))
         try:
             storage_id = self.store.create_multipart(key, CONTENT_TYPES[ext])
         except ObjectStoreError as exc:

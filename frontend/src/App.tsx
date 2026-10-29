@@ -236,9 +236,9 @@ export default function App() {
     uploader.current = upload;
     try {
       const session = await upload.start(target || undefined);
-      if (session.state === 'completed') {
+      if (session?.state === 'completed') {
         setUploadState(null); uploader.current = null; chooseVideo(session.video_id); refresh();
-        if (session.result?.index_error) setNotice('视频已校验，处理队列已满，可稍后点击“重新处理”。');
+        if (session?.result?.index_error) setNotice('视频已校验，处理队列已满，可稍后点击“重新处理”。');
       }
     } catch (e) {
       // A wrong reselected file must not hide the resume prompt; other failures stay in the panel.
@@ -248,7 +248,7 @@ export default function App() {
   }
   async function resumeUpload() {
     const upload = uploader.current; if (!upload) return;
-    try {const session = await upload.resume(); if (session.state === 'completed') {setUploadState(null); uploader.current = null; chooseVideo(session.video_id); refresh()}}
+    try {const session = await upload.resume(); if (session?.state === 'completed') {setUploadState(null); uploader.current = null; chooseVideo(session.video_id); refresh()}}
     catch { /* rendered */ }
   }
   async function cancelUpload() {
@@ -258,7 +258,7 @@ export default function App() {
       if (outcome === 'unconfirmed') return;  // the panel shows it and offers retry / continue
       if (outcome === 'continuing') {
         setNotice('上传已在服务器端完成合并，无法取消，正在继续校验。');
-        try {const session = await upload.wait(); if (session.state === 'completed') {setUploadState(null); uploader.current = null; chooseVideo(session.video_id); refresh()}}
+        try {const session = await upload.wait(); if (session?.state === 'completed') {setUploadState(null); uploader.current = null; chooseVideo(session.video_id); refresh()}}
         catch { /* rendered */ }
         return;
       }

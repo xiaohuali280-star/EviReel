@@ -1,7 +1,7 @@
 // Client scheduling logic against an in-memory fake server/storage (TEST DOUBLE).
 // Proves retry, re-sign, pause/resume and "send only missing parts" decisions; it does
 // not prove S3/MinIO behaviour - see tests/test_e1_* and e2e/upload-resume.spec.ts.
-import {describe, expect, it} from 'vitest';
+import {describe, expect, it, vi} from 'vitest';
 import {md5, toBase64} from './md5';
 import {fingerprint, ResumableUpload, type Transport, UploadError, type UploadSession, type UploadState} from './resumable-upload';
 
@@ -24,6 +24,11 @@ class FakeServer implements Transport {
   deleteFails = 0;                          // remaining DELETE network failures
   completeBeforeDelete = false;             // the session completes before the DELETE arrives
   deleteCalls = 0;
+  posts = 0; creates = 0;                   // POST requests received / sessions actually created
+  createGate?: Promise<void>;               // holds the create response until released
+  loseCreateResponse = 0;                   // remaining creates whose response is lost (session IS created)
+  failPost = 0;                             // remaining POSTs that never reach the server
+  byRequest = new Map<string, UploadSession>();
   clock = 0;
   session!: UploadSession;
   constructor(public partSize: number, public expiresIn = 900) {}
@@ -37,11 +42,20 @@ class FakeServer implements Transport {
   }
   async json<T>(url: string, init: {method?: string; body?: any} = {}): Promise<T> {
     if (url === '/api/uploads' && init.method === 'POST') {
-      const size = init.body.size;
-      this.session = {upload_id: 'up_' + '1'.repeat(32), video_id: 'v_' + '2'.repeat(32), state: 'uploading',
-        original_name: init.body.filename, declared_size: size, part_size: this.partSize,
-        part_count: Math.ceil(size / this.partSize), client_fingerprint: init.body.fingerprint,
-        uploaded_parts: [], mismatched_parts: [], uploaded_bytes: 0, missing_parts: [], expires_at: '', error: null, result: null, job_id: null};
+      this.posts++;
+      if (this.failPost > 0) {this.failPost--; throw new TypeError('Failed to fetch')}
+      const replay = this.byRequest.get(init.body.client_request_id);  // idempotent, like the server
+      if (!replay) {
+        const size = init.body.size;
+        this.creates++;
+        this.session = {upload_id: 'up_' + '1'.repeat(32), video_id: 'v_' + '2'.repeat(32), state: 'uploading',
+          original_name: init.body.filename, declared_size: size, part_size: this.partSize,
+          part_count: Math.ceil(size / this.partSize), client_fingerprint: init.body.fingerprint,
+          uploaded_parts: [], mismatched_parts: [], uploaded_bytes: 0, missing_parts: [], expires_at: '', error: null, result: null, job_id: null};
+        this.byRequest.set(init.body.client_request_id, this.session);
+      }
+      if (this.createGate) await this.createGate;
+      if (this.loseCreateResponse > 0) {this.loseCreateResponse--; throw new TypeError('Failed to fetch')}
       return this.view() as T;
     }
     if (url.endsWith('/parts/sign')) {
@@ -168,6 +182,69 @@ describe('resumable upload client', () => {
     expect(result.state).toBe('completed');
     expect(states.at(-1)?.phase).toBe('completed');
     expect(states.some(s => s.phase === 'cancelled')).toBe(false);
+  });
+
+  it('cancel while the file is still being fingerprinted sends nothing at all', async () => {
+    const server = new FakeServer(MiB), states: UploadState[] = [];
+    const upload = run(makeFile(3 * MiB), server, states);
+    const running = upload.start();             // now awaiting the fingerprint
+    expect(await upload.cancel()).toBe('cancelled');
+    await running;
+    expect([server.posts, server.signCalls, server.puts.length, server.deleteCalls]).toEqual([0, 0, 0, 0]);
+    expect(states.slice(states.findIndex(s => s.phase === 'cancelled')).map(s => s.phase)).toEqual(['cancelled']);
+  });
+
+  it('cancel while the create response is pending cancels the created session and uploads nothing', async () => {
+    const server = new FakeServer(MiB), states: UploadState[] = [];
+    let release!: () => void; server.createGate = new Promise(r => {release = r});
+    const upload = run(makeFile(3 * MiB), server, states);
+    const running = upload.start();
+    await vi.waitFor(() => expect(server.posts).toBe(1));   // the POST reached the server and is held
+    const cancelling = upload.cancel();
+    expect(states.some(s => s.phase === 'cancelled')).toBe(false);  // not claimed while the create is unsettled
+    release();
+    expect(await cancelling).toBe('cancelled');
+    await running;
+    expect(server.session.state).toBe('aborted');           // the created session was cancelled on the server
+    expect([server.creates, server.deleteCalls, server.signCalls, server.puts.length]).toEqual([1, 1, 0, 0]);
+    expect(states.slice(states.findIndex(s => s.phase === 'cancelled')).map(s => s.phase)).toEqual(['cancelled']);
+  });
+
+  it('a lost create response is settled by replaying the same request id, then cancelled', async () => {
+    const server = new FakeServer(MiB), states: UploadState[] = [];
+    let release!: () => void; server.createGate = new Promise(r => {release = r});
+    server.loseCreateResponse = 1;              // the server creates the session, the client never hears back
+    const upload = run(makeFile(3 * MiB), server, states);
+    const running = upload.start().catch(() => undefined);
+    await vi.waitFor(() => expect(server.posts).toBe(1));
+    const cancelling = upload.cancel();
+    server.createGate = undefined; release();
+    expect(await cancelling).toBe('cancelled');
+    await running;
+    expect(server.posts).toBe(2);               // original + replay with the same client_request_id
+    expect(server.creates).toBe(1);             // the replay found the session instead of making another
+    expect(server.session.state).toBe('aborted');
+    expect([server.signCalls, server.puts.length]).toEqual([0, 0]);
+  });
+
+  it('when the create outcome cannot be learned, the cancel is reported as unconfirmed', async () => {
+    const server = new FakeServer(MiB), states: UploadState[] = [];
+    let release!: () => void; server.createGate = new Promise(r => {release = r});
+    server.loseCreateResponse = 1;
+    const upload = run(makeFile(3 * MiB), server, states);
+    const running = upload.start().catch(() => undefined);
+    await vi.waitFor(() => expect(server.posts).toBe(1));
+    server.failPost = 1;                        // the replay cannot reach the server either
+    const cancelling = upload.cancel();
+    server.createGate = undefined; release();
+    expect(await cancelling).toBe('unconfirmed');
+    await running;
+    expect(states.at(-1)?.phase).toBe('cancel_unconfirmed');
+    expect(states.some(s => s.phase === 'cancelled')).toBe(false);
+    expect([server.signCalls, server.puts.length]).toEqual([0, 0]);
+    expect(await upload.cancel()).toBe('cancelled');   // retry: the replay now finds the session and DELETEs it
+    expect(server.session.state).toBe('aborted');
+    expect(server.creates).toBe(1);
   });
 
   it('re-signs expired URLs and retries transient failures', async () => {

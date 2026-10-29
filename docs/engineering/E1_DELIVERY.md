@@ -56,10 +56,14 @@
 - 文件身份分两层。① 快速预检：指纹 `fp1` = SHA-256(大小 + 首尾各 1 MiB + 3 处 64 KiB 采样)，它覆盖不到采样区以外的修改。② 内容核对：会话视图返回 `uploaded_part_md5`，即存储确认持有的每个分片的签名 Content-MD5（`_sync_parts` 已用 ETag 核对过）。续传前，前端用重选文件逐片计算这些分片的 MD5，任何一片不一致都按 `file_mismatch` 拒绝，不签名也不发送任何字节。因此最终对象只可能由同一份文件的字节组成，不会出现“旧文件已传分片 + 新文件剩余分片”的混合。代价是续传前要读取并哈希已上传部分（在 Worker 中进行）。前提是 `UPLOAD_VERIFY_PART_ETAG=true`（默认）；关闭后，账本中的“uploaded”不再与 ETag 核对。
 - 刷新或重开浏览器后，从 `GET /api/uploads` 列出未完成会话，提示重新选择文件；名称、大小、指纹或已传分片内容不符时拒绝，且不发送任何字节。
 - 取消：`cancel()` 返回 `cancelled | unconfirmed | continuing`。只有服务端确认后才显示已取消。网络失败时进入 `cancel_unconfirmed`，提示会话可能仍占用配额，并提供“重试取消”和“继续上传”。与完成竞争失败（409）时转为跟随服务端的合并/校验阶段。
+- 会话尚未建立时的取消（第二次独立验收）：
+  - **幂等创建**：每次新上传生成随机 `client_request_id`，随 `POST /api/uploads` 发送。服务端在锁定空间行后，按（空间, request id）查找已有会话；找到就原样返回，不再预占配额（迁移 `003_upload_request_id.sql`，唯一索引）。
+  - **取消时如何确认**：创建请求在途时，`cancel()` 先等它出结果。服务端返回了错误说明没有创建；拿到会话就补发 `DELETE`；完全没有回音时，用同一个 request id 重放创建来查明结果，仍失败则报告 `unconfirmed`。
+  - **防止旧流程继续**：`run()` 在每个 `await` 之后（指纹、创建、读取会话、核对分片）以及启动分片之前，都检查取消信号和代次（generation），被取消或被新一轮替代就立即停止，不再签名、上传或修改界面状态。另外，向已中止的信号添加监听不会触发回调，所以启动分片时会显式检查一次。
 - 三阶段分开显示：上传分片 → 服务器校验 → 视频处理（沿用现有处理中界面）。
 
 ### 3.5 迁移工具 `python -m vam.platform.migrate`
-`schema [--dry-run]`、`create-user`、`set-quota`、`backfill-legacy [--dry-run]`、`check`、`rollback-legacy [--dry-run]`。SQLite 以只读 URI 打开，工具不移动、不修改现有视频文件和行。回填只新增 `origin='legacy'` 的归属，回退只删除这些行。schema 当前为版本 2（`001_platform`、`002_object_deletions`），`schema` 按序幂等应用。002 只新建一张表，不改动已有数据；回退到只认识 v1 的代码时需要删除该表并移除 `schema_migrations` 中版本 2 的记录（v1 代码会拒绝启动比自己新的 schema）。
+`schema [--dry-run]`、`create-user`、`set-quota`、`backfill-legacy [--dry-run]`、`check`、`rollback-legacy [--dry-run]`。SQLite 以只读 URI 打开，工具不移动、不修改现有视频文件和行。回填只新增 `origin='legacy'` 的归属，回退只删除这些行。schema 当前为版本 3（`001_platform`、`002_object_deletions`、`003_upload_request_id`），`schema` 按序幂等应用。002 新建一张表；003 给 `upload_sessions` 增加一个可空列和一个部分唯一索引，已有行不受影响。旧代码会拒绝启动比自己新的 schema，因此回退时要倒序撤销：对 003 删除 `upload_sessions_request` 索引和 `client_request_id` 列，对 002 删除 `object_deletions` 表，并移除 `schema_migrations` 中对应版本的记录。
 
 ## 4. 启动方式
 
@@ -107,7 +111,7 @@ python -m vam.platform.migrate rollback-legacy --workspace <ws_id> [--dry-run]
 | CI（Linux） | `4632b4f`：`E1 platform`（compose 中的真实 PG + MinIO，后端验收 + 浏览器验收）与 `EviReel CPU tests` | 均 success |
 | 未运行 | Linux compose 只在 CI 上运行过，本机无 Docker；真实模型调用 | — |
 
-独立验收（目标 `be66e7d`）发现 3 项缺陷：续传文件内容一致性、对象删除的持久补偿、取消状态失真。它们的修复和回归结果见 STATUS“独立验收整改”：真实 PG+MinIO 下 22 passed（全量 237 passed）、E1 浏览器 2/2、vitest 30/30、P5 21/21。
+独立验收（目标 `be66e7d`）发现 3 项缺陷：续传文件内容一致性、对象删除的持久补偿、取消状态失真。它们的修复和回归结果见 STATUS“独立验收整改”：真实 PG+MinIO 下 22 passed（全量 237 passed）、E1 浏览器 2/2、vitest 30/30、P5 21/21。第二次独立验收（目标 `55d4271`）发现会话未建立时取消的时序缺陷。修复方式是幂等创建、取消前先确认、每个 await 之后检查取消，见 3.4。修复后本机结果：真实 PG+MinIO 下 23 passed，全量 238 passed，vitest 34/34，P5 21/21，E1 浏览器 2/2。
 
 ## 7. 交接给 E2
 - **接口**：`UploadService`（create/get/sign/complete/cancel/reconcile/accept_processing），`ObjectStore`（见 3.1），`ObjectCleaner`（`enqueue` 在调用方事务内，`delete_now`/`drain`）。`object_deletions` 已经是一张持久任务表，E2 可以把它并入通用任务表或交给 Worker 消费。
