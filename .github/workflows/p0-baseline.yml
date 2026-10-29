@@ -59,7 +59,10 @@ jobs:
             sleep 1
           done
           cd frontend
-          pnpm e2e
+          PLAYWRIGHT_JUNIT_OUTPUT_NAME=../browser-results.xml pnpm e2e --reporter=list,junit
+      - name: Report browser failures as annotations
+        if: failure()
+        run: python .github/scripts/junit_annotations.py browser-results.xml
       - name: Build installable package with web assets
         run: |
           python -m pip install build
