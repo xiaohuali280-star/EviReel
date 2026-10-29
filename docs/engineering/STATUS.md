@@ -1,8 +1,29 @@
 # 工程状态
 
-更新：2026-10-29　阶段：**E2 已交付**：本机真实 PG/MinIO 验证通过；Linux 真实 RabbitMQ + 独立 Worker 的 13 个故障场景全部执行并通过。未迁移项见下文，待独立验收。E1 已验收（历史记录见下文）
+更新：2026-10-29　阶段：**E2 第二次独立验收的 5 项问题（P1×1、P2×4）已整改**：本机真实 PG/MinIO 与 Linux 真实 RabbitMQ + 独立 Worker 全部通过，待复验。E1 已验收（历史记录见下文）
 
-当前提交：E2 实现 `866e8bf` → 修复 `2d8309f` → CI 计数 `85a8278`，文档见其后的提交。
+当前提交：E2 实现 `866e8bf` → 修复 `2d8309f` → CI 计数 `85a8278` → 验收整改 `afd21ee` → CI/文档 `8f8ce44`，状态记录见其后的提交。
+
+## E2 第二次独立验收整改（`a224201` 之后）
+
+| 发现 | 整改 | 回归测试 |
+| --- | --- | --- |
+| [P1] publish 在 token 校验之前写可见状态，旧执行者能把 `active_generation` 回退；transcript_index 在校验前移动字幕 head | 每个任务有单调递增的 `jobs.seq`（PG 迁移 005）。可见状态只在 publish 中写，并按 seq fencing：SQLite `publish_fenced`（代次、播放路径、视频/转写状态、任务行，一个事务，条件 `published_seq ≤ seq`；registry 迁移 005），以及转写库 `publish_head`（`transcript_fence`）。transcript_index 只完成版本、不移动 head；失败投影在账本接受后才执行且带 fence；Worker 进度不会重新打开已终结的行 | 任务 1、任务 2 先后发布后，任务 1 的 publish 执行者恢复：`published=false`，head 未移动，可见代次仍为任务 2 的，其账本提交也被拒；当前任务重放发布幂等。转写 head：旧序号的 head 移动被拒，同序号可重复执行 |
+| [P2] 音频故障让视觉分支被跳过 | 新增 `audio` 阶段（语音分支专属）；`prepare` 只校验原片和生成播放文件 | 只对音频抽取注入 `audio_timeout`：audio 失败（2 次尝试），asr/transcript 跳过，**vision 执行并成功**，任务 partial，可播放、视觉可用，转写状态为 failed |
+| [P2] 扫描在锁外读候选，锁内只查 status，会终止已续租或已被接管的尝试 | 持锁后重核：同一 token、租约仍过期、未被再次投递；不满足就不动作 | 用测试钩子把“候选读出后续租”和“候选读出后接管”注入锁前：两者都不失败、不重投；健康尝试正常完成 |
+| [P2] 笔记批次、导出未迁移，自动笔记回退 | `notes` 任务：`notes_draft`（按批调用模型，批次检查点）→ `notes_publish`（确定性 id，按任务创建时间排序）。`export` 任务：产物写入对象存储，按引用下载。自动笔记在 publish 的同一事务里创建。API 重启不会中断笔记任务 | 自动笔记随发布创建；首次输出无效时重试成功；手动再生成复用全部批次检查点（模型调用次数不变）；重复执行笔记发布不会产生重复产物；API 重启后笔记任务仍为 queued 并能完成；导出任务幂等，下载内容与直接导出一致。**Linux 独立 Worker**：在笔记批次检查点之后 kill -9，恢复后复用该批（computed=0，模型只调用 1 次） |
+| [P2] 失败对象没有清理收敛 | `vam/pipeline/sweep.py`：`pipeline/` 下超过宽限期、未被检查点/阶段输出/运行中尝试引用的对象进入持久删除队列（`pipeline_orphan`），由发布器周期执行 | 真实 MinIO：宽限期内不删除；超过宽限期后只删除孤儿；被阶段输出引用的产物、检查点、运行中尝试的产物都保留；删除记录为 done |
+
+### 整改后的验证
+| 类别 | 检查 | 结果 |
+| --- | --- | --- |
+| 真实中间件（本机，PG 16.4 + MinIO） | `tests/test_e2_pipeline.py` + `tests/test_e2_remediation.py`（新增 8 个） | **20 passed** |
+| 真实中间件（本机） | 全量 `pytest tests` | **259 passed, 14 skipped**（14 个故障测试需要 Linux 和 RabbitMQ，在 CI 上执行）。registry 迁移测试改为期望版本 5（数据保留断言不变） |
+| 回归（本机） | P5 浏览器回归 21 个用例 | **21/21 通过** |
+| GitHub CI（Linux，`afd21ee`） | E2 pipeline：故障测试 tests=14 failures=0 skipped=0（含新增的笔记批次 kill -9 恢复）；容器栈冒烟；E1 回归 | success；E1 platform 工作流 success |
+| GitHub CI（Linux，`8f8ce44`） | E2 pipeline：账本/阶段/整改测试 tests=20 failures=0 skipped=0；故障测试 tests=14 failures=0 skipped=0 | success |
+| GitHub CI | EviReel CPU tests | `afd21ee` 上浏览器回归步骤失败一次（当时没有具体输出，本机同样 21 个用例全部通过）；之后为该步骤增加 JUnit 注释输出，`8f8ce44` 上 **success**。该次失败的原因未查明，按偶发记录 |
+| 未运行 | 真实模型调用；真实网关故障；本机 Linux 容器（无 Docker） | — |
 
 ## E2：可靠异步处理（`12a16ee` 之后）
 设计、启动、迁移与回退见 `E2_DELIVERY.md`。
@@ -27,11 +48,12 @@
   - `deploy/e2/app.Dockerfile`，`.env.example`，`pyproject` 新增 `pipeline` extra（Celery 5.5–5.6）。
 - CI：`.github/workflows/e2-pipeline.yml`，真实 PG + MinIO + RabbitMQ + 独立 Worker 进程 + 容器栈冒烟。
 
-### 未完成 / 未迁移（如实记录）
-- 笔记批次、导出、问答没有迁移到 Worker。worker 模式下，索引后自动生成笔记不会触发（需手动生成）。
+### 未完成 / 未迁移（如实记录；已按第二次验收更新）
+- 问答没有迁移到 Worker（需求允许自行决定），保留 P4 的幂等与终态持久化。笔记批次、导出、自动笔记已在 `afd21ee` 迁入流水线。
 - 视觉阶段只有阶段级恢复。
-- 仍是单 API + 共享 DATA_ROOT；SQLite 中的视频元数据和发布指针没有迁入 PG。
-- 对象存储中失败尝试的产物没有自动清理。
+- 仍是单 API + 共享 DATA_ROOT；SQLite 中的视频元数据和发布指针没有迁入 PG（发布已按任务序号 fencing）。
+- 已成功任务的阶段产物会一直保留，保留期策略交给 E3；孤儿产物由清理扫描回收。
+- 以下“验证记录”是 `85a8278` 时的结果，整改后的结果见上一节。
 
 ### 验证记录
 **E2-A 真实中间件（本机 Windows，PostgreSQL 16.4 + MinIO；没有 RabbitMQ，outbox 行在测试进程内交给真实 runner）**
