@@ -140,7 +140,7 @@ def test_auto_notes_follow_publication_and_run_as_checkpointed_pipeline_jobs(wor
         repo = app.state.pipeline.repo
         with repo.db.connect() as conn:
             notes = conn.execute("SELECT * FROM jobs WHERE kind='notes'").fetchone()
-        assert notes["request_id"] == f"auto-notes:{view['job_id']}"   # created in the publish transaction
+        assert notes["request_id"] == f"auto-notes:{view['job_id']}"   # created in the video project commit
         assert drain_inline(ctx, notes["job_id"])["status"] == "succeeded"
         assert [a["outcome"] for a in attempt_rows(repo.db, notes["job_id"], "notes_draft")] == ["retry", "succeeded"]
         state = alice.get(f"/api/videos/{view['video_id']}/study").json()

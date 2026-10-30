@@ -71,7 +71,7 @@ class StudyService:
         """Worker mode: the PostgreSQL ledger decides the outcome; the SQLite row is a projection that the
         final `project` stage writes. Until it has, a terminal ledger state overrides a stale mirror."""
         pipeline = getattr(self.indexing, 'pipeline', None)
-        if pipeline is None or job['status'] not in ('queued', 'running'):
+        if pipeline is None:
             return job
         try:
             ledger = pipeline.repo.job(job['job_id'])
@@ -81,10 +81,22 @@ class StudyService:
         failed = next((s for s in stages.values() if s['status'] == 'failed'), None)
         if ledger['status'] == 'failed' or failed:   # a failed notes stage already decides the outcome
             code = (failed or {}).get('error_code') or ledger['error_code'] or 'study_generation_failed'
-            return job | {'status': 'failed', 'phase': 'failed', 'error_code': code}
+            return job | {'status': 'failed', 'phase': 'failed', 'error_code': code, 'artifact_id': None}
         if ledger['status'] == 'succeeded':
             return job | {'status': 'succeeded', 'phase': 'done'}
+        if job['status'] not in ('queued', 'running'):   # mirror ahead of an undecided ledger: not final yet
+            return job | {'status': 'running', 'phase': 'publishing', 'artifact_id': None}
         return job
+
+    def _artifact_allowed(self, artifact):
+        """Worker mode: an artifact is visible only if its job's committed ledger outcome is success."""
+        pipeline = getattr(self.indexing, 'pipeline', None)
+        if pipeline is None:
+            return True
+        try:
+            return pipeline.repo.job(artifact['job_id'])['status'] == 'succeeded'
+        except DomainError:
+            return True   # artifacts from before worker mode exist only in SQLite
 
     def submit(self, video_id, request_id):
         if self.closed:
@@ -138,7 +150,8 @@ class StudyService:
         row = self.indexing._usable_video(video_id)
         with self.registry.db.connect() as conn:
             job = conn.execute('SELECT * FROM study_jobs WHERE video_id=? ORDER BY created_at DESC LIMIT 1', (video_id,)).fetchone()
-            artifact = conn.execute('SELECT * FROM study_artifacts WHERE video_id=? ORDER BY created_at DESC LIMIT 1', (video_id,)).fetchone()
+            candidates = conn.execute('SELECT * FROM study_artifacts WHERE video_id=? ORDER BY created_at DESC LIMIT 20', (video_id,)).fetchall()
+        artifact = next((a for a in candidates if self._artifact_allowed(a)), None)
         return {'video_id': video_id, 'job': self._with_ledger(dict(job)) if job else None,
                 'artifact': self.public_artifact(artifact, row) if artifact else None,
                 'auto_enabled': self.settings.study_auto_generate,
@@ -155,7 +168,7 @@ class StudyService:
         row = self.indexing._usable_video(video_id)
         with self.registry.db.connect() as conn:
             artifact = conn.execute('SELECT * FROM study_artifacts WHERE video_id=? AND artifact_id=?', (video_id, artifact_id)).fetchone()
-        if not artifact:
+        if not artifact or not self._artifact_allowed(artifact):
             raise DomainError(404, 'artifact_not_found', 'Study artifact not found')
         return self.public_artifact(artifact, row)
 

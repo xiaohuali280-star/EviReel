@@ -333,11 +333,8 @@ def publish(ctx, claim):
                 "vision_generation": vis["generation"] if vision_ok else None,
                 "fingerprint": vis["fingerprint"] if vision_ok else None, "playback_path": playback,
                 "transcript": {"status": t, "version": transcript.get("version"), "error": transcript.get("error")}}
-    follow = []
-    if (job["kind"] == "video" and status in {"succeeded", "partial"}
-            and ctx.settings.study_auto_generate and ctx.study_model_configured):
-        follow.append({"kind": "notes", "request_id": f"auto-notes:{job_id}"})   # same transaction as the decision
-    return StageResult({"decision": decision}, follow_up=follow,
+    # Auto notes are NOT created here: they read the published corpus, which exists only after `project`.
+    return StageResult({"decision": decision},
                        job_result={"status": status, "result": result, "error_code": error.get("error_code"),
                                    "error": error.get("error")})
 
@@ -358,8 +355,16 @@ def project(ctx, claim):
     if job["kind"] == "notes":
         published = stages["notes_publish"]
         if published["status"] == "succeeded":
-            ctx.registry.publish_study_artifact_state(job_id, published["output"]["artifact_id"])
-            return StageResult({"status": "succeeded"})
+            # Only a COMMITTED notes_publish decision reaches here: write the artifact (deterministic id,
+            # ordered by job creation time) and the terminal state. Any re-run writes the same values.
+            decided = published["output"]
+            payload = ctx.fetch_json(decided["notes"], ctx.workdir(claim["stage"]["attempt_token"]) / "notes.json")
+            ctx.project(job)
+            ctx.registry.publish_study_artifact(video_id, job_id, artifact_id=decided["artifact_id"],
+                                                versions=payload["versions"], content=payload["content"],
+                                                created_at=job["created_at"].timestamp())
+            ctx.registry.publish_study_artifact_state(job_id, decided["artifact_id"])
+            return StageResult({"status": "succeeded", "artifact_id": decided["artifact_id"]})
         failed = next((s for s in (stages["notes_draft"], published) if s["status"] == "failed"), None)
         code = failed["error_code"] if failed else "study_generation_failed"
         ctx.project(job)
@@ -391,7 +396,14 @@ def project(ctx, claim):
             ctx.drop_generation(video_id, attempt["attempt_token"])
     if job["kind"] == "video" and d["transcript"]["status"] in {"failed", "skipped"}:
         ctx.drop_generation(video_id, job_id)  # a transcript file this job created but never published
-    return StageResult({"status": d["status"], "published": published, "transcript_heads_moved": heads_moved})
+    # Auto notes are accepted only now - after the corpus they read (heads, generation) is projected - and
+    # in this stage's own token-guarded ledger commit, so the intent is durable and created exactly once.
+    follow = []
+    if (published and job["kind"] == "video" and d["status"] in {"succeeded", "partial"}
+            and ctx.settings.study_auto_generate and ctx.study_model_configured):
+        follow.append({"kind": "notes", "request_id": f"auto-notes:{job_id}"})
+    return StageResult({"status": d["status"], "published": published, "transcript_heads_moved": heads_moved},
+                       follow_up=follow)
 
 
 
@@ -450,16 +462,14 @@ def notes_draft(ctx, claim):
 
 
 def notes_publish(ctx, claim):
-    """Idempotent publication of the notes artifact (deterministic id, ordered by job creation time)."""
+    """DECIDE the notes artifact: verify the drafted product and fix its id. Writes nothing visible; the
+    artifact and the job's terminal state are written by `project` from this committed decision only."""
     job, token = claim["job"], claim["stage"]["attempt_token"]
     draft = ctx.repo.stages(job["job_id"])["notes_draft"]["output"]
-    payload = ctx.fetch_json(draft["notes"], ctx.workdir(token) / "notes.json")
-    ctx.project(job)
-    artifact_id = "a_" + job["job_id"]
-    ctx.registry.publish_study_artifact(job["video_id"], job["job_id"], artifact_id=artifact_id,
-                                        versions=payload["versions"], content=payload["content"],
-                                        created_at=job["created_at"].timestamp())
-    return StageResult({"artifact_id": artifact_id})
+    payload = ctx.fetch_json(draft["notes"], ctx.workdir(token) / "notes.json")   # verified (sha256) and parseable
+    if not payload.get("content", {}).get("chapters"):
+        raise StageError("study_empty_output", "Drafted notes contain no chapters", transient=False)
+    return StageResult({"artifact_id": "a_" + job["job_id"], "notes": draft["notes"]})
 
 
 EXPORT_TYPES = {"md": "text/markdown; charset=utf-8", "pdf": "application/pdf",
