@@ -14,7 +14,9 @@ class SearchRequest(VisualSearchRequest):
     queries: list[Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=4000)]] = Field(default_factory=list, max_length=3)
     fusion: Literal['rrf', 'legacy'] | None = None
     rerank: bool | None = None
+    keyword: bool | None = None                               # E4: BM25 keyword channel (default: setting)
     answer: bool = False
+    answer_mode: Literal['deep', 'cheap', 'auto'] | None = None  # E4 route (default: ANSWER_ROUTE)
 
 
 @router.post('/{video_id}/search')
@@ -22,13 +24,14 @@ async def search(video_id: str, body: SearchRequest, request: Request):
     async with request.app.state.indexing.retrieval_context(video_id) as context:
         context.strategy = body.fusion or context.strategy
         context.use_rerank = context.use_rerank if body.rerank is None else body.rerank
+        context.use_keyword = context.use_keyword if body.keyword is None else body.keyword
         queries = list(dict.fromkeys(q.strip() for q in [body.query] + body.queries if q.strip()))
         for query in queries:
             await context.search(query, top_k=body.top_k, sources=body.sources,
                                  min_time=body.min_time, max_time=body.max_time if body.max_time is not None else float('inf'))
         evidence = await context.prepare(body.query, top_k=body.top_k)
         if body.answer:
-            return await context.answer(body.query)
+            return await context.answer(body.query, mode=body.answer_mode)
         return {'video_id': video_id, 'index_version': context.versions['visual'], 'evidence': evidence,
                 'results': evidence, 'warnings': context.warnings,
                 'execution': {'versions': context.versions, 'searches': context.executions,

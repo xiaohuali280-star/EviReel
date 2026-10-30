@@ -1,0 +1,474 @@
+{
+ "note": "Synthetic lecture text written for the E4 evaluation tooling. Not a recording; no real video.",
+ "videos": [
+  {
+   "key": "algo",
+   "title": "合成课程：最小生成树",
+   "duration": 480,
+   "segments": [
+    {
+     "start": 0,
+     "end": 15,
+     "text": "大家好，今天这一讲的主题是最小生成树，我们会讲 Kruskal 和 Prim 两种算法。"
+    },
+    {
+     "start": 15,
+     "end": 30,
+     "text": "先回顾一下定义：在连通无向带权图里，生成树要连通所有顶点，并且边数等于顶点数减一。"
+    },
+    {
+     "start": 30,
+     "end": 45,
+     "text": "最小生成树就是所有生成树里边权之和最小的那一棵，它不一定唯一。"
+    },
+    {
+     "start": 45,
+     "end": 60,
+     "text": "第一个关键性质叫切分定理：横跨任意切分的最轻边，一定属于某棵最小生成树。"
+    },
+    {
+     "start": 60,
+     "end": 75,
+     "text": "Kruskal 算法的思路是先把所有边按权重从小到大排序，然后依次考虑每条边。"
+    },
+    {
+     "start": 75,
+     "end": 90,
+     "text": "如果一条边的两个端点已经连通，加入它就会形成环，所以要跳过这条边。"
+    },
+    {
+     "start": 90,
+     "end": 105,
+     "text": "判断两个端点是否连通，我们用并查集，也就是 union find 数据结构。"
+    },
+    {
+     "start": 105,
+     "end": 120,
+     "text": "并查集有两个操作，find 找到集合的代表元素，union 合并两个集合。"
+    },
+    {
+     "start": 120,
+     "end": 135,
+     "text": "代码里我们写成 uf.find(u) 和 uf.union(u, v)，这两个函数名大家要记住。"
+    },
+    {
+     "start": 135,
+     "end": 150,
+     "text": "为了让 find 足够快，要做路径压缩，把查找路径上的节点直接挂到根上。"
+    },
+    {
+     "start": 150,
+     "end": 165,
+     "text": "另一个优化是按秩合并，总是把矮的树挂到高的树下面。"
+    },
+    {
+     "start": 165,
+     "end": 180,
+     "text": "两个优化一起用，单次操作的均摊复杂度接近常数，严格说是反阿克曼函数。"
+    },
+    {
+     "start": 180,
+     "end": 195,
+     "text": "所以 Kruskal 的总时间复杂度主要来自排序，是 O(E log E)。"
+    },
+    {
+     "start": 195,
+     "end": 210,
+     "text": "接下来讲 Prim 算法，它从一个起点出发，每次把离当前树最近的顶点加进来。"
+    },
+    {
+     "start": 210,
+     "end": 225,
+     "text": "Prim 需要一个优先队列，Python 里我们用 heapq 模块来实现最小堆。"
+    },
+    {
+     "start": 225,
+     "end": 240,
+     "text": "每次用 heapq.heappop 取出权重最小的候选边，如果另一端已经在树里就丢弃。"
+    },
+    {
+     "start": 240,
+     "end": 255,
+     "text": "新加入顶点之后，把它的所有邻边用 heapq.heappush 放进堆里。"
+    },
+    {
+     "start": 255,
+     "end": 270,
+     "text": "用二叉堆实现的 Prim 时间复杂度是 O(E log V)。"
+    },
+    {
+     "start": 270,
+     "end": 285,
+     "text": "稠密图用邻接矩阵版本的 Prim 更合适，复杂度是 O(V 平方)。"
+    },
+    {
+     "start": 285,
+     "end": 300,
+     "text": "稀疏图一般用 Kruskal 或者堆优化的 Prim，两者差别不大。"
+    },
+    {
+     "start": 300,
+     "end": 315,
+     "text": "下面看一个例子，这张图有六个顶点和九条边。"
+    },
+    {
+     "start": 315,
+     "end": 330,
+     "text": "我们按照 Kruskal 的顺序一条一条加边，注意哪些边因为成环被跳过。"
+    },
+    {
+     "start": 330,
+     "end": 345,
+     "text": "第四条边连接的两个顶点已经在同一个集合里，所以它被跳过了。"
+    },
+    {
+     "start": 345,
+     "end": 360,
+     "text": "最后选出了五条边，总权重是十七。"
+    },
+    {
+     "start": 360,
+     "end": 375,
+     "text": "常见的错误是忘记检查连通，结果把成环的边也加了进去。"
+    },
+    {
+     "start": 375,
+     "end": 390,
+     "text": "还有一个常见错误是没有做路径压缩，导致大图上非常慢。"
+    },
+    {
+     "start": 390,
+     "end": 405,
+     "text": "最小生成树的应用包括网络布线、聚类分析，以及近似求解旅行商问题。"
+    },
+    {
+     "start": 405,
+     "end": 420,
+     "text": "比如单链接聚类，就是在最小生成树上删掉最长的几条边。"
+    },
+    {
+     "start": 420,
+     "end": 435,
+     "text": "作业是用并查集实现 Kruskal，并且在随机图上和 Prim 比较运行时间。"
+    },
+    {
+     "start": 435,
+     "end": 450,
+     "text": "作业截止时间是下周五晚上十点，请在课程平台提交。"
+    },
+    {
+     "start": 450,
+     "end": 465,
+     "text": "提交时请附上你的测试图和运行时间的对比表。"
+    },
+    {
+     "start": 465,
+     "end": 480,
+     "text": "好，今天就讲到这里，下一讲我们讲最短路径的 Dijkstra 算法。"
+    }
+   ],
+   "frames": [
+    {
+     "t": 15,
+     "caption": "幻灯片标题：第五讲 最小生成树 MST"
+    },
+    {
+     "t": 45,
+     "caption": "幻灯片：生成树的边数 = V - 1，图示一个连通无向带权图"
+    },
+    {
+     "t": 75,
+     "caption": "幻灯片：切分定理 Cut Property 的示意图，红色虚线表示切分"
+    },
+    {
+     "t": 105,
+     "caption": "幻灯片：Kruskal 伪代码 sort(edges) 然后 for e in edges"
+    },
+    {
+     "t": 135,
+     "caption": "幻灯片：并查集类 class UnionFind 包含 parent 和 rank 两个数组"
+    },
+    {
+     "t": 165,
+     "caption": "代码截图：def find(self, x) 中有 self.parent[x] = self.find(self.parent[x]) 一行"
+    },
+    {
+     "t": 195,
+     "caption": "幻灯片：复杂度表 Kruskal O(E log E)，并查集 α(n)"
+    },
+    {
+     "t": 225,
+     "caption": "幻灯片：Prim 算法流程图，起点标为 A"
+    },
+    {
+     "t": 255,
+     "caption": "代码截图：import heapq 和 heapq.heappush(pq, (w, v))"
+    },
+    {
+     "t": 285,
+     "caption": "幻灯片：稠密图 vs 稀疏图 的对比表格，邻接矩阵 V²"
+    },
+    {
+     "t": 315,
+     "caption": "板书：例子图 六个顶点 A 到 F，九条边，边权写在边上"
+    },
+    {
+     "t": 345,
+     "caption": "板书：被跳过的边 C-D 用红叉标出，最终 MST 总权重 17"
+    },
+    {
+     "t": 375,
+     "caption": "幻灯片：应用 网络布线、单链接聚类、TSP 近似"
+    },
+    {
+     "t": 405,
+     "caption": "幻灯片：作业要求 实现 Kruskal 并与 Prim 比较，提交到 Gradescope"
+    },
+    {
+     "t": 435,
+     "caption": "幻灯片：截止时间 周五 22:00，迟交每天扣 10 分"
+    },
+    {
+     "t": 465,
+     "caption": "幻灯片：下一讲预告 Dijkstra 最短路径"
+    }
+   ],
+   "events": [
+    {
+     "start": 0,
+     "end": 60,
+     "text": "开场：介绍最小生成树主题和生成树的定义"
+    },
+    {
+     "start": 60,
+     "end": 120,
+     "text": "讲解切分定理和 Kruskal 算法的排序加边思路"
+    },
+    {
+     "start": 120,
+     "end": 195,
+     "text": "讲解并查集 find 和 union、路径压缩与按秩合并"
+    },
+    {
+     "start": 195,
+     "end": 300,
+     "text": "讲解 Prim 算法、heapq 优先队列和复杂度对比"
+    },
+    {
+     "start": 300,
+     "end": 390,
+     "text": "在板书例子上演示 Kruskal，总结常见错误"
+    },
+    {
+     "start": 390,
+     "end": 480,
+     "text": "应用、作业说明和下一讲预告"
+    }
+   ]
+  },
+  {
+   "key": "py",
+   "title": "合成课程：Python 装饰器与生成器",
+   "duration": 360,
+   "segments": [
+    {
+     "start": 0,
+     "end": 15,
+     "text": "这一讲我们讲 Python 的装饰器和生成器，这是写出简洁代码的两个工具。"
+    },
+    {
+     "start": 15,
+     "end": 30,
+     "text": "装饰器本质上是一个函数，它接收一个函数，返回一个新的函数。"
+    },
+    {
+     "start": 30,
+     "end": 45,
+     "text": "最简单的写法是在内部定义 wrapper，然后 return wrapper。"
+    },
+    {
+     "start": 45,
+     "end": 60,
+     "text": "但这样会丢掉原函数的名字和文档字符串，所以要用 functools.wraps。"
+    },
+    {
+     "start": 60,
+     "end": 75,
+     "text": "写法是在 wrapper 上面加一行 @functools.wraps(func)。"
+    },
+    {
+     "start": 75,
+     "end": 90,
+     "text": "带参数的装饰器需要再多包一层，最外层接收参数。"
+    },
+    {
+     "start": 90,
+     "end": 105,
+     "text": "比如一个重试装饰器 retry(times=3)，外层拿到 times，里面才是真正的装饰器。"
+    },
+    {
+     "start": 105,
+     "end": 120,
+     "text": "装饰器也可以用类来写，只要类实现了 __call__ 方法。"
+    },
+    {
+     "start": 120,
+     "end": 135,
+     "text": "类装饰器的好处是可以保存状态，比如统计函数被调用了多少次。"
+    },
+    {
+     "start": 135,
+     "end": 150,
+     "text": "常见的内置装饰器有 property、staticmethod 和 classmethod。"
+    },
+    {
+     "start": 150,
+     "end": 165,
+     "text": "接下来讲生成器，含有 yield 的函数调用后返回的是一个生成器对象。"
+    },
+    {
+     "start": 165,
+     "end": 180,
+     "text": "生成器是惰性的，只有在迭代的时候才一步一步计算。"
+    },
+    {
+     "start": 180,
+     "end": 195,
+     "text": "所以处理大文件的时候，用生成器逐行读取可以节省内存。"
+    },
+    {
+     "start": 195,
+     "end": 210,
+     "text": "yield from 可以把迭代委托给另一个生成器，代码更简洁。"
+    },
+    {
+     "start": 210,
+     "end": 225,
+     "text": "想取前 n 个元素，可以用 itertools.islice，而不是把生成器转成列表。"
+    },
+    {
+     "start": 225,
+     "end": 240,
+     "text": "生成器只能遍历一次，遍历完再遍历就什么也得不到了。"
+    },
+    {
+     "start": 240,
+     "end": 255,
+     "text": "上下文管理器可以用 contextlib.contextmanager 加生成器来写。"
+    },
+    {
+     "start": 255,
+     "end": 270,
+     "text": "在 yield 之前写进入时的逻辑，在 yield 之后写退出时的清理逻辑。"
+    },
+    {
+     "start": 270,
+     "end": 285,
+     "text": "要注意用 try finally 包住 yield，这样出异常时也能清理。"
+    },
+    {
+     "start": 285,
+     "end": 300,
+     "text": "最后总结一下：装饰器改变函数的行为，生成器改变数据产生的方式。"
+    },
+    {
+     "start": 300,
+     "end": 315,
+     "text": "练习一：写一个 timer 装饰器，打印函数运行的时间。"
+    },
+    {
+     "start": 315,
+     "end": 330,
+     "text": "练习二：写一个生成器，按块读取二进制文件，每块四千零九十六字节。"
+    },
+    {
+     "start": 330,
+     "end": 345,
+     "text": "参考答案会在下周的课上讲。"
+    },
+    {
+     "start": 345,
+     "end": 360,
+     "text": "下课。"
+    }
+   ],
+   "frames": [
+    {
+     "t": 10,
+     "caption": "幻灯片标题：Python 装饰器与生成器"
+    },
+    {
+     "t": 40,
+     "caption": "代码截图：def decorator(func): def wrapper(*args, **kwargs): return func(*args, **kwargs)"
+    },
+    {
+     "t": 70,
+     "caption": "代码截图：@functools.wraps(func) 写在 wrapper 定义上方"
+    },
+    {
+     "t": 100,
+     "caption": "代码截图：def retry(times=3) 三层嵌套函数，最内层捕获 Exception 后重试"
+    },
+    {
+     "t": 130,
+     "caption": "代码截图：class CountCalls: def __call__(self, *args) 中 self.count += 1"
+    },
+    {
+     "t": 160,
+     "caption": "幻灯片：生成器 vs 列表 内存占用对比图，生成器常数内存"
+    },
+    {
+     "t": 190,
+     "caption": "代码截图：with open(path) as f: for line in f: yield line.rstrip()"
+    },
+    {
+     "t": 220,
+     "caption": "代码截图：from itertools import islice; first_ten = list(islice(gen, 10))"
+    },
+    {
+     "t": 250,
+     "caption": "代码截图：@contextmanager def timer(): start = time.perf_counter() try: yield finally: print(elapsed)"
+    },
+    {
+     "t": 280,
+     "caption": "幻灯片：总结表格 装饰器 vs 生成器 vs 上下文管理器"
+    },
+    {
+     "t": 310,
+     "caption": "幻灯片：练习 timer 装饰器 与 分块读取 chunk_size = 4096"
+    },
+    {
+     "t": 340,
+     "caption": "幻灯片：参考资料 PEP 318 装饰器，PEP 255 生成器"
+    }
+   ],
+   "events": [
+    {
+     "start": 0,
+     "end": 75,
+     "text": "装饰器概念、wrapper 写法和 functools.wraps"
+    },
+    {
+     "start": 75,
+     "end": 150,
+     "text": "带参数的装饰器、类装饰器和内置装饰器"
+    },
+    {
+     "start": 150,
+     "end": 240,
+     "text": "生成器、惰性求值、yield from 和 itertools.islice"
+    },
+    {
+     "start": 240,
+     "end": 300,
+     "text": "用 contextlib.contextmanager 写上下文管理器"
+    },
+    {
+     "start": 300,
+     "end": 360,
+     "text": "总结和练习"
+    }
+   ]
+  }
+ ]
+}

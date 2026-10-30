@@ -48,6 +48,14 @@ class Settings(BaseSettings):
     retrieval_max_turns: int = Field(4, ge=1, le=20)
     retrieval_answer_text_chars: int = Field(800, ge=100, le=4000)
     rerank_enabled: bool = False
+    # E4: keyword (BM25) channel next to the embedding channels, and the answer route (vam/retrieval/routing.py).
+    # Defaults keep the pre-E4 behaviour; thresholds are evaluated (docs/engineering/EVALUATION.md), not tuned on
+    # real data yet.
+    retrieval_keyword: bool = False
+    answer_route: Literal["deep", "cheap", "auto"] = "deep"
+    route_min_similarity: float = Field(0.5, ge=-1, le=1)
+    route_min_keyword_coverage: float = Field(0.6, ge=0, le=1)
+    route_escalation_timeout_s: float = Field(60, gt=0, le=600)
     rerank_api_key: str = ''
     rerank_model: str = 'rerank-v4.0-pro'
     rerank_timeout_s: float = Field(10, gt=0, le=60)

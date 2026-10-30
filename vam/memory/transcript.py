@@ -179,6 +179,34 @@ class TranscriptStore:
                 row[key] = json.loads(row[key])
         return row
 
+    def keyword_search(self, query, *, top_k=5, min_time=0., max_time=None, version_id=None):
+        """E4 keyword channel (vam.retrieval.keywords): BM25 over the chunks of the pinned search version.
+        ``score`` is BM25 divided by the best score of this query (1.0 = best match), so it can share the
+        fused ranking with the embedding channels; only chunks with a matching token are returned."""
+        from vam.retrieval.keywords import bm25, tokenize
+        wanted = set(tokenize(query))
+        state = self.state()
+        version_id = version_id or state['search_version']
+        if not version_id:
+            raise DomainError(409, 'transcript_search_not_ready', 'Transcript search is not ready')
+        with self.connect() as conn:
+            rows = [dict(raw) for raw in conn.execute(
+                'SELECT * FROM transcript_chunks WHERE version=? AND end_t>=? AND start_t<=?',
+                (version_id, min_time, max_time if max_time is not None else float('inf')))]
+        scores = bm25(query, [r['text'] for r in rows])
+        best = max(scores, default=0.0)
+        hits = []
+        for row, score in zip(rows, scores):
+            if score > 0:
+                row['score'] = score / best
+                row['bm25'] = score
+                # Share of the question's distinct tokens present in this chunk (the routing rule's signal).
+                row['coverage'] = len(wanted & set(tokenize(row['text']))) / len(wanted)
+                row['quality_warnings'] = []
+                hits.append(row)
+        hits.sort(key=lambda h: (-h['score'], h['start_t'], h['doc_id']))
+        return {'video_id': self.video_id, 'results': [self.public_item(h) for h in hits[:top_k]]}
+
     def search(self, query_vector, *, fingerprint, dim, top_k=5, min_time=0., max_time=None, version_id=None):
         state = self.state()
         if version_id is not None:
