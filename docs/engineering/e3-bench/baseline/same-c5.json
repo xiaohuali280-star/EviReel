@@ -1,0 +1,109 @@
+{
+ "load": {
+  "mode": "closed",
+  "concurrency": 5,
+  "rate_per_s": null,
+  "duration_s": 20.0,
+  "same_video": true,
+  "videos": 1,
+  "targets": [
+   "http://127.0.0.1:8890"
+  ],
+  "sources": [
+   "frame",
+   "event",
+   "transcript"
+  ]
+ },
+ "requests": 27,
+ "ok": 27,
+ "statuses": {
+  "200": 27
+ },
+ "rejection_rate": 0.0,
+ "throughput_ok_per_s": 1.116,
+ "latency_ms": {
+  "p50": 4438.3,
+  "p95": 4561.6,
+  "p99": 4652.5,
+  "max": 4652.5
+ },
+ "client": {
+  "python": "3.11.16",
+  "host": "Windows-10-10.0.26200-SP0"
+ },
+ "server_breakdown": {
+  "http://127.0.0.1:8890": {
+   "lock_wait": {
+    "count": 27,
+    "total_s": 83.3699,
+    "mean_ms": 3087.774,
+    "p50_ms": 3384.256,
+    "p95_ms": 3519.161,
+    "p99_ms": 3530.747,
+    "max_ms": 3530.747
+   },
+   "index_open": {
+    "count": 27,
+    "total_s": 2.8453,
+    "mean_ms": 105.38,
+    "p50_ms": 104.769,
+    "p95_ms": 117.646,
+    "p99_ms": 125.805,
+    "max_ms": 125.805
+   },
+   "event_loop_lag": {
+    "count": 401,
+    "total_s": 5.1741,
+    "mean_ms": 12.903,
+    "p50_ms": 1.374,
+    "p95_ms": 113.051,
+    "p99_ms": 145.007,
+    "max_ms": 153.887
+   },
+   "sqlite_frames": {
+    "count": 766,
+    "total_s": 9.7872,
+    "mean_ms": 12.777,
+    "p50_ms": 5.434,
+    "p95_ms": 82.075,
+    "p99_ms": 90.536,
+    "max_ms": 100.59
+   },
+   "model_embed": {
+    "count": 108,
+    "total_s": 4.3735,
+    "mean_ms": 40.495,
+    "p50_ms": 40.475,
+    "p95_ms": 40.801,
+    "p99_ms": 40.948,
+    "max_ms": 41.084
+   },
+   "sqlite_documents": {
+    "count": 55,
+    "total_s": 0.4024,
+    "mean_ms": 7.316,
+    "p50_ms": 5.936,
+    "p95_ms": 10.594,
+    "p99_ms": 11.203,
+    "max_ms": 11.203
+   },
+   "sqlite_transcript_search": {
+    "count": 27,
+    "total_s": 2.7052,
+    "mean_ms": 100.191,
+    "p50_ms": 100.696,
+    "p95_ms": 102.371,
+    "p99_ms": 105.477,
+    "max_ms": 105.477
+   },
+   "process": {
+    "cpu_s": 19.828,
+    "wall_s": 24.209,
+    "cpu_utilization_cores": 0.819,
+    "rss_mb": null
+   }
+  }
+ },
+ "label": "same-c5"
+}

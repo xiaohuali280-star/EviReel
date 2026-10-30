@@ -1,0 +1,111 @@
+{
+ "load": {
+  "mode": "open",
+  "concurrency": null,
+  "rate_per_s": 2.0,
+  "duration_s": 20.0,
+  "same_video": true,
+  "videos": 1,
+  "targets": [
+   "http://127.0.0.1:8890"
+  ],
+  "sources": [
+   "frame",
+   "event",
+   "transcript"
+  ],
+  "client_dropped_over_max_inflight": 0,
+  "max_inflight": 200
+ },
+ "requests": 40,
+ "ok": 40,
+ "statuses": {
+  "200": 40
+ },
+ "rejection_rate": 0.0,
+ "throughput_ok_per_s": 1.188,
+ "latency_ms": {
+  "p50": 7508.5,
+  "p95": 13576.6,
+  "p99": 14174.3,
+  "max": 14174.3
+ },
+ "client": {
+  "python": "3.11.16",
+  "host": "Windows-10-10.0.26200-SP0"
+ },
+ "server_breakdown": {
+  "http://127.0.0.1:8890": {
+   "lock_wait": {
+    "count": 40,
+    "total_s": 267.3188,
+    "mean_ms": 6682.97,
+    "p50_ms": 6543.896,
+    "p95_ms": 12606.731,
+    "p99_ms": 13209.18,
+    "max_ms": 13209.18
+   },
+   "index_open": {
+    "count": 40,
+    "total_s": 3.6186,
+    "mean_ms": 90.465,
+    "p50_ms": 89.845,
+    "p95_ms": 101.46,
+    "p99_ms": 105.047,
+    "max_ms": 105.047
+   },
+   "event_loop_lag": {
+    "count": 570,
+    "total_s": 6.6758,
+    "mean_ms": 11.712,
+    "p50_ms": 0.697,
+    "p95_ms": 98.672,
+    "p99_ms": 124.372,
+    "max_ms": 149.918
+   },
+   "sqlite_frames": {
+    "count": 1132,
+    "total_s": 13.2542,
+    "mean_ms": 11.709,
+    "p50_ms": 5.353,
+    "p95_ms": 71.777,
+    "p99_ms": 74.356,
+    "max_ms": 88.497
+   },
+   "model_embed": {
+    "count": 160,
+    "total_s": 6.4736,
+    "mean_ms": 40.46,
+    "p50_ms": 40.447,
+    "p95_ms": 40.773,
+    "p99_ms": 40.856,
+    "max_ms": 40.91
+   },
+   "sqlite_documents": {
+    "count": 82,
+    "total_s": 0.5857,
+    "mean_ms": 7.143,
+    "p50_ms": 5.547,
+    "p95_ms": 9.739,
+    "p99_ms": 11.473,
+    "max_ms": 11.473
+   },
+   "sqlite_transcript_search": {
+    "count": 40,
+    "total_s": 4.0332,
+    "mean_ms": 100.83,
+    "p50_ms": 100.268,
+    "p95_ms": 107.255,
+    "p99_ms": 108.081,
+    "max_ms": 108.081
+   },
+   "process": {
+    "cpu_s": 27.062,
+    "wall_s": 33.688,
+    "cpu_utilization_cores": 0.803,
+    "rss_mb": null
+   }
+  }
+ },
+ "label": "open-r2"
+}

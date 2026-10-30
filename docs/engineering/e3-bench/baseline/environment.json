@@ -1,0 +1,26 @@
+{
+ "environment": {
+  "os": "Windows-10-10.0.26200-SP0",
+  "python": "3.11.16",
+  "cpu_count": 32,
+  "machine": "AMD64",
+  "processor": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
+  "git_commit": "b39a564",
+  "git_dirty": false
+ },
+ "bench": {
+  "port": 8890,
+  "videos": 4,
+  "frames": 300,
+  "events": 60,
+  "chunks": 200,
+  "dim": 1024,
+  "model_ms": 40.0,
+  "vlm_ms": 400.0,
+  "data_root": "",
+  "out": ""
+ },
+ "mode": "explicit-model-simulator",
+ "videos": 4,
+ "started_at": "2026-10-30T03:10:37-0400"
+}

@@ -1,0 +1,109 @@
+{
+ "load": {
+  "mode": "closed",
+  "concurrency": 10,
+  "rate_per_s": null,
+  "duration_s": 20.0,
+  "same_video": false,
+  "videos": 4,
+  "targets": [
+   "http://127.0.0.1:8890"
+  ],
+  "sources": [
+   "frame",
+   "event",
+   "transcript"
+  ]
+ },
+ "requests": 48,
+ "ok": 48,
+ "statuses": {
+  "200": 48
+ },
+ "rejection_rate": 0.0,
+ "throughput_ok_per_s": 2.01,
+ "latency_ms": {
+  "p50": 4597.1,
+  "p95": 5942.6,
+  "p99": 6113.2,
+  "max": 6113.2
+ },
+ "client": {
+  "python": "3.11.16",
+  "host": "Windows-10-10.0.26200-SP0"
+ },
+ "server_breakdown": {
+  "http://127.0.0.1:8890": {
+   "event_loop_lag": {
+    "count": 308,
+    "total_s": 9.4873,
+    "mean_ms": 30.803,
+    "p50_ms": 0.047,
+    "p95_ms": 146.108,
+    "p99_ms": 208.423,
+    "max_ms": 454.943
+   },
+   "lock_wait": {
+    "count": 48,
+    "total_s": 115.9663,
+    "mean_ms": 2415.965,
+    "p50_ms": 2485.979,
+    "p95_ms": 3780.612,
+    "p99_ms": 3970.805,
+    "max_ms": 3970.805
+   },
+   "index_open": {
+    "count": 48,
+    "total_s": 5.1063,
+    "mean_ms": 106.381,
+    "p50_ms": 103.522,
+    "p95_ms": 136.299,
+    "p99_ms": 151.62,
+    "max_ms": 151.62
+   },
+   "sqlite_frames": {
+    "count": 1316,
+    "total_s": 28.383,
+    "mean_ms": 21.568,
+    "p50_ms": 7.979,
+    "p95_ms": 118.566,
+    "p99_ms": 227.895,
+    "max_ms": 315.513
+   },
+   "model_embed": {
+    "count": 192,
+    "total_s": 7.8036,
+    "mean_ms": 40.644,
+    "p50_ms": 40.548,
+    "p95_ms": 41.443,
+    "p99_ms": 43.229,
+    "max_ms": 43.861
+   },
+   "sqlite_documents": {
+    "count": 112,
+    "total_s": 1.4788,
+    "mean_ms": 13.203,
+    "p50_ms": 9.32,
+    "p95_ms": 41.567,
+    "p99_ms": 66.985,
+    "max_ms": 75.746
+   },
+   "sqlite_transcript_search": {
+    "count": 48,
+    "total_s": 10.4931,
+    "mean_ms": 218.606,
+    "p50_ms": 203.75,
+    "p95_ms": 346.194,
+    "p99_ms": 368.702,
+    "max_ms": 368.702
+   },
+   "process": {
+    "cpu_s": 40.844,
+    "wall_s": 23.887,
+    "cpu_utilization_cores": 1.71,
+    "rss_mb": null
+   }
+  }
+ },
+ "label": "diff-c10"
+}

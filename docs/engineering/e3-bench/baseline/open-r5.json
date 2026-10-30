@@ -1,0 +1,111 @@
+{
+ "load": {
+  "mode": "open",
+  "concurrency": null,
+  "rate_per_s": 5.0,
+  "duration_s": 20.0,
+  "same_video": true,
+  "videos": 1,
+  "targets": [
+   "http://127.0.0.1:8890"
+  ],
+  "sources": [
+   "frame",
+   "event",
+   "transcript"
+  ],
+  "client_dropped_over_max_inflight": 0,
+  "max_inflight": 200
+ },
+ "requests": 100,
+ "ok": 100,
+ "statuses": {
+  "200": 100
+ },
+ "rejection_rate": 0.0,
+ "throughput_ok_per_s": 1.184,
+ "latency_ms": {
+  "p50": 32679.0,
+  "p95": 61605.9,
+  "p99": 64155.5,
+  "max": 64671.4
+ },
+ "client": {
+  "python": "3.11.16",
+  "host": "Windows-10-10.0.26200-SP0"
+ },
+ "server_breakdown": {
+  "http://127.0.0.1:8890": {
+   "lock_wait": {
+    "count": 100,
+    "total_s": 3100.448,
+    "mean_ms": 31004.48,
+    "p50_ms": 31712.87,
+    "p95_ms": 52831.787,
+    "p99_ms": 52861.201,
+    "max_ms": 52892.19
+   },
+   "index_open": {
+    "count": 100,
+    "total_s": 9.2205,
+    "mean_ms": 92.205,
+    "p50_ms": 90.518,
+    "p95_ms": 100.413,
+    "p99_ms": 106.53,
+    "max_ms": 224.685
+   },
+   "event_loop_lag": {
+    "count": 1433,
+    "total_s": 16.6403,
+    "mean_ms": 11.612,
+    "p50_ms": 0.394,
+    "p95_ms": 98.868,
+    "p99_ms": 128.997,
+    "max_ms": 258.938
+   },
+   "sqlite_frames": {
+    "count": 2812,
+    "total_s": 33.2379,
+    "mean_ms": 11.82,
+    "p50_ms": 5.361,
+    "p95_ms": 71.295,
+    "p99_ms": 75.331,
+    "max_ms": 199.771
+   },
+   "model_embed": {
+    "count": 400,
+    "total_s": 16.1932,
+    "mean_ms": 40.483,
+    "p50_ms": 40.461,
+    "p95_ms": 40.804,
+    "p99_ms": 40.994,
+    "max_ms": 41.446
+   },
+   "sqlite_documents": {
+    "count": 202,
+    "total_s": 1.4736,
+    "mean_ms": 7.295,
+    "p50_ms": 6.001,
+    "p95_ms": 9.851,
+    "p99_ms": 10.327,
+    "max_ms": 20.108
+   },
+   "sqlite_transcript_search": {
+    "count": 100,
+    "total_s": 10.1262,
+    "mean_ms": 101.262,
+    "p50_ms": 100.67,
+    "p95_ms": 107.797,
+    "p99_ms": 111.425,
+    "max_ms": 111.59
+   },
+   "process": {
+    "cpu_s": 68.203,
+    "wall_s": 84.493,
+    "cpu_utilization_cores": 0.807,
+    "rss_mb": null
+   }
+  }
+ },
+ "label": "open-r5"
+}

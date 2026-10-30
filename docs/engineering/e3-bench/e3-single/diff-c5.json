@@ -1,0 +1,91 @@
+{
+ "load": {
+  "mode": "closed",
+  "concurrency": 5,
+  "rate_per_s": null,
+  "duration_s": 20.0,
+  "same_video": false,
+  "videos": 4,
+  "targets": [
+   "http://127.0.0.1:8890"
+  ],
+  "sources": [
+   "frame",
+   "event",
+   "transcript"
+  ]
+ },
+ "requests": 210,
+ "ok": 210,
+ "statuses": {
+  "200": 210
+ },
+ "rejection_rate": 0.0,
+ "throughput_ok_per_s": 10.295,
+ "latency_ms": {
+  "p50": 418.1,
+  "p95": 764.5,
+  "p99": 838.7,
+  "max": 841.7
+ },
+ "client": {
+  "python": "3.11.16",
+  "host": "Windows-10-10.0.26200-SP0"
+ },
+ "server_breakdown": {
+  "http://127.0.0.1:8890": {
+   "event_loop_lag": {
+    "count": 407,
+    "total_s": 1.6456,
+    "mean_ms": 4.043,
+    "p50_ms": 0.0,
+    "p95_ms": 21.433,
+    "p99_ms": 47.7,
+    "max_ms": 100.79
+   },
+   "sqlite_frames": {
+    "count": 5761,
+    "total_s": 0.2295,
+    "mean_ms": 0.04,
+    "p50_ms": 0.036,
+    "p95_ms": 0.081,
+    "p99_ms": 0.115,
+    "max_ms": 0.195
+   },
+   "model_embed": {
+    "count": 840,
+    "total_s": 34.4703,
+    "mean_ms": 41.036,
+    "p50_ms": 40.496,
+    "p95_ms": 41.876,
+    "p99_ms": 43.202,
+    "max_ms": 161.42
+   },
+   "sqlite_documents": {
+    "count": 490,
+    "total_s": 4.2887,
+    "mean_ms": 8.753,
+    "p50_ms": 6.525,
+    "p95_ms": 21.82,
+    "p99_ms": 32.847,
+    "max_ms": 42.264
+   },
+   "sqlite_transcript_search": {
+    "count": 210,
+    "total_s": 10.2036,
+    "mean_ms": 48.589,
+    "p50_ms": 41.61,
+    "p95_ms": 93.467,
+    "p99_ms": 132.961,
+    "max_ms": 204.908
+   },
+   "process": {
+    "cpu_s": 28.016,
+    "wall_s": 20.406,
+    "cpu_utilization_cores": 1.373,
+    "rss_mb": null
+   }
+  }
+ },
+ "label": "diff-c5"
+}

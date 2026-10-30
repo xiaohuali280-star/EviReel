@@ -1,0 +1,109 @@
+{
+ "load": {
+  "mode": "closed",
+  "concurrency": 1,
+  "rate_per_s": null,
+  "duration_s": 20.0,
+  "same_video": false,
+  "videos": 4,
+  "targets": [
+   "http://127.0.0.1:8890"
+  ],
+  "sources": [
+   "frame",
+   "event",
+   "transcript"
+  ]
+ },
+ "requests": 23,
+ "ok": 23,
+ "statuses": {
+  "200": 23
+ },
+ "rejection_rate": 0.0,
+ "throughput_ok_per_s": 1.114,
+ "latency_ms": {
+  "p50": 881.4,
+  "p95": 979.7,
+  "p99": 982.7,
+  "max": 982.7
+ },
+ "client": {
+  "python": "3.11.16",
+  "host": "Windows-10-10.0.26200-SP0"
+ },
+ "server_breakdown": {
+  "http://127.0.0.1:8890": {
+   "lock_wait": {
+    "count": 23,
+    "total_s": 0.0001,
+    "mean_ms": 0.006,
+    "p50_ms": 0.005,
+    "p95_ms": 0.009,
+    "p99_ms": 0.009,
+    "max_ms": 0.009
+   },
+   "index_open": {
+    "count": 23,
+    "total_s": 2.384,
+    "mean_ms": 103.652,
+    "p50_ms": 103.695,
+    "p95_ms": 108.112,
+    "p99_ms": 123.081,
+    "max_ms": 123.081
+   },
+   "event_loop_lag": {
+    "count": 343,
+    "total_s": 4.2769,
+    "mean_ms": 12.469,
+    "p50_ms": 0.636,
+    "p95_ms": 111.664,
+    "p99_ms": 138.669,
+    "max_ms": 157.283
+   },
+   "sqlite_frames": {
+    "count": 636,
+    "total_s": 8.0205,
+    "mean_ms": 12.611,
+    "p50_ms": 5.401,
+    "p95_ms": 78.633,
+    "p99_ms": 83.909,
+    "max_ms": 86.64
+   },
+   "model_embed": {
+    "count": 92,
+    "total_s": 3.7303,
+    "mean_ms": 40.547,
+    "p50_ms": 40.544,
+    "p95_ms": 40.869,
+    "p99_ms": 40.93,
+    "max_ms": 40.93
+   },
+   "sqlite_documents": {
+    "count": 55,
+    "total_s": 0.3896,
+    "mean_ms": 7.083,
+    "p50_ms": 5.512,
+    "p95_ms": 10.543,
+    "p99_ms": 14.416,
+    "max_ms": 14.416
+   },
+   "sqlite_transcript_search": {
+    "count": 23,
+    "total_s": 2.3108,
+    "mean_ms": 100.47,
+    "p50_ms": 100.759,
+    "p95_ms": 102.074,
+    "p99_ms": 103.196,
+    "max_ms": 103.196
+   },
+   "process": {
+    "cpu_s": 16.594,
+    "wall_s": 20.65,
+    "cpu_utilization_cores": 0.804,
+    "rss_mb": null
+   }
+  }
+ },
+ "label": "diff-c1"
+}

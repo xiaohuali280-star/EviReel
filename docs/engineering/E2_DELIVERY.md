@@ -186,7 +186,7 @@ docker compose --env-file deploy/e1/dev.env -f deploy/e2/compose.yml exec api \
 - **回退**：
   1. 停止受理，等待 `jobs` 中没有 queued/running 的任务（或把它们置为 failed）。
   2. 设置 `PIPELINE_MODE=inline`，重启 API（回到进程内执行）。
-  3. 若要回退到 v3 代码，再删除 `checkpoints`、`outbox_events`、`stage_attempts`、`job_stages`、`jobs` 表；把 `object_deletions_reason_check` 改回原值（删除 `pipeline_orphan` 记录后）；移除 `schema_migrations` 中版本 4、5 的记录（旧代码会拒绝比自己新的 schema）。
+  3. 若要回退到 v3 代码，再删除 `checkpoints`、`outbox_events`、`stage_attempts`、`job_stages`、`jobs` 表；把 `object_deletions_reason_check` 改回原值（删除 `pipeline_orphan` 记录后）；移除 `schema_migrations` 中版本 4、5、6 的记录（旧代码会拒绝比自己新的 schema；版本 6 只改了 `job_stages` 的约束，表删除后无需单独还原）。此步骤未在数据副本上演练，执行前先演练。
   4. SQLite registry 版本 5 只多一列，旧代码会拒绝版本 5。回退前需要先备份，再在 SQLite 中删除该列（`ALTER TABLE videos DROP COLUMN published_seq`），并把 `user_version` 设回 4。
 - 对象存储中 `pipeline/` 前缀下的产物可以整体删除；检查点删除后会重新计算。
 

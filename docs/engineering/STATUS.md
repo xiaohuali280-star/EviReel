@@ -1,6 +1,45 @@
 # 工程状态
 
-更新：2026-10-30　阶段：**E2 第三轮验收的 2 项问题（P2×2，笔记发布链路）已修复**：本机与 Linux CI 全部通过，待复验。E1 已验收（历史记录见下文）
+更新：2026-10-30　阶段：**E3 待验收**（实现与自测完成；CI 和自测通过不等于验收通过）。E1、E2 已验收（E2：`b39a564`）。E4 未开始，等 E3 验收通过后再启动。
+
+## E3（当前）
+
+- **代码**：`2916817`（E3 实现与测试）→ `175dccb`（nginx 转移到另一实例、冒烟脚本计数修正）→ `cddcfe4`（两个实例同时启动时创建存储桶的竞争）。设计取舍、协议、迁移与回退、限制见 `E3_DELIVERY.md`。
+- **阻塞**：无。真实模型验证没有授权预算，未执行（见 E3_DELIVERY 第 9 节）。
+- **下一步**：等待 E3 验收。
+
+| 类别 | 检查 | 结果 |
+| --- | --- | --- |
+| 本机，无中间件 | 全量 `pytest tests`（SQLite 读模型） | **234 passed, 73 skipped**（跳过的需要 PG/S3/Redis/RabbitMQ） |
+| 本机，真实 PG 16 + MinIO | `test_e3_unit` + `test_e3_platform` + E1/E2 平台与流水线测试 | **71 passed** |
+| 本机，真实 PG | P1–P5、聊天、笔记 HTTP 测试在 `REGISTRY_BACKEND=postgres` 下 | **200 passed** |
+| 本机，前端 | tsc；vitest；构建 | 通过；**42/42**；已重建 `vam/server/static` |
+| CI `2916817`：E3 concurrency | E3 测试（真实 Redis + PG + MinIO，两个 API 实例，禁止跳过） | **28 passed, 0 skipped** |
+| | P1/P4/P5/聊天在 PG 读模型上 | **98 passed** |
+| | E1/E2 在 schema 7 上回归 | **50 passed** |
+| | 容器栈冒烟 | **失败**：脚本计数有误；停止 api-1 后 20 个请求中 4 个失败（nginx 未转移到另一实例）。已在 `175dccb` 修复，结果见下一行 |
+| CI `175dccb`：E3 concurrency | 同上 | 测试 **28 / 98 / 50 passed**；容器栈**失败**：两个 API 同时启动，都发现存储桶不存在并去创建，后创建的那个收到 `BucketAlreadyOwnedByYou` 后退出。这是真实的多实例缺陷，已在 `cddcfe4` 修复，并补充真实 MinIO 回归测试（6 个并发实例；未修复时失败，修复后通过） |
+| CI `175dccb`：E2 pipeline | 同上 | 通过 |
+| CI `cddcfe4`（运行 41046551674）：E3 concurrency | E3 测试 / PG 读模型回归 / E1+E2 回归 / 容器栈冒烟 | **29 / 98 / 50 passed**，E3 测试 0 skipped。冒烟通过：两个实例都接受同一登录会话；停止 api-1 后 20/20 请求成功，全部由 api-2 处理；api-1 重启后重新加入 |
+| CI `cddcfe4`：E1 platform、CPU tests、E2 pipeline | 同前 | 三项**全部通过** |
+| CI `2916817`：E2 pipeline | 流水线测试 + 故障测试（kill -9、RabbitMQ 停启）+ E1 回归 | **26 + 14 + 24 passed** |
+| CI `2916817`：E1 platform、CPU tests | E1 平台；全量 CPU 测试 + 浏览器 | 通过（CPU **234 passed**，浏览器 **21 passed**） |
+| 压测（本机，模型模拟器） | 基线 `b39a564`，以及 `2916817` 的无缓存、热缓存、热缓存 + PG 读模型三组 | 见 E3_DELIVERY 第 8 节；JSON 在 `docs/engineering/e3-bench/` |
+
+主要实测（同一台机器、同一模拟器）：
+
+- 同视频 20 并发：P95 从 17.9 s 降到 2.4 s（无缓存）；
+- 固定到达 5/s：基线只能处理 1.2/s，P99 达到 64 s；E3 跟得上 5/s，P99 为 0.32 s（无缓存）。
+
+真实中间件与测试替身：
+
+- **真实中间件**：PostgreSQL、MinIO、Redis、RabbitMQ、媒体处理（ffmpeg）。
+- **测试替身**：模型（`e2_factory`、压测模拟器）。
+- **只在 Linux CI 上验证**：真实 Redis 测试与容器栈（本机没有 Redis）。
+
+---
+
+# E2 记录（历史）
 
 当前提交：E2 实现 `866e8bf` → 修复 `2d8309f` → CI 计数 `85a8278` → 验收整改 `afd21ee` → CI/文档 `8f8ce44` → 复验整改 `d662b61` → 第三轮整改 `7d5868f` → 聊天重复发送修复 `8047089`，状态记录见其后的提交。
 

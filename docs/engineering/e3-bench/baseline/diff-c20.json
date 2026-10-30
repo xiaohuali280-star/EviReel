@@ -1,0 +1,109 @@
+{
+ "load": {
+  "mode": "closed",
+  "concurrency": 20,
+  "rate_per_s": null,
+  "duration_s": 20.0,
+  "same_video": false,
+  "videos": 4,
+  "targets": [
+   "http://127.0.0.1:8890"
+  ],
+  "sources": [
+   "frame",
+   "event",
+   "transcript"
+  ]
+ },
+ "requests": 58,
+ "ok": 58,
+ "statuses": {
+  "200": 58
+ },
+ "rejection_rate": 0.0,
+ "throughput_ok_per_s": 2.015,
+ "latency_ms": {
+  "p50": 9377.4,
+  "p95": 11093.4,
+  "p99": 11219.7,
+  "max": 11219.7
+ },
+ "client": {
+  "python": "3.11.16",
+  "host": "Windows-10-10.0.26200-SP0"
+ },
+ "server_breakdown": {
+  "http://127.0.0.1:8890": {
+   "event_loop_lag": {
+    "count": 359,
+    "total_s": 11.938,
+    "mean_ms": 33.254,
+    "p50_ms": 0.715,
+    "p95_ms": 169.737,
+    "p99_ms": 246.16,
+    "max_ms": 444.006
+   },
+   "lock_wait": {
+    "count": 58,
+    "total_s": 363.3028,
+    "mean_ms": 6263.842,
+    "p50_ms": 7218.05,
+    "p95_ms": 8613.676,
+    "p99_ms": 9245.587,
+    "max_ms": 9245.587
+   },
+   "index_open": {
+    "count": 58,
+    "total_s": 6.5201,
+    "mean_ms": 112.416,
+    "p50_ms": 105.862,
+    "p95_ms": 175.386,
+    "p99_ms": 192.329,
+    "max_ms": 192.329
+   },
+   "sqlite_frames": {
+    "count": 1604,
+    "total_s": 33.7575,
+    "mean_ms": 21.046,
+    "p50_ms": 7.998,
+    "p95_ms": 112.91,
+    "p99_ms": 226.599,
+    "max_ms": 339.669
+   },
+   "model_embed": {
+    "count": 232,
+    "total_s": 9.9028,
+    "mean_ms": 42.684,
+    "p50_ms": 40.545,
+    "p95_ms": 41.963,
+    "p99_ms": 190.207,
+    "max_ms": 191.015
+   },
+   "sqlite_documents": {
+    "count": 138,
+    "total_s": 1.806,
+    "mean_ms": 13.087,
+    "p50_ms": 9.294,
+    "p95_ms": 32.669,
+    "p99_ms": 48.414,
+    "max_ms": 66.607
+   },
+   "sqlite_transcript_search": {
+    "count": 58,
+    "total_s": 12.8143,
+    "mean_ms": 220.936,
+    "p50_ms": 203.81,
+    "p95_ms": 348.135,
+    "p99_ms": 367.578,
+    "max_ms": 367.578
+   },
+   "process": {
+    "cpu_s": 49.75,
+    "wall_s": 28.8,
+    "cpu_utilization_cores": 1.727,
+    "rss_mb": null
+   }
+  }
+ },
+ "label": "diff-c20"
+}

@@ -1,0 +1,109 @@
+{
+ "load": {
+  "mode": "closed",
+  "concurrency": 10,
+  "rate_per_s": null,
+  "duration_s": 20.0,
+  "same_video": true,
+  "videos": 1,
+  "targets": [
+   "http://127.0.0.1:8890"
+  ],
+  "sources": [
+   "frame",
+   "event",
+   "transcript"
+  ]
+ },
+ "requests": 36,
+ "ok": 36,
+ "statuses": {
+  "200": 36
+ },
+ "rejection_rate": 0.0,
+ "throughput_ok_per_s": 1.331,
+ "latency_ms": {
+  "p50": 6524.1,
+  "p95": 9064.2,
+  "p99": 9263.6,
+  "max": 9263.6
+ },
+ "client": {
+  "python": "3.11.16",
+  "host": "Windows-10-10.0.26200-SP0"
+ },
+ "server_breakdown": {
+  "http://127.0.0.1:8890": {
+   "event_loop_lag": {
+    "count": 465,
+    "total_s": 5.1644,
+    "mean_ms": 11.106,
+    "p50_ms": 0.654,
+    "p95_ms": 67.673,
+    "p99_ms": 136.852,
+    "max_ms": 164.494
+   },
+   "lock_wait": {
+    "count": 36,
+    "total_s": 200.7483,
+    "mean_ms": 5576.34,
+    "p50_ms": 5641.685,
+    "p95_ms": 7962.943,
+    "p99_ms": 8049.654,
+    "max_ms": 8049.654
+   },
+   "index_open": {
+    "count": 36,
+    "total_s": 2.9919,
+    "mean_ms": 83.11,
+    "p50_ms": 100.174,
+    "p95_ms": 109.131,
+    "p99_ms": 116.095,
+    "max_ms": 116.095
+   },
+   "sqlite_frames": {
+    "count": 1008,
+    "total_s": 10.4012,
+    "mean_ms": 10.319,
+    "p50_ms": 5.268,
+    "p95_ms": 53.558,
+    "p99_ms": 90.306,
+    "max_ms": 101.649
+   },
+   "model_embed": {
+    "count": 144,
+    "total_s": 5.8224,
+    "mean_ms": 40.433,
+    "p50_ms": 40.401,
+    "p95_ms": 40.728,
+    "p99_ms": 40.846,
+    "max_ms": 40.98
+   },
+   "sqlite_documents": {
+    "count": 72,
+    "total_s": 0.4324,
+    "mean_ms": 6.005,
+    "p50_ms": 5.375,
+    "p95_ms": 9.862,
+    "p99_ms": 12.038,
+    "max_ms": 12.038
+   },
+   "sqlite_transcript_search": {
+    "count": 36,
+    "total_s": 2.976,
+    "mean_ms": 82.668,
+    "p50_ms": 98.153,
+    "p95_ms": 111.954,
+    "p99_ms": 113.157,
+    "max_ms": 113.157
+   },
+   "process": {
+    "cpu_s": 21.172,
+    "wall_s": 27.052,
+    "cpu_utilization_cores": 0.783,
+    "rss_mb": null
+   }
+  }
+ },
+ "label": "same-c10"
+}

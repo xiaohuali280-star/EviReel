@@ -1,0 +1,109 @@
+{
+ "load": {
+  "mode": "closed",
+  "concurrency": 10,
+  "rate_per_s": null,
+  "duration_s": 20.0,
+  "same_video": true,
+  "videos": 1,
+  "targets": [
+   "http://127.0.0.1:8890"
+  ],
+  "sources": [
+   "frame",
+   "event",
+   "transcript"
+  ]
+ },
+ "requests": 199,
+ "ok": 199,
+ "statuses": {
+  "200": 199
+ },
+ "rejection_rate": 0.0,
+ "throughput_ok_per_s": 9.801,
+ "latency_ms": {
+  "p50": 997.9,
+  "p95": 1338.3,
+  "p99": 1454.3,
+  "max": 1471.9
+ },
+ "client": {
+  "python": "3.11.16",
+  "host": "Windows-10-10.0.26200-SP0"
+ },
+ "server_breakdown": {
+  "http://127.0.0.1:8890": {
+   "event_loop_lag": {
+    "count": 327,
+    "total_s": 4.9781,
+    "mean_ms": 15.223,
+    "p50_ms": 2.162,
+    "p95_ms": 75.991,
+    "p99_ms": 135.229,
+    "max_ms": 161.797
+   },
+   "sqlite_frames": {
+    "count": 5605,
+    "total_s": 0.2034,
+    "mean_ms": 0.036,
+    "p50_ms": 0.036,
+    "p95_ms": 0.054,
+    "p99_ms": 0.074,
+    "max_ms": 0.467
+   },
+   "model_vlm": {
+    "count": 26,
+    "total_s": 10.74,
+    "mean_ms": 413.076,
+    "p50_ms": 401.547,
+    "p95_ms": 469.107,
+    "p99_ms": 517.195,
+    "max_ms": 517.195
+   },
+   "model_embed": {
+    "count": 52,
+    "total_s": 2.1221,
+    "mean_ms": 40.809,
+    "p50_ms": 40.514,
+    "p95_ms": 42.744,
+    "p99_ms": 43.271,
+    "max_ms": 43.271
+   },
+   "summarize_request": {
+    "count": 13,
+    "total_s": 19.6216,
+    "mean_ms": 1509.357,
+    "p50_ms": 1559.854,
+    "p95_ms": 1734.891,
+    "p99_ms": 1734.891,
+    "max_ms": 1734.891
+   },
+   "sqlite_documents": {
+    "count": 425,
+    "total_s": 21.3635,
+    "mean_ms": 50.267,
+    "p50_ms": 31.836,
+    "p95_ms": 123.55,
+    "p99_ms": 140.341,
+    "max_ms": 159.255
+   },
+   "sqlite_transcript_search": {
+    "count": 199,
+    "total_s": 32.7302,
+    "mean_ms": 164.473,
+    "p50_ms": 162.946,
+    "p95_ms": 324.268,
+    "p99_ms": 381.878,
+    "max_ms": 397.041
+   },
+   "process": {
+    "cpu_s": 36.125,
+    "wall_s": 20.309,
+    "cpu_utilization_cores": 1.779,
+    "rss_mb": null
+   }
+  }
+ },
+ "label": "mixed-c10"
+}

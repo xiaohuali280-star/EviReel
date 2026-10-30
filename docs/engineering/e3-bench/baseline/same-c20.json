@@ -1,0 +1,109 @@
+{
+ "load": {
+  "mode": "closed",
+  "concurrency": 20,
+  "rate_per_s": null,
+  "duration_s": 20.0,
+  "same_video": true,
+  "videos": 1,
+  "targets": [
+   "http://127.0.0.1:8890"
+  ],
+  "sources": [
+   "frame",
+   "event",
+   "transcript"
+  ]
+ },
+ "requests": 41,
+ "ok": 41,
+ "statuses": {
+  "200": 41
+ },
+ "rejection_rate": 0.0,
+ "throughput_ok_per_s": 1.216,
+ "latency_ms": {
+  "p50": 14762.6,
+  "p95": 17915.0,
+  "p99": 18172.4,
+  "max": 18172.4
+ },
+ "client": {
+  "python": "3.11.16",
+  "host": "Windows-10-10.0.26200-SP0"
+ },
+ "server_breakdown": {
+  "http://127.0.0.1:8890": {
+   "event_loop_lag": {
+    "count": 559,
+    "total_s": 7.2564,
+    "mean_ms": 12.981,
+    "p50_ms": 1.426,
+    "p95_ms": 116.779,
+    "p99_ms": 149.426,
+    "max_ms": 161.67
+   },
+   "lock_wait": {
+    "count": 41,
+    "total_s": 493.1646,
+    "mean_ms": 12028.405,
+    "p50_ms": 13797.865,
+    "p95_ms": 16849.643,
+    "p99_ms": 16878.007,
+    "max_ms": 16878.007
+   },
+   "index_open": {
+    "count": 41,
+    "total_s": 3.8172,
+    "mean_ms": 93.104,
+    "p50_ms": 103.761,
+    "p95_ms": 109.877,
+    "p99_ms": 110.059,
+    "max_ms": 110.059
+   },
+   "sqlite_frames": {
+    "count": 1153,
+    "total_s": 13.2554,
+    "mean_ms": 11.496,
+    "p50_ms": 5.467,
+    "p95_ms": 78.878,
+    "p99_ms": 87.611,
+    "max_ms": 115.334
+   },
+   "model_embed": {
+    "count": 164,
+    "total_s": 6.6367,
+    "mean_ms": 40.468,
+    "p50_ms": 40.456,
+    "p95_ms": 40.746,
+    "p99_ms": 40.874,
+    "max_ms": 41.191
+   },
+   "sqlite_documents": {
+    "count": 83,
+    "total_s": 0.5445,
+    "mean_ms": 6.56,
+    "p50_ms": 5.73,
+    "p95_ms": 9.564,
+    "p99_ms": 10.934,
+    "max_ms": 10.934
+   },
+   "sqlite_transcript_search": {
+    "count": 41,
+    "total_s": 3.7602,
+    "mean_ms": 91.713,
+    "p50_ms": 100.527,
+    "p95_ms": 106.497,
+    "p99_ms": 112.364,
+    "max_ms": 112.364
+   },
+   "process": {
+    "cpu_s": 27.0,
+    "wall_s": 33.731,
+    "cpu_utilization_cores": 0.8,
+    "rss_mb": null
+   }
+  }
+ },
+ "label": "same-c20"
+}

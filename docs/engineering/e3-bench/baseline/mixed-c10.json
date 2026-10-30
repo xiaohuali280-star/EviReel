@@ -1,0 +1,127 @@
+{
+ "load": {
+  "mode": "closed",
+  "concurrency": 10,
+  "rate_per_s": null,
+  "duration_s": 20.0,
+  "same_video": true,
+  "videos": 1,
+  "targets": [
+   "http://127.0.0.1:8890"
+  ],
+  "sources": [
+   "frame",
+   "event",
+   "transcript"
+  ]
+ },
+ "requests": 28,
+ "ok": 28,
+ "statuses": {
+  "200": 28
+ },
+ "rejection_rate": 0.0,
+ "throughput_ok_per_s": 0.918,
+ "latency_ms": {
+  "p50": 10836.8,
+  "p95": 10956.4,
+  "p99": 10956.9,
+  "max": 10956.9
+ },
+ "client": {
+  "python": "3.11.16",
+  "host": "Windows-10-10.0.26200-SP0"
+ },
+ "server_breakdown": {
+  "http://127.0.0.1:8890": {
+   "model_embed": {
+    "count": 134,
+    "total_s": 5.4213,
+    "mean_ms": 40.457,
+    "p50_ms": 40.441,
+    "p95_ms": 40.793,
+    "p99_ms": 40.922,
+    "max_ms": 40.965
+   },
+   "event_loop_lag": {
+    "count": 517,
+    "total_s": 5.7815,
+    "mean_ms": 11.183,
+    "p50_ms": 1.36,
+    "p95_ms": 95.698,
+    "p99_ms": 120.963,
+    "max_ms": 149.253
+   },
+   "sqlite_frames": {
+    "count": 801,
+    "total_s": 9.3928,
+    "mean_ms": 11.726,
+    "p50_ms": 5.332,
+    "p95_ms": 71.144,
+    "p99_ms": 75.3,
+    "max_ms": 88.602
+   },
+   "sqlite_documents": {
+    "count": 68,
+    "total_s": 0.4823,
+    "mean_ms": 7.093,
+    "p50_ms": 5.946,
+    "p95_ms": 9.829,
+    "p99_ms": 10.667,
+    "max_ms": 10.667
+   },
+   "model_vlm": {
+    "count": 5,
+    "total_s": 2.0225,
+    "mean_ms": 404.505,
+    "p50_ms": 406.187,
+    "p95_ms": 414.376,
+    "p99_ms": 414.376,
+    "max_ms": 414.376
+   },
+   "summarize_request": {
+    "count": 3,
+    "total_s": 23.99,
+    "mean_ms": 7996.677,
+    "p50_ms": 10619.361,
+    "p95_ms": 10881.102,
+    "p99_ms": 10881.102,
+    "max_ms": 10881.102
+   },
+   "lock_wait": {
+    "count": 31,
+    "total_s": 256.7594,
+    "mean_ms": 8282.561,
+    "p50_ms": 9822.245,
+    "p95_ms": 9986.551,
+    "p99_ms": 10000.862,
+    "max_ms": 10000.862
+   },
+   "index_open": {
+    "count": 31,
+    "total_s": 2.8395,
+    "mean_ms": 91.596,
+    "p50_ms": 91.13,
+    "p95_ms": 101.34,
+    "p99_ms": 106.277,
+    "max_ms": 106.277
+   },
+   "sqlite_transcript_search": {
+    "count": 28,
+    "total_s": 2.8099,
+    "mean_ms": 100.353,
+    "p50_ms": 100.074,
+    "p95_ms": 103.912,
+    "p99_ms": 106.329,
+    "max_ms": 106.329
+   },
+   "process": {
+    "cpu_s": 22.797,
+    "wall_s": 30.513,
+    "cpu_utilization_cores": 0.747,
+    "rss_mb": null
+   }
+  }
+ },
+ "label": "mixed-c10"
+}
