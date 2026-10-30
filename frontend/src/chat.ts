@@ -3,6 +3,7 @@ import type {AgentEvent, ChatPayload} from './types';
 
 export const matches = (e: AgentEvent, p: ChatPayload) => e.video_id === p.video_id && e.conversation_id === p.conversation_id && e.request_id === p.request_id;
 export const pendingKey = (cid: string) => `evireel:pending:${cid}`;
+export const RECONCILE_MS = 1500;
 export function remembered(cid: string): ChatPayload | null {
   try {
     const p = JSON.parse(localStorage.getItem(pendingKey(cid)) || 'null');
@@ -48,7 +49,9 @@ export class ChatChannel {
     this.payload = payload;
     try {localStorage.setItem(pendingKey(this.cid), JSON.stringify(payload))} catch { /* socket recovery still works without storage */ }
     if (this.socket?.readyState === WebSocket.OPEN) this.socket.send(JSON.stringify(payload));
-    this.reconcile();
+    // First reconciliation after one poll interval: checking immediately races the frame just sent (the
+    // server may not have registered it yet), and the 404 would trigger a needless resend.
+    this.poll = setTimeout(() => this.reconcile(), RECONCILE_MS);
     return true;
   }
   event(e: AgentEvent) {
@@ -73,7 +76,7 @@ export class ChatChannel {
       // Only a confirmed missing request is resent, always with its original ID.
       if (error instanceof ApiError && error.status === 404 && this.payload?.request_id === p.request_id && this.socket?.readyState === WebSocket.OPEN) this.socket.send(JSON.stringify(p));
     }
-    if (this.payload && !this.stopped) this.poll = setTimeout(() => this.reconcile(), 1500);
+    if (this.payload && !this.stopped) this.poll = setTimeout(() => this.reconcile(), RECONCILE_MS);
   }
   close() {this.stopped = true; clearTimeout(this.reconnect); clearTimeout(this.poll); this.abort.abort(); this.socket?.close()}
 }
