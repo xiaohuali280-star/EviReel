@@ -326,3 +326,122 @@ def test_instances_starting_together_create_the_bucket_once():
     finally:
         boto3.client("s3", endpoint_url=S3["endpoint"], aws_access_key_id=S3["access_key"],
                      aws_secret_access_key=S3["secret_key"], region_name="us-east-1").delete_bucket(Bucket=bucket)
+
+
+# ---------------------------------------------------------------------------- E3 first review: lease windows
+def published(app, worker, alice, vid):
+    rerun = alice.post(f"/api/videos/{vid}/index").json()["job_id"]
+    assert drain_inline(worker, rerun)["status"] == "succeeded"
+    return app.state.indexing.registry.get(vid)["active_generation"]
+
+
+def test_a_request_never_leases_a_generation_removed_between_its_row_read_and_its_lease(instances, media):
+    """Review P1-1, deterministic interleaving: the request reads the row (generation 1); before its lease
+    is written, a new generation is published, generation 1 retired and swept. The coordinator refuses
+    the lease on generation 1 and the request re-pins generation 2 -- it never holds a removed one."""
+    _, app_a = instances("a")
+    with TestClient(app_a) as a:
+        alice, _ = users(a, app_a, "alice")["alice"]
+        view = upload_video(a, alice, media["red"])
+        vid = view["video_id"]
+        worker = instances.worker()
+        assert drain_inline(worker, view["job_id"])["status"] == "succeeded"
+        service = app_a.state.indexing
+        old = service.registry.get(vid)["active_generation"]
+        real_acquire, raced = service.coordination.acquire, {}
+
+        def acquire(video_id, generations=(), purpose="read"):
+            if purpose == "retrieval" and not raced:      # first pin only: race it
+                raced["new"] = published(app_a, worker, alice, vid)
+                raced["swept"] = service.sweep()["generations_removed"]
+            return real_acquire(video_id, generations, purpose)
+        service.coordination.acquire = acquire
+        try:
+            response = search(alice, vid)
+        finally:
+            service.coordination.acquire = real_acquire
+        assert raced["swept"] == 1 and not (service.registry.root / "videos" / vid / "memory" / f"{old}.sqlite3").exists()
+        assert response.status_code == 200, response.text
+        assert response.json()["execution"]["snapshot"]["visual"] == raced["new"] != old
+        assert service.coordination.active(vid, old) == 0
+        with pytest.raises(Exception) as stale:            # a lease naming the removed generation is refused
+            real_acquire(vid, (old,), "read")
+        assert getattr(stale.value, "code", "") == "snapshot_stale"
+
+
+def test_removal_rechecks_leases_under_the_lock_after_the_candidate_list(instances, media):
+    """Review P1-1, sweeper side: a lease written after the candidate query but before deletion wins --
+    the claim (under the video lock) fails and the files stay until the lease is gone."""
+    _, app_a = instances("a")
+    with TestClient(app_a) as a:
+        alice, _ = users(a, app_a, "alice")["alice"]
+        view = upload_video(a, alice, media["red"])
+        vid = view["video_id"]
+        worker = instances.worker()
+        assert drain_inline(worker, view["job_id"])["status"] == "succeeded"
+        service = app_a.state.indexing
+        old = service.registry.get(vid)["active_generation"]
+        published(app_a, worker, alice, vid)
+        candidates = service.coordination.due_retired(0)
+        assert (vid, old) in candidates
+        lease = service.coordination.acquire(vid, (old,), "read")       # arrives after the candidate list
+        assert service.remove_generation(vid, old) is False
+        assert (service.registry.root / "videos" / vid / "memory" / f"{old}.sqlite3").is_file()
+        lease.release()
+        assert service.sweep()["generations_removed"] == 1
+
+
+def test_lost_leases_stop_readers_and_are_never_revived(instances, media):
+    """Review P1-2 on real PostgreSQL: maximum lifetime, an expired row and missed renewals all mark the
+    lease lost; a search whose lease is lost ends with 503 read_lease_lost instead of reading on."""
+    from unittest.mock import patch
+    import time
+    _, app_a = instances("a", conversation_request_timeout_s=5, read_lease_max_s=60)
+    with TestClient(app_a) as a:
+        alice, _ = users(a, app_a, "alice")["alice"]
+        view = upload_video(a, alice, media["red"])
+        vid = view["video_id"]
+        assert drain_inline(instances.worker(), view["job_id"])["status"] == "succeeded"
+        coordination = app_a.state.indexing.coordination
+        gen = app_a.state.indexing.registry.get(vid)["active_generation"]
+
+        lifetime = coordination.acquire(vid, (gen,), "read")
+        fired = []
+        lifetime.on_lost(lambda: fired.append("cb"))
+        lifetime.acquired -= coordination.max_life               # its maximum lifetime has passed
+        coordination.expire_overdue()
+        assert lifetime.lost == "max_lifetime" and fired == ["cb"] and not lifetime.valid
+        lifetime.release()                                        # not deleted: in-flight work keeps the TTL
+        assert pg_rows(app_a, "SELECT count(*) AS n FROM read_leases WHERE lease_id=%s", lifetime.lease_id)[0]["n"] == 1
+
+        expired = coordination.acquire(vid, (gen,), "read")
+        with app_a.state.platform.db.transaction() as conn:
+            conn.execute("UPDATE read_leases SET expires_at = now() - interval '1 second' WHERE lease_id=%s",
+                         (expired.lease_id,))
+        coordination.renew_once()
+        assert expired.lost == "row_expired"
+        row = pg_rows(app_a, "SELECT expires_at < now() AS past FROM read_leases WHERE lease_id=%s", expired.lease_id)
+        assert row[0]["past"] is True                             # renewal did not revive it
+
+        unrenewed = coordination.acquire(vid, (gen,), "read")
+        unrenewed.deadline = time.monotonic() - 0.01              # e.g. the database was unreachable
+        coordination.expire_overdue()
+        assert unrenewed.lost == "not_renewed"
+
+        async def slow_search(self, *args, **kwargs):
+            for lease in list(coordination.held.values()):
+                if lease.purpose == "retrieval":
+                    lease.mark_lost("max_lifetime")
+            await asyncio.sleep(5)
+        with patch("vam.retrieval.pipeline.SearchContext.search", slow_search):
+            started = time.monotonic()
+            response = search(alice, vid)
+        assert response.status_code == 503 and response.json()["error"]["code"] == "read_lease_lost"
+        assert time.monotonic() - started < 3
+
+
+def test_startup_refuses_a_lease_lifetime_shorter_than_the_question_deadline(instances):
+    _, app = instances("a", conversation_request_timeout_s=300, read_lease_max_s=200)
+    with pytest.raises(RuntimeError, match="READ_LEASE_MAX_S"):
+        with TestClient(app):
+            pass

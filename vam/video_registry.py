@@ -104,6 +104,19 @@ class VideoRegistry:
         with self.db.connect(write=True) as conn:
             conn.execute("UPDATE videos SET " + ",".join(k + "=?" for k in fields) + " WHERE video_id=?", (*fields.values(), video_id))
 
+    def mark_deleting(self, video_id):
+        """Mark the video 'deleting' unless work that writes state tied to it is active, in one write
+        transaction serialized with job, question and notes acceptance (each re-checks the status in its
+        own transaction): nothing can be accepted between this check and the mark."""
+        with self.db.connect(write=True) as conn:
+            if conn.execute("SELECT 1 FROM index_jobs WHERE video_id=? AND status IN ('queued','running')", (video_id,)).fetchone():
+                raise DomainError(409, "index_running", "Wait for indexing to finish before deleting")
+            if conn.execute("SELECT 1 FROM conversation_requests r JOIN conversations c USING(conversation_id) "
+                            "WHERE c.video_id=? AND r.status IN ('accepted','running')", (video_id,)).fetchone() or \
+                    conn.execute("SELECT 1 FROM study_jobs WHERE video_id=? AND status IN ('queued','running')", (video_id,)).fetchone():
+                raise DomainError(409, "video_busy", "Wait for the running question or notes job to finish")
+            conn.execute("UPDATE videos SET status='deleting' WHERE video_id=?", (video_id,))
+
     def create_job(self, video_id, max_queued, kind="video"):
         if kind not in {"video", "transcript"}:
             raise ValueError("unsupported indexing job kind")

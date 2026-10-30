@@ -177,9 +177,17 @@ class StudyService:
     async def corpus(self, video_id):
         # E3: no per-video lock. The versions are pinned at the start and every page is read at that pinned
         # version (published versions are immutable); a later rebuild only marks the artifact as stale.
-        row = self.indexing._usable_video(video_id)
+        from vam.coordination import StaleSnapshot
+        for _ in range(5):   # lease the row's generations first; re-read the row if they were just removed
+            row = self.indexing._usable_video(video_id)
+            try:
+                release = self.indexing._retain(video_id, (row['active_generation'], row['transcript_generation']), 'study')
+                break
+            except StaleSnapshot:
+                continue
+        else:
+            raise DomainError(503, 'snapshot_stale', 'The index is being replaced; retry')
         versions = self.versions(row)
-        release = self.indexing._retain(video_id, (row['active_generation'], row['transcript_generation']), 'study')
         try:
             records = []
             if versions['transcript'] and self.registry.transcript_state(row)['readable']:
@@ -200,6 +208,9 @@ class StudyService:
                 source, version = 'event', versions['vision']
             else:
                 raise DomainError(409, 'study_source_not_ready', 'No transcript or visual event text is available')
+            check = getattr(release, 'check', None)
+            if check is not None:
+                check()   # the records were read while the lease still protected them
         finally:
             release()
         evidence = [adapt_hit(r, video_id=video_id, source=source, version=version, duration=row['duration'])

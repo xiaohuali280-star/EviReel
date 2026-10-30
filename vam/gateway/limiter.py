@@ -153,7 +153,7 @@ class RedisLimiter:
 
 class LocalLimiter:
     """Same algorithm in one process: for single-instance deployments and as the explicit
-    ``MODEL_LIMITER_ON_REDIS_ERROR=local`` fallback (limits divided by the configured instance count)."""
+    ``MODEL_LIMITER_ON_REDIS_ERROR=local`` fallback of a single model-calling process."""
     name = 'local'
 
     def __init__(self, settings, *, share=1):
@@ -163,7 +163,8 @@ class LocalLimiter:
         self.slots: dict[str, dict[str, float]] = {}
 
     def _scaled(self, limit):
-        return limit if limit < 0 else max(1, limit // self.share)
+        # Never rounds up: a share of a small limit can be 0 (deny), and a limit of 0 always denies.
+        return limit if limit < 0 else limit // self.share
 
     def acquire(self, *, provider, workspace, lane, tokens, permit_id, lease_ms):
         rates, slots = plan(self.settings, provider=provider, workspace=workspace, lane=lane, tokens=tokens)
@@ -181,7 +182,8 @@ class LocalLimiter:
                 held = {p: exp for p, exp in self.slots.get(key, {}).items() if exp > now}
                 self.slots[key] = held
                 if limit >= 0 and len(held) >= limit:
-                    return Denied('slot', name, max(.05, (min(held.values()) - now) / 1000))
+                    # limit 0 (nothing can be held): retry later rather than at a holder's expiry
+                    return Denied('slot', name, max(.05, (min(held.values()) - now) / 1000) if held else 1.0)
             for name, key, limit, cost in rates:
                 self.counts[f'{key}:{window}'] = self.counts.get(f'{key}:{window}', 0) + cost
             for name, key, limit in slots:

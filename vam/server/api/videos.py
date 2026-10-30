@@ -6,6 +6,7 @@ import re
 from fastapi import APIRouter, Request, UploadFile, File, Query
 from starlette.responses import FileResponse, JSONResponse, Response
 
+from vam.coordination import lease_lost_error
 from vam.runtime import run_sync
 from vam.server.platform_auth import principal_of
 from vam.video_registry import DomainError
@@ -15,13 +16,20 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["Videos"])
 
 class LeasedFileResponse(FileResponse):
+    """Streams a file under a read lease. If the lease is lost mid-stream (maximum lifetime, renewal
+    failure) sending stops: the connection is cut and the player re-requests with Range, under a new lease."""
     def __init__(self, path, release, **kwargs):
         super().__init__(path, **kwargs)
         self.release = release
 
     async def __call__(self, scope, receive, send):
+        async def guarded(message):
+            if message["type"] == "http.response.body" and not getattr(self.release, "valid", True):
+                logger.warning("playback_stopped_lease_lost")
+                raise lease_lost_error()
+            await send(message)
         try:
-            await super().__call__(scope, receive, send)
+            await super().__call__(scope, receive, guarded)
         finally:
             await run_sync(self.release)   # a shared (PostgreSQL) lease release is a short DB call
 

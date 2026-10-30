@@ -56,11 +56,8 @@ async def download_export(video_id: str, job_id: str, request: Request):
 async def export(video_id: str, artifact_id: str, request: Request, format: str = Query('md', pattern='^(md|pptx|pdf)$')):
     study = request.app.state.study
     artifact = study.artifact(video_id, artifact_id)
-    release = study.indexing._retain(video_id)
-    try:
+    async with study.indexing.guard(study.indexing._retain(video_id)):
         content = await run_sync(export_study, artifact, format, study.settings.study_max_export_pages)
-    finally:
-        release()
     media = {'md': 'text/markdown; charset=utf-8', 'pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation', 'pdf': 'application/pdf'}[format]
     return Response(content, media_type=media, headers={'Content-Disposition': f'attachment; filename="EviReel-{artifact_id}.{format}"'})
 

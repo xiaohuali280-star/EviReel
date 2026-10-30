@@ -224,11 +224,12 @@ class WorkerContext:
 
 class _StudyIndexing:
     """The slice of IndexingService that StudyService reads (corpus/artifacts), for worker processes.
-    Read-only over published generations; no OwnerLock, no in-process leases."""
+    Read-only over published generations; no OwnerLock; shared (PostgreSQL) read leases."""
 
     def __init__(self, ctx):
         self.registry, self.settings, self.backend = ctx.registry, ctx.settings, ctx.backend
         self.publications = ctx.publications
+        self.coordination = ctx.coordination
 
     def _usable_video(self, video_id):
         row = self.registry.get(video_id)
@@ -239,8 +240,13 @@ class _StudyIndexing:
         return row
 
     def _retain(self, video_id, generations=None, purpose='read'):
-        # Workers read the generation pinned by their job; the retirement grace period covers the read.
-        return lambda: None
+        # A real shared lease (E3): a worker reading a published generation blocks its removal like any API
+        # reader; renewed by a daemon thread in this process.
+        self.coordination.start_thread()
+        if generations is None:
+            row = self.registry.get(video_id)
+            generations = (row['active_generation'], row['transcript_generation'])
+        return self.coordination.acquire(video_id, generations, purpose)
 
     def _transcript_store(self, video_id):
         row = self.registry.get(video_id)

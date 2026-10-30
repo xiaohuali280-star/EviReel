@@ -11,7 +11,10 @@ Per *attempt* (retries are separate attempts and pay again):
                    window is charged the difference.
 Retries: 429/5xx/timeouts/transport errors, exponential backoff with full jitter, honouring Retry-After.
 Shared limiter unreachable: MODEL_LIMITER_ON_REDIS_ERROR=reject (default: 503, no call is made) or local
-(per-process limiter with every limit divided by API_INSTANCE_COUNT -- conservative, not shared).
+-- a per-process limiter, allowed only when this is the only process calling models (one API, no pipeline
+workers); with several model-calling processes it is refused at API startup and ignored by workers.
+Deadlines: the total timeout is absolute and bounds admission waits, backoff, reservation and each call;
+the admission wait budget is shared by all attempts of one request.
 
 Scope (workspace, lane) comes from a ContextVar set where work starts: question answering and search are
 'interactive', pipeline stages and note generation are 'offline'.
@@ -144,182 +147,192 @@ class ModelGateway:
             self.waiters += 1
             return True
 
-    def _leave_wait(self):
-        with self.waiters_lock:
-            self.waiters -= 1
-
-    def _wait_budget(self, call):
-        return self.settings.model_queue_wait_s if call.lane == 'interactive' else self.settings.model_offline_queue_wait_s
+    def _leave_wait(self, run):
+        if run.waiting:
+            run.waiting = False
+            with self.waiters_lock:
+                self.waiters -= 1
 
     def _reject(self, denied):
         self._count('rejected', denied.limit)
         raise DomainError(429, 'model_rate_limited', f'Model capacity is busy ({denied.limit}); retry in '
                           f'{max(1, round(denied.retry_after_s))} s')
 
-    # -- async ------------------------------------------------------------------------------------------
-    async def _admit(self, call):
-        from vam.runtime import run_sync
-        waited, registered = 0.0, False
-        try:
-            while True:
-                result, limiter = await run_sync(self._try_admit, call)
-                if not isinstance(result, Denied):
-                    self._count('admitted')
-                    return result, limiter
-                self._count('denied', result.limit)
-                budget = self._wait_budget(call) - waited
-                if budget <= 0:
-                    self._reject(result)
-                if not registered:
-                    if not self._enter_wait():
-                        self._reject(Denied(result.kind, 'max_waiters', result.retry_after_s))
-                    registered = True
-                pause = min(budget, max(.02, result.retry_after_s) * (0.5 + random.random() / 2), 2.0)
-                await asyncio.sleep(pause)
-                waited += pause
-        finally:
-            if registered:
-                self._leave_wait()
+    def _deadline_exceeded(self):
+        self._count('rejected', 'total_deadline')
+        return DomainError(504, 'model_deadline_exceeded', 'Model request exceeded its total time budget')
 
+    # -- one policy for both execution styles ----------------------------------------------------------
+    # The async and the sync (thread) entry points only differ in how they sleep and call the provider;
+    # admission, deadlines, retries and accounting are these shared steps.
+    def _start(self, timeout, attempts, total_timeout):
+        lane = current_scope()[1]
+        queue = self.settings.model_queue_wait_s if lane != 'offline' else self.settings.model_offline_queue_wait_s
+        return _Run(timeout=timeout or self.settings.model_attempt_timeout_s,
+                    attempts=attempts or self.settings.model_max_attempts,
+                    deadline=time.monotonic() + (total_timeout or self.settings.model_total_timeout_s),
+                    queue_left=queue)
+
+    def _admit_step(self, run, call):
+        """One admission try: ``(permit, limiter), 0`` when admitted, else ``None, pause`` to sleep before the
+        next try. Never admits after the total deadline; the wait is bounded by the smaller of the remaining
+        queue budget (shared by all attempts of the request) and the remaining total budget."""
+        if time.monotonic() >= run.deadline:
+            raise self._deadline_exceeded()
+        result, limiter = self._try_admit(call)
+        if not isinstance(result, Denied):
+            self._count('admitted')
+            return (result, limiter), 0
+        self._count('denied', result.limit)
+        remaining = run.deadline - time.monotonic()
+        if run.queue_left <= 0:
+            self._reject(result)
+        if remaining <= 0:
+            raise self._deadline_exceeded()
+        if not run.waiting:
+            if not self._enter_wait():
+                self._reject(Denied(result.kind, 'max_waiters', result.retry_after_s))
+            run.waiting = True
+        pause = min(run.queue_left, remaining, max(.02, result.retry_after_s) * (0.5 + random.random() / 2), 2.0)
+        run.queue_left -= pause
+        return None, pause
+
+    def _reserve(self, run, call, permit, limiter):
+        try:
+            self.ledger.reserve(call)
+        except BaseException:
+            limiter.release(permit)
+            raise
+        if time.monotonic() >= run.deadline:   # admission or the reservation used up the budget
+            self.ledger.fail(call, 'deadline_exceeded')
+            limiter.release(permit)
+            raise self._deadline_exceeded()
+        return min(run.timeout, run.deadline - time.monotonic())
+
+    def _failed_attempt(self, run, call, permit, limiter, exc, number):
+        """Record a failed provider attempt; the pause before the next one, or raise to stop."""
+        (self.ledger.unknown if exc.sent else self.ledger.fail)(call, exc.code)
+        self._count('outcomes', 'unknown' if exc.sent else 'failed')
+        limiter.release(permit)
+        remaining = run.deadline - time.monotonic()
+        if not exc.retryable or number == run.attempts or remaining <= 0:
+            raise exc
+        self._count('retries')
+        base = min(self.settings.model_retry_cap_s, self.settings.model_retry_base_s * 2 ** (number - 1))
+        return min(max(exc.retry_after or 0, random.uniform(0, base)), remaining)
+
+    def _caller_error(self, call, permit, limiter):
+        self.ledger.unknown(call, 'caller_error')
+        limiter.release(permit)
+
+    def _succeeded(self, call, permit, limiter, usage):
+        used_in = int((usage or {}).get('input_tokens') or 0)
+        used_out = int((usage or {}).get('output_tokens') or 0)
+        source = 'provider' if usage else 'estimate'
+        if not usage:
+            used_in, used_out = call.est_input_tokens, call.est_output_tokens
+        self.ledger.settle(call, used_in, used_out, source)
+        limiter.release(permit)
+        limiter.adjust_tokens(permit, used_in + used_out - call.est_input_tokens - call.est_output_tokens)
+        self._count('outcomes', 'settled')
+
+    @staticmethod
+    def _provider_error(exc):
+        if isinstance(exc, (ProviderError, DomainError)):
+            return None
+        import httpx
+        return from_httpx(exc) if isinstance(exc, httpx.HTTPError) else None
+
+    # -- async ------------------------------------------------------------------------------------------
     async def run(self, *, operation, model, attempt_fn, est_input_tokens, est_output_tokens=0, provider=None,
                   timeout=None, attempts=None, total_timeout=None):
         """``attempt_fn()`` performs ONE provider request and returns ``(result, usage)`` where usage is
         ``{'input_tokens', 'output_tokens'}`` from the provider, or None. It raises ProviderError/httpx errors."""
         from vam.runtime import run_sync
-        timeout = timeout or self.settings.model_attempt_timeout_s
-        attempts = attempts or self.settings.model_max_attempts
-        deadline = time.monotonic() + (total_timeout or self.settings.model_total_timeout_s)
-        last = None
-        for number in range(1, attempts + 1):
-            call = self._call(operation, model, provider, number, est_input_tokens, est_output_tokens, timeout)
-            permit, limiter = await self._admit(call)
-            try:
-                await run_sync(self.ledger.reserve, call)
-            except BaseException:
-                limiter.release(permit)
-                raise
-            try:
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    await run_sync(self.ledger.fail, call, 'deadline_exceeded')
-                    raise DomainError(504, 'model_deadline_exceeded', 'Model request exceeded its total time budget')
+        run = self._start(timeout, attempts, total_timeout)
+        try:
+            for number in range(1, run.attempts + 1):
+                call = self._call(operation, model, provider, number, est_input_tokens, est_output_tokens, run.timeout)
+                while True:
+                    admitted, pause = await run_sync(self._admit_step, run, call)
+                    if admitted:
+                        break
+                    await asyncio.sleep(pause)
+                self._leave_wait(run)
+                permit, limiter = admitted
+                budget = await run_sync(self._reserve, run, call, permit, limiter)
                 try:
-                    result, usage = await asyncio.wait_for(attempt_fn(), min(timeout, remaining))
-                except (TimeoutError, asyncio.TimeoutError):
-                    raise ProviderError('provider_timeout', retryable=True, sent=True) from None
-                except ProviderError:
+                    try:
+                        result, usage = await asyncio.wait_for(attempt_fn(), budget)
+                    except (TimeoutError, asyncio.TimeoutError):
+                        raise ProviderError('provider_timeout', retryable=True, sent=True) from None
+                    except Exception as exc:
+                        mapped = self._provider_error(exc)
+                        if mapped is None:
+                            raise
+                        raise mapped from exc
+                except ProviderError as exc:
+                    await asyncio.sleep(await run_sync(self._failed_attempt, run, call, permit, limiter, exc, number))
+                    continue
+                except BaseException:
+                    await run_sync(self._caller_error, call, permit, limiter)
                     raise
-                except DomainError:
-                    raise
-                except Exception as exc:
-                    import httpx
-                    if isinstance(exc, httpx.HTTPError):
-                        raise from_httpx(exc) from exc
-                    raise
-            except ProviderError as exc:
-                last = exc
-                await run_sync(self.ledger.unknown if exc.sent else self.ledger.fail, call, exc.code)
-                self._count('outcomes', 'unknown' if exc.sent else 'failed')
-                limiter.release(permit)
-                if not exc.retryable or number == attempts or time.monotonic() >= deadline:
-                    raise
-                self._count('retries')
-                base = min(self.settings.model_retry_cap_s, self.settings.model_retry_base_s * 2 ** (number - 1))
-                pause = max(exc.retry_after or 0, random.uniform(0, base))
-                await asyncio.sleep(min(pause, max(0, deadline - time.monotonic())))
-                continue
-            except BaseException:
-                await run_sync(self.ledger.unknown, call, 'caller_error')
-                limiter.release(permit)
-                raise
-            used_in = int((usage or {}).get('input_tokens') or 0)
-            used_out = int((usage or {}).get('output_tokens') or 0)
-            source = 'provider' if usage else 'estimate'
-            if not usage:
-                used_in, used_out = call.est_input_tokens, call.est_output_tokens
-            await run_sync(self.ledger.settle, call, used_in, used_out, source)
-            limiter.release(permit)
-            limiter.adjust_tokens(permit, used_in + used_out - call.est_input_tokens - call.est_output_tokens)
-            self._count('outcomes', 'settled')
-            return result
-        raise last or RuntimeError('model call failed')
+                await run_sync(self._succeeded, call, permit, limiter, usage)
+                return result
+        finally:
+            self._leave_wait(run)
+        raise RuntimeError('model call failed')
 
     # -- sync (threads: the embedding client is synchronous) ------------------------------------------
     def run_sync(self, *, operation, model, attempt_fn, est_input_tokens, est_output_tokens=0, provider=None,
                  timeout=None, attempts=None, total_timeout=None):
-        timeout = timeout or self.settings.model_attempt_timeout_s
-        attempts = attempts or self.settings.model_max_attempts
-        deadline = time.monotonic() + (total_timeout or self.settings.model_total_timeout_s)
-        last = None
-        for number in range(1, attempts + 1):
-            call = self._call(operation, model, provider, number, est_input_tokens, est_output_tokens, timeout)
-            waited, registered = 0.0, False
-            try:
+        """Same policy; ``attempt_fn(timeout_s)`` must bound its own request by ``timeout_s``."""
+        run = self._start(timeout, attempts, total_timeout)
+        try:
+            for number in range(1, run.attempts + 1):
+                call = self._call(operation, model, provider, number, est_input_tokens, est_output_tokens, run.timeout)
                 while True:
-                    permit, limiter = self._try_admit(call)
-                    if not isinstance(permit, Denied):
-                        self._count('admitted')
+                    admitted, pause = self._admit_step(run, call)
+                    if admitted:
                         break
-                    self._count('denied', permit.limit)
-                    budget = self._wait_budget(call) - waited
-                    if budget <= 0:
-                        self._reject(permit)
-                    if not registered:
-                        if not self._enter_wait():
-                            self._reject(Denied(permit.kind, 'max_waiters', permit.retry_after_s))
-                        registered = True
-                    pause = min(budget, max(.02, permit.retry_after_s) * (0.5 + random.random() / 2), 2.0)
                     time.sleep(pause)
-                    waited += pause
-            finally:
-                if registered:
-                    self._leave_wait()
-            try:
-                self.ledger.reserve(call)
-            except BaseException:
-                limiter.release(permit)
-                raise
-            try:
-                if time.monotonic() >= deadline:
-                    self.ledger.fail(call, 'deadline_exceeded')
-                    raise DomainError(504, 'model_deadline_exceeded', 'Model request exceeded its total time budget')
+                self._leave_wait(run)
+                permit, limiter = admitted
+                budget = self._reserve(run, call, permit, limiter)
                 try:
-                    result, usage = attempt_fn(min(timeout, max(.1, deadline - time.monotonic())))
-                except ProviderError:
+                    try:
+                        result, usage = attempt_fn(max(.1, budget))
+                    except Exception as exc:
+                        mapped = self._provider_error(exc)
+                        if mapped is None:
+                            raise
+                        raise mapped from exc
+                except ProviderError as exc:
+                    time.sleep(self._failed_attempt(run, call, permit, limiter, exc, number))
+                    continue
+                except BaseException:
+                    self._caller_error(call, permit, limiter)
                     raise
-                except DomainError:
-                    raise
-                except Exception as exc:
-                    import httpx
-                    if isinstance(exc, httpx.HTTPError):
-                        raise from_httpx(exc) from exc
-                    raise
-            except ProviderError as exc:
-                last = exc
-                (self.ledger.unknown if exc.sent else self.ledger.fail)(call, exc.code)
-                self._count('outcomes', 'unknown' if exc.sent else 'failed')
-                limiter.release(permit)
-                if not exc.retryable or number == attempts or time.monotonic() >= deadline:
-                    raise
-                self._count('retries')
-                base = min(self.settings.model_retry_cap_s, self.settings.model_retry_base_s * 2 ** (number - 1))
-                time.sleep(min(max(exc.retry_after or 0, random.uniform(0, base)), max(0, deadline - time.monotonic())))
-                continue
-            except BaseException:
-                self.ledger.unknown(call, 'caller_error')
-                limiter.release(permit)
-                raise
-            used_in = int((usage or {}).get('input_tokens') or 0)
-            used_out = int((usage or {}).get('output_tokens') or 0)
-            source = 'provider' if usage else 'estimate'
-            if not usage:
-                used_in, used_out = call.est_input_tokens, call.est_output_tokens
-            self.ledger.settle(call, used_in, used_out, source)
-            limiter.release(permit)
-            limiter.adjust_tokens(permit, used_in + used_out - call.est_input_tokens - call.est_output_tokens)
-            self._count('outcomes', 'settled')
-            return result
-        raise last or RuntimeError('model call failed')
+                self._succeeded(call, permit, limiter, usage)
+                return result
+        finally:
+            self._leave_wait(run)
+        raise RuntimeError('model call failed')
+
+
+@dataclass
+class _Run:
+    """Budget of one gateway request (all its attempts)."""
+    timeout: float
+    attempts: int
+    deadline: float          # absolute (monotonic): admission, backoff, reservation and calls all end here
+    queue_left: float        # admission wait still allowed, shared by every attempt
+    waiting: bool = False
+
+
+def shares_model_limits(settings) -> bool:
+    """True when other processes also call models: several API instances, or pipeline workers."""
+    return bool(settings.api_multi_instance or settings.pipeline_mode == 'worker')
 
 
 _gateway: ModelGateway | None = None
@@ -329,8 +342,14 @@ _gateway_lock = threading.Lock()
 def build_gateway(settings, *, redis_client=None, db=None):
     if redis_client is not None:
         limiter = RedisLimiter(redis_client, settings)
-        fallback = LocalLimiter(settings, share=settings.api_instance_count) \
-            if settings.model_limiter_on_redis_error == 'local' else None
+        fallback = None
+        if settings.model_limiter_on_redis_error == 'local':
+            if shares_model_limits(settings):
+                # Several model-calling processes (API instances, workers): no per-process limit can keep the
+                # sum under the configured one, so this process rejects instead (the API refuses to start).
+                logger.warning('model_limiter_local_fallback_ignored reason=shared_limits')
+            else:
+                fallback = LocalLimiter(settings)
     else:
         limiter, fallback = LocalLimiter(settings), None
     ledger = PgLedger(db, settings) if db is not None else NullLedger()

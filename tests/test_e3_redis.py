@@ -109,14 +109,19 @@ def test_unreachable_redis_rejects_model_calls_instead_of_running_unlimited():
     with pytest.raises(DomainError) as exc:
         asyncio.run(gateway.run(operation="chat", model="sim", attempt_fn=provider, est_input_tokens=1))
     assert exc.value.status == 503 and called == []
-    # Explicit opt-in: a per-process limiter with every limit divided by the instance count.
-    local = build_gateway(settings(model_limiter_on_redis_error="local", api_instance_count=2, model_rpm_workspace=4,
-                                   model_queue_wait_s=0), redis_client=dead)
-    results = [asyncio.run(local.run(operation="chat", model="sim", attempt_fn=provider, est_input_tokens=1))
-               if i < 2 else None for i in range(2)]
-    assert results == ["ok", "ok"]
+    # Explicit opt-in, allowed only for the single model-calling process: its own limits apply.
+    local = build_gateway(settings(model_limiter_on_redis_error="local", model_rpm_workspace=2, model_queue_wait_s=0),
+                          redis_client=dead)
+    assert [asyncio.run(local.run(operation="chat", model="sim", attempt_fn=provider, est_input_tokens=1))
+            for _ in range(2)] == ["ok", "ok"]
     with pytest.raises(DomainError):
         asyncio.run(local.run(operation="chat", model="sim", attempt_fn=provider, est_input_tokens=1))
+    # Several model-calling processes (API instances / workers): the opt-in is ignored, calls are rejected.
+    shared = build_gateway(settings(model_limiter_on_redis_error="local", pipeline_mode="worker",
+                                    api_instance_count=2), redis_client=dead)
+    with pytest.raises(DomainError) as refused:
+        asyncio.run(shared.run(operation="chat", model="sim", attempt_fn=provider, est_input_tokens=1))
+    assert refused.value.status == 503
 
 
 def test_cache_single_flight_across_instances_and_a_stale_executor_cannot_overwrite(redis):
@@ -240,3 +245,14 @@ def test_question_on_instance_a_is_followed_from_a_socket_on_instance_b(tmp_path
                     assert events[-1]["type"] == "final" and "answer from A" in events[-1]["text"]
             assert app_b.state.events.received >= 1                      # it came over Redis Pub/Sub
             assert alice_b.get(f"/api/conversations/{cid}/requests/{rid}").json()["status"] == "completed"
+
+
+def test_small_and_zero_limits_hold_across_instances(redis):
+    """Review P2-4 on the shared path: in-flight limit 1 over two instances admits exactly one call;
+    a limit of 0 admits none."""
+    from vam.gateway.limiter import Permit
+    a, b = limiter_pair(settings(model_inflight_provider=1))
+    assert [isinstance(take(x), Permit) for x in (a, b, a, b)] == [True, False, False, False]
+    redis.flushdb()
+    a, b = limiter_pair(settings(model_inflight_provider=0))
+    assert not any(isinstance(take(x), Permit) for x in (a, b))

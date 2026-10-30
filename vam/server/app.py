@@ -90,6 +90,15 @@ def create_app(*, settings=None, backend=None, indexer=None, transcriber=None, r
         if settings.api_multi_instance and settings.registry_backend != "postgres":
             # The read model (videos, jobs, conversations, notes) must not live in an instance-local file.
             raise RuntimeError("API_MULTI_INSTANCE requires REGISTRY_BACKEND=postgres")
+        if settings.read_lease_max_s < settings.conversation_request_timeout_s + settings.read_lease_ttl_s:
+            # A question's reads are protected for its whole deadline; the lease ending first would cancel
+            # questions that are still allowed to run.
+            raise RuntimeError("READ_LEASE_MAX_S must be at least CONVERSATION_REQUEST_TIMEOUT_S + READ_LEASE_TTL_S")
+        if settings.model_limiter_on_redis_error == "local" and model_gateway.shares_model_limits(settings):
+            # Other processes (API instances, pipeline workers) call models too: a per-process fallback cannot
+            # keep their sum under the configured limits.
+            raise RuntimeError("MODEL_LIMITER_ON_REDIS_ERROR=local is only allowed for a single API process "
+                               "without pipeline workers; use reject")
         if settings.platform_enabled:
             from vam.platform import build_platform
             platform = await run_sync(build_platform, settings, store=object_store)

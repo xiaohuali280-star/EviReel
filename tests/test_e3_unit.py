@@ -238,3 +238,159 @@ def test_local_events_drop_oldest_progress_and_end_on_terminal_event():
     assert [queue.get_nowait()["i"] for _ in range(2)] == [1, 2]
     bus.publish(("c", "r"), {"type": "final"})
     assert bus.subscribers == {}
+
+
+# ---------------------------------------------------------------------------- E3 first review fixes
+class BusyLimiter:
+    """Always denies (a saturated shared limiter); counts the tries."""
+    name = "redis"
+
+    def __init__(self, admit_first=0):
+        self.tries, self.admit_first = 0, admit_first
+
+    def acquire(self, **_):
+        from vam.gateway.limiter import Denied, Permit
+        self.tries += 1
+        if self.tries <= self.admit_first:
+            return Permit(f"p{self.tries}", [], None, "test")
+        return Denied("slot", "provider_inflight", 0.01)
+
+    def release(self, permit):
+        pass
+
+    def adjust_tokens(self, permit, delta):
+        pass
+
+
+@pytest.mark.parametrize("style", ["async", "sync"])
+def test_total_deadline_bounds_the_admission_wait(style):
+    """Review P2-3: total 0.05 s, queue wait 0.5 s, limiter always busy -> 504 within the total budget,
+    the provider is never called (previously ~0.47 s and model_rate_limited)."""
+    import time
+    from vam.video_registry import DomainError
+    g = gateway(settings(model_queue_wait_s=0.5, model_offline_queue_wait_s=0.5), BusyLimiter())
+    called = []
+
+    async def provider():
+        called.append(1)
+        return "ok", None
+    started = time.monotonic()
+    with pytest.raises(DomainError) as exc:
+        if style == "async":
+            asyncio.run(g.run(operation="chat", model="m", attempt_fn=provider, est_input_tokens=1, total_timeout=0.05))
+        else:
+            g.run_sync(operation="chat", model="m", attempt_fn=lambda t: called.append(1), est_input_tokens=1,
+                       total_timeout=0.05)
+    elapsed = time.monotonic() - started
+    assert exc.value.code == "model_deadline_exceeded" and called == [] and elapsed < 0.2, elapsed
+    assert g.waiters == 0
+
+
+@pytest.mark.parametrize("style", ["async", "sync"])
+def test_queue_wait_budget_is_shared_by_all_attempts(style):
+    """A retry does not get a fresh admission wait: 0.2 s for the whole request."""
+    import time
+    from vam.gateway import ProviderError
+    from vam.video_registry import DomainError
+    g = gateway(settings(model_queue_wait_s=0.2, model_max_attempts=4, model_retry_base_s=0), BusyLimiter(admit_first=1))
+
+    def fail(*_):
+        raise ProviderError("provider_http_429", status=429, retryable=True, sent=False, retry_after=0)
+
+    async def afail():
+        fail()
+    started = time.monotonic()
+    with pytest.raises(DomainError) as exc:
+        if style == "async":
+            asyncio.run(g.run(operation="chat", model="m", attempt_fn=afail, est_input_tokens=1, total_timeout=5))
+        else:
+            g.run_sync(operation="chat", model="m", attempt_fn=fail, est_input_tokens=1, total_timeout=5)
+    assert exc.value.code == "model_rate_limited" and time.monotonic() - started < 0.45
+    assert g.waiters == 0
+
+
+def test_local_limits_never_round_up():
+    """Review P2-4: a share of a small limit is 0 (deny), never 1; a limit of 0 always denies."""
+    from vam.gateway.limiter import LocalLimiter
+    base = dict(model_inflight_workspace=-1, model_rpm_global=-1, model_rpm_provider=-1, model_tpm_provider=-1,
+                model_rpm_workspace=-1)
+    assert acquire(LocalLimiter(settings(model_inflight_provider=1, **base), share=2), 1)[0] == []
+    assert acquire(LocalLimiter(settings(model_inflight_provider=0, **base)), 1)[0] == []
+    assert len(acquire(LocalLimiter(settings(model_inflight_provider=1, **base)), 2)[0]) == 1
+
+
+def test_local_fallback_is_refused_when_other_processes_call_models():
+    """With several model-calling processes (API instances or pipeline workers) a per-process fallback
+    cannot keep the sum under the limit: every process rejects (503, no provider call) when Redis is down."""
+    import redis as redis_lib
+    from vam.gateway import build_gateway, shares_model_limits
+    from vam.video_registry import DomainError
+    dead = redis_lib.Redis(host="127.0.0.1", port=1, socket_connect_timeout=0.2, socket_timeout=0.2)
+    called = []
+
+    async def provider():
+        called.append(1)
+        return "ok", None
+    api = settings(model_limiter_on_redis_error="local", pipeline_mode="worker", api_instance_count=2)
+    worker = settings(model_limiter_on_redis_error="local", pipeline_mode="worker")
+    assert shares_model_limits(api) and shares_model_limits(worker)
+    for s in (api, worker):     # one API and one worker process, Redis down at the same time
+        g = build_gateway(s, redis_client=dead)
+        assert g.fallback is None
+        with pytest.raises(DomainError) as exc:
+            asyncio.run(g.run(operation="chat", model="m", attempt_fn=provider, est_input_tokens=1))
+        assert exc.value.status == 503
+    assert called == []
+    alone = build_gateway(settings(model_limiter_on_redis_error="local"), redis_client=dead)
+    assert alone.fallback is not None and alone.fallback.share == 1
+
+
+def test_lost_lease_cancels_the_guarded_read_and_never_fires_after_release(tmp_path):
+    from vam.coordination import LocalCoordinator
+    from vam.indexing.service import IndexingService
+    from vam.video_registry import DomainError
+    service = IndexingService(settings(data_root=str(tmp_path)), backend=object(), transcriber=object())
+    coordination = LocalCoordinator(service.settings)
+
+    async def scenario():
+        lease = coordination.acquire("v_" + "0" * 32, (), "test")
+        asyncio.get_running_loop().call_later(0.05, lease.mark_lost, "max_lifetime")
+        with pytest.raises(DomainError) as exc:
+            async with service.guard(lease):
+                await asyncio.sleep(5)
+        assert exc.value.code == "read_lease_lost" and lease.released
+        done = coordination.acquire("v_" + "0" * 32, (), "test")
+        async with service.guard(done):
+            pass
+        done.mark_lost("late")              # after release: the finished request is not cancelled
+        await asyncio.sleep(0.05)
+        return True
+    assert asyncio.run(scenario())
+
+
+def test_streamed_file_stops_when_its_lease_is_lost(tmp_path):
+    from vam.server.api.videos import LeasedFileResponse
+    from vam.video_registry import DomainError
+    path = tmp_path / "big.bin"
+    path.write_bytes(b"x" * (1 << 20))
+
+    class Lease:
+        valid, released, chunks = True, False, 0
+
+        def __call__(self):
+            self.released = True
+    lease = Lease()
+    sent = []
+
+    async def send(message):
+        if message["type"] == "http.response.body":
+            sent.append(len(message.get("body", b"")))
+            lease.valid = False                       # lost after the first chunk
+
+    async def receive():
+        await asyncio.sleep(10)
+        return {"type": "http.disconnect"}
+    scope = {"type": "http", "method": "GET", "headers": [], "path": "/", "query_string": b""}
+    with pytest.raises(DomainError) as exc:
+        asyncio.run(LeasedFileResponse(path, lease)(scope, receive, send))
+    assert exc.value.code == "read_lease_lost" and sum(sent) < (1 << 20) and lease.released

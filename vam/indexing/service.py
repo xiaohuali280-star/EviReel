@@ -13,7 +13,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
-from vam.coordination import LocalCoordinator
+from vam.coordination import LocalCoordinator, StaleSnapshot, lease_lost_error
 from vam.memory.transcript import embedding_fingerprint
 from vam.runtime import run_sync
 from vam.asr.audio import ASRError
@@ -185,12 +185,46 @@ class IndexingService:
         return row
 
     def _retain(self, video_id, generations=None, purpose='read'):
-        """A read lease on the video and the generations it names (default: the currently published ones).
-        Refused once the video is tombstoned. The returned lease is callable to release it."""
-        if generations is None:
-            row = self.registry.get(video_id)
-            generations = (row['active_generation'], row['transcript_generation'])
-        return self.coordination.acquire(video_id, generations, purpose)
+        """A read lease on the video and the generations it names (default: the currently published ones,
+        re-read if they were replaced and removed meanwhile). Refused once the video is tombstoned. The
+        returned lease is callable to release it."""
+        if generations is not None:
+            return self.coordination.acquire(video_id, generations, purpose)
+        return self._lease_current(video_id, purpose, lambda row: (row['active_generation'], row['transcript_generation']))[1]
+
+    def _lease_current(self, video_id, purpose, generations_of, *, usable=False):
+        """Read the video row, then lease the generations it names. The coordinator refuses generations
+        already claimed for removal (StaleSnapshot): the row is then re-read, so what is returned is always
+        a row whose generations are protected by the returned lease -- read files only after this."""
+        for _ in range(5):
+            row = self._usable_video(video_id) if usable else self.registry.get(video_id)
+            try:
+                return row, self.coordination.acquire(video_id, generations_of(row), purpose)
+            except StaleSnapshot:
+                continue
+        raise DomainError(503, 'snapshot_stale', 'The index is being replaced; retry')
+
+    @asynccontextmanager
+    async def guard(self, lease):
+        """Run a read under ``lease``: if the lease is lost (maximum lifetime, renewal failure) the read is
+        cancelled and ends with 503 read_lease_lost instead of continuing unprotected. Releases on exit."""
+        task, loop = asyncio.current_task(), asyncio.get_running_loop()
+        active = [True]
+
+        def cancel():
+            if active[0]:
+                task.cancel()
+        lease.on_lost(lambda: loop.call_soon_threadsafe(cancel))
+        try:
+            yield lease
+        except asyncio.CancelledError:
+            if lease.lost is None:
+                raise
+            task.uncancel()
+            raise lease_lost_error() from None
+        finally:
+            active[0] = False
+            await run_sync(lease.release)
 
     def _restore(self, video_id, relative, *, prefix=False):
         if self.publications is not None:
@@ -210,11 +244,15 @@ class IndexingService:
                             embedding_fingerprint(self.backend or get_backend()))
 
     async def _pin(self, video_id, purpose):
-        """Usable-check, snapshot and lease, in that order; the lease names the snapshot's generations."""
-        row = self._usable_video(video_id)
-        snapshot = await run_sync(self.snapshot, row)
-        lease = await run_sync(self.coordination.acquire, video_id,
-                               (snapshot.visual_generation, snapshot.transcript_generation), purpose)
+        """Lease first, then snapshot: the lease names the row's generations (granted only while they are
+        not claimed for removal), and the snapshot is read from exactly those generations."""
+        row, lease = await run_sync(self._lease_current, video_id, purpose,
+                                    lambda r: (r['active_generation'], r['transcript_generation']), usable=True)
+        try:
+            snapshot = await run_sync(self.snapshot, row)
+        except BaseException:
+            await run_sync(lease.release)
+            raise
         return row, snapshot, lease
 
     def _reader(self, video_id, generation):
@@ -445,11 +483,10 @@ class IndexingService:
         row = self._usable_video(video_id)
         if not row["transcript_generation"]:
             raise DomainError(409, "transcript_not_ready", "No transcript job has initialized this video")
-        lease = await run_sync(self.coordination.acquire, video_id, (row["transcript_generation"],), "transcript")
-        try:
+        _, lease = await run_sync(self._lease_current, video_id, "transcript",
+                                  lambda r: (r["transcript_generation"],), usable=True)
+        async with self.guard(lease):
             yield self._transcript_store(video_id)
-        finally:
-            await run_sync(lease.release)
 
     @asynccontextmanager
     async def retrieval_context(self, video_id):
@@ -457,7 +494,7 @@ class IndexingService:
         same immutable generation in parallel; summaries written meanwhile go to the derived-summary file."""
         from vam.retrieval.pipeline import SearchContext
         row, snapshot, lease = await self._pin(video_id, "retrieval")
-        try:
+        async with self.guard(lease):
             visual, transcript, warnings = None, None, []
             if snapshot.visual_generation:
                 try:
@@ -472,20 +509,17 @@ class IndexingService:
             yield SearchContext(row=row, visual=visual, transcript=transcript, backend=self.backend or get_backend(),
                                 settings=self.settings, reranker=self.reranker, warnings=warnings, snapshot=snapshot,
                                 cache=self.cache, cache_scope=scope)
-        finally:
-            await run_sync(lease.release)
 
     @asynccontextmanager
     async def memory_context(self, video_id):
-        row = self._usable_video(video_id)
-        generation = row["active_generation"]
-        if not generation:
+        if not self._usable_video(video_id)["active_generation"]:
             raise DomainError(409, "index_not_ready", "Video has no usable visual index")
-        lease = await run_sync(self.coordination.acquire, video_id, (generation,), "memory")
-        try:
-            yield row, await run_sync(self._reader, video_id, generation)
-        finally:
-            await run_sync(lease.release)
+        row, lease = await run_sync(self._lease_current, video_id, "memory", lambda r: (r["active_generation"],),
+                                    usable=True)
+        async with self.guard(lease):
+            if not row["active_generation"]:
+                raise DomainError(409, "index_not_ready", "Video has no usable visual index")
+            yield row, await run_sync(self._reader, video_id, row["active_generation"])
 
     def playback_asset(self, video_id):
         row = self._usable_video(video_id)
@@ -495,7 +529,7 @@ class IndexingService:
         path = self.registry.asset(video_id, row["playback_path"])
         if not path.is_file():
             raise DomainError(404, "asset_missing", "Video asset is missing")
-        return path, self.coordination.acquire(video_id, (), "playback")
+        return path, self.coordination.acquire(video_id, (), "playback")   # streamed under LeasedFileResponse
 
     def delete(self, video_id, requested_by=None):
         """Tombstone first (no new reader or job can start), then reclaim once no reader holds a lease.
@@ -509,17 +543,8 @@ class IndexingService:
         if row["status"] not in {"deleting", "delete_failed"}:
             if self.pipeline is not None and self.pipeline.has_active(video_id):
                 raise DomainError(409, "index_running", "Wait for indexing to finish before deleting")
-            # Checks and the 'deleting' mark in one registry write transaction, serialized with job,
-            # question and notes acceptance (which re-check the status in theirs): nothing that writes
-            # state tied to the video can be accepted between the check and the mark.
-            with self.registry.db.connect(write=True) as conn:
-                if conn.execute("SELECT 1 FROM index_jobs WHERE video_id=? AND status IN ('queued','running')", (video_id,)).fetchone():
-                    raise DomainError(409, "index_running", "Wait for indexing to finish before deleting")
-                if conn.execute("SELECT 1 FROM conversation_requests r JOIN conversations c USING(conversation_id) "
-                                "WHERE c.video_id=? AND r.status IN ('accepted','running')", (video_id,)).fetchone() or \
-                        conn.execute("SELECT 1 FROM study_jobs WHERE video_id=? AND status IN ('queued','running')", (video_id,)).fetchone():
-                    raise DomainError(409, "video_busy", "Wait for the running question or notes job to finish")
-                conn.execute("UPDATE videos SET status='deleting' WHERE video_id=?", (video_id,))
+            # Checks and the mark are one registry transaction (see VideoRegistry.mark_deleting).
+            self.registry.mark_deleting(video_id)
             try:
                 readers = self.coordination.tombstone(video_id, requested_by)
             except DomainError:   # a pipeline job was accepted meanwhile: deletion is refused, nothing changed
@@ -534,6 +559,9 @@ class IndexingService:
     def reclaim(self, video_id):
         """Remove files and the registry row of a tombstoned video; idempotent (sweeper and API may race)."""
         directory = self.registry.directory(video_id)
+        # Re-checked under the video lock right before anything is deleted (a candidate list is not enough).
+        if not self.coordination.claim_reclaim(video_id):
+            return {"video_id": video_id, "status": "deleting"}
         if self.queue_objects is not None:
             # Queue the published objects before their manifest rows go away with the video row (a crash
             # in between leaves queued deletions of tombstoned objects, never unreferenced leftovers).
@@ -565,7 +593,10 @@ class IndexingService:
         except DomainError:
             row = None
         if row is not None and generation in {row["active_generation"], row["transcript_generation"]}:
-            self.coordination.mark_removed(video_id, generation)   # still published: never delete
+            self.coordination.unretire(video_id, generation)   # published again: never delete
+            return False
+        # Claimed under the video lock: from here on no lease naming it is granted, and none exists now.
+        if not self.coordination.claim_removal(video_id, generation):
             return False
         path = self.registry.asset(video_id, f"memory/{generation}.sqlite3")
         for name in (str(path), str(path)[:-len(".sqlite3")] + ".derived.sqlite3"):
@@ -575,7 +606,6 @@ class IndexingService:
         if assets.exists():
             shutil.rmtree(assets, ignore_errors=True)
         self.readers.evict(video_id, generation)
-        self.coordination.mark_removed(video_id, generation)
         return True
 
     def sweep(self):
@@ -584,8 +614,8 @@ class IndexingService:
         done = {"reclaimed": 0, "generations_removed": 0}
         for video_id in self.coordination.reclaimable():
             try:
-                self.reclaim(video_id)
-                done["reclaimed"] += 1
+                if self.reclaim(video_id)["status"] == "deleted":
+                    done["reclaimed"] += 1
             except DomainError:
                 logger.warning("reclaim_failed video_id=%s", video_id)
         for video_id, generation in self.coordination.due_retired(self.settings.generation_retire_grace_s):
