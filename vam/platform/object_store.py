@@ -99,7 +99,12 @@ class S3ObjectStore:
         try:
             self.client.head_bucket(Bucket=self.bucket)
         except ClientError:
-            self._call(self.client.create_bucket, Bucket=self.bucket)
+            try:
+                self._call(self.client.create_bucket, Bucket=self.bucket)
+            except ObjectStoreError as exc:
+                # E3: API instances and workers start together; another one may have just created it.
+                if str(exc) != "BucketAlreadyOwnedByYou":
+                    raise
 
     def create_multipart(self, key, content_type):
         return self._call(self.client.create_multipart_upload, Bucket=self.bucket, Key=key,

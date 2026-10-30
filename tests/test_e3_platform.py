@@ -308,3 +308,21 @@ def test_registry_copy_tool_round_trips(instances, media, tmp_path):
     vid = restored.list()["items"][0]["video_id"]
     cid = ConversationStore(restored).create(vid)["conversation_id"]
     assert ConversationStore(restored).accept(cid, "r_" + uuid.uuid4().hex, vid, {"q": 9}, "next", 10)
+
+
+def test_instances_starting_together_create_the_bucket_once():
+    """Two API instances on an empty object store: both find no bucket and both create it; the loser of
+    that race must start normally (CI found api-1 exiting with BucketAlreadyOwnedByYou)."""
+    import boto3
+    from concurrent.futures import ThreadPoolExecutor
+    from e1_support import S3
+    from vam.platform.object_store import S3ObjectStore
+    bucket = "e3-race-" + uuid.uuid4().hex[:12]
+    stores = [S3ObjectStore(endpoint=S3["endpoint"], public_endpoint=S3["endpoint"], access_key=S3["access_key"],
+                            secret_key=S3["secret_key"], bucket=bucket, region="us-east-1") for _ in range(6)]
+    try:
+        with ThreadPoolExecutor(6) as pool:
+            list(pool.map(lambda store: store.ensure_bucket(), stores))     # raises if any instance fails
+    finally:
+        boto3.client("s3", endpoint_url=S3["endpoint"], aws_access_key_id=S3["access_key"],
+                     aws_secret_access_key=S3["secret_key"], region_name="us-east-1").delete_bucket(Bucket=bucket)
