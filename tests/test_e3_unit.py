@@ -322,10 +322,15 @@ def test_local_limits_never_round_up():
 def test_local_fallback_is_refused_when_other_processes_call_models():
     """With several model-calling processes (API instances or pipeline workers) a per-process fallback
     cannot keep the sum under the limit: every process rejects (503, no provider call) when Redis is down."""
-    import redis as redis_lib
     from vam.gateway import build_gateway, shares_model_limits
     from vam.video_registry import DomainError
-    dead = redis_lib.Redis(host="127.0.0.1", port=1, socket_connect_timeout=0.2, socket_timeout=0.2)
+
+    class Unreachable:      # a Redis client whose server is down (the real client is used in test_e3_redis)
+        def register_script(self, _):
+            def call(**_):
+                raise ConnectionError("Connection refused")
+            return call
+    dead = Unreachable()
     called = []
 
     async def provider():
