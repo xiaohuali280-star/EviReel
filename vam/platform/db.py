@@ -10,7 +10,7 @@ from pathlib import Path
 import os
 import re
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 MIGRATIONS = Path(__file__).parent / "migrations"
 
 

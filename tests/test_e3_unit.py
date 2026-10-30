@@ -399,3 +399,24 @@ def test_streamed_file_stops_when_its_lease_is_lost(tmp_path):
     with pytest.raises(DomainError) as exc:
         asyncio.run(LeasedFileResponse(path, lease)(scope, receive, send))
     assert exc.value.code == "read_lease_lost" and sum(sent) < (1 << 20) and lease.released
+
+
+def test_local_coordinator_claim_and_cleanup_are_separate():
+    """Same protocol in memory: a claimed generation refuses leases until and after cleanup; a failed
+    cleanup keeps it a candidate; a reader blocks the claim; cleaned generations are not returned again."""
+    from vam.coordination import LocalCoordinator, StaleSnapshot
+    c = LocalCoordinator(settings())
+    vid, gen = "v_" + "1" * 32, "a" * 32
+    c.retire(vid, gen)
+    lease = c.acquire(vid, (gen,), "read")
+    assert c.due_retired(0) == [] and c.claim_removal(vid, gen) is False
+    lease.release()
+    assert c.due_retired(0) == [(vid, gen)] and c.claim_removal(vid, gen) is True
+    with pytest.raises(StaleSnapshot):
+        c.acquire(vid, (gen,), "read")
+    c.record_cleanup_failure(vid, gen, "PermissionError")
+    assert c.due_retired(10_000) == [(vid, gen)] and c.claim_removal(vid, gen) is True   # resumed
+    c.mark_cleaned(vid, gen)
+    assert c.due_retired(0) == [] and c.claim_removal(vid, gen) is False
+    with pytest.raises(StaleSnapshot):
+        c.acquire(vid, (gen,), "read")

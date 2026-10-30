@@ -445,3 +445,108 @@ def test_startup_refuses_a_lease_lifetime_shorter_than_the_question_deadline(ins
     with pytest.raises(RuntimeError, match="READ_LEASE_MAX_S"):
         with TestClient(app):
             pass
+
+
+# ---------------------------------------------------------------------------- E3 second review: cleanup is retryable
+def retired_row(app, vid, gen):
+    return pg_rows(app, "SELECT removed_at IS NOT NULL AS claimed, cleaned_at IS NOT NULL AS cleaned, "
+                        "cleanup_attempts, cleanup_error FROM retired_generations WHERE video_id=%s AND generation=%s",
+                   vid, gen)[0]
+
+
+def with_old_generation(instances, a, app, media):
+    alice, _ = users(a, app, "alice")["alice"]
+    view = upload_video(a, alice, media["red"])
+    vid = view["video_id"]
+    worker = instances.worker()
+    assert drain_inline(worker, view["job_id"])["status"] == "succeeded"
+    old = app.state.indexing.registry.get(vid)["active_generation"]
+    new = published(app, worker, alice, vid)
+    return alice, vid, old, new
+
+
+def test_a_failed_generation_cleanup_is_retried_and_readers_stay_refused(instances, media, monkeypatch):
+    """Review P2: the first unlink of the old index fails (file in use). The claim stays -- no lease on the old
+    generation is granted -- and the generation remains a candidate; once the file system recovers the
+    next sweep finishes the cleanup."""
+    import pathlib
+    from vam.coordination import StaleSnapshot
+    _, app = instances("a")
+    with TestClient(app) as a:
+        alice, vid, old, new = with_old_generation(instances, a, app, media)
+        service = app.state.indexing
+        target = service.registry.root / "videos" / vid / "memory" / f"{old}.sqlite3"
+        real_unlink, failures = pathlib.Path.unlink, []
+
+        def flaky_unlink(self, missing_ok=False):
+            if self == target and not failures:
+                failures.append(1)
+                raise PermissionError("file in use")
+            return real_unlink(self, missing_ok=missing_ok)
+        monkeypatch.setattr(pathlib.Path, "unlink", flaky_unlink)
+        assert service.sweep()["generations_removed"] == 0
+        assert target.is_file()
+        row = retired_row(app, vid, old)
+        assert row["claimed"] and not row["cleaned"] and row["cleanup_attempts"] == 1 and "PermissionError" in row["cleanup_error"]
+        assert (vid, old) in service.coordination.due_retired(10_000)      # still a candidate (any grace)
+        with pytest.raises(StaleSnapshot):                                  # still refused to readers
+            service.coordination.acquire(vid, (old,), "read")
+        assert search(alice, vid).json()["execution"]["snapshot"]["visual"] == new
+        assert service.sweep()["generations_removed"] == 1                 # recovered: cleanup completes
+        assert not target.exists() and not (service.registry.root / "videos" / vid / "cache" / old).exists()
+        assert retired_row(app, vid, old)["cleaned"] and (vid, old) not in service.coordination.due_retired(0)
+        assert service.remove_generation(vid, old) is False                 # done: nothing to repeat
+
+
+def test_cleanup_interrupted_after_the_claim_resumes_after_a_restart(instances, media):
+    """The process dies between the claim and the deletion: after a restart the sweeper finishes it."""
+    _, app = instances("a")
+    with TestClient(app) as a:
+        alice, vid, old, _ = with_old_generation(instances, a, app, media)
+        assert app.state.indexing.coordination.claim_removal(vid, old)     # ... and the process stops here
+        target = app.state.indexing.registry.root / "videos" / vid / "memory" / f"{old}.sqlite3"
+    assert target.is_file() and retired_row(app, vid, old)["claimed"]
+    _, restarted = instances("a")
+    with TestClient(restarted):
+        service = restarted.state.indexing
+        assert service.sweep()["generations_removed"] == 1
+        assert not target.exists() and retired_row(restarted, vid, old)["cleaned"]
+
+
+def test_concurrent_sweepers_clean_one_generation_once_and_safely(instances, media):
+    """Two sweepers (separate database connections, same files) process the same generation at once:
+    both complete without error, the files are gone, the row is cleaned once, a later sweep has nothing."""
+    import threading
+    _, app = instances("a")
+    with TestClient(app) as a:
+        _, vid, old, _ = with_old_generation(instances, a, app, media)
+        service = app.state.indexing
+        barrier, results, errors = threading.Barrier(2), [], []
+
+        def sweeper():
+            barrier.wait()
+            try:
+                results.append(service.remove_generation(vid, old))
+            except Exception as exc:     # pragma: no cover - the assertion below reports it
+                errors.append(exc)
+        threads = [threading.Thread(target=sweeper) for _ in range(2)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(30)
+        assert errors == [] and True in results
+        assert not (service.registry.root / "videos" / vid / "memory" / f"{old}.sqlite3").exists()
+        assert retired_row(app, vid, old)["cleaned"]
+        assert service.sweep()["generations_removed"] == 0
+
+
+def test_an_active_reader_still_blocks_the_claim(instances, media):
+    _, app = instances("a")
+    with TestClient(app) as a:
+        _, vid, old, _ = with_old_generation(instances, a, app, media)
+        service = app.state.indexing
+        lease = service.coordination.acquire(vid, (old,), "read")
+        assert service.sweep()["generations_removed"] == 0
+        assert not retired_row(app, vid, old)["claimed"]
+        lease.release()
+        assert service.sweep()["generations_removed"] == 1

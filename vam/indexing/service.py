@@ -595,18 +595,40 @@ class IndexingService:
         if row is not None and generation in {row["active_generation"], row["transcript_generation"]}:
             self.coordination.unretire(video_id, generation)   # published again: never delete
             return False
-        # Claimed under the video lock: from here on no lease naming it is granted, and none exists now.
+        # Claimed under the video lock: from here on no lease naming it is granted, and none exists now. A
+        # claim whose cleanup failed or was interrupted is returned again, so this resumes it.
         if not self.coordination.claim_removal(video_id, generation):
             return False
-        path = self.registry.asset(video_id, f"memory/{generation}.sqlite3")
-        for name in (str(path), str(path)[:-len(".sqlite3")] + ".derived.sqlite3"):
-            for suffix in ("", "-wal", "-shm", ".lock"):
-                Path(name + suffix).unlink(missing_ok=True)
-        assets = self.registry.asset(video_id, f"cache/{generation}")
-        if assets.exists():
-            shutil.rmtree(assets, ignore_errors=True)
         self.readers.evict(video_id, generation)
+        try:
+            self._delete_generation_files(video_id, generation)
+        except OSError as exc:
+            # The claim stays (readers remain refused) and so does the candidate: the next sweep retries.
+            logger.warning("generation_cleanup_failed video_id=%s generation=%s error=%s", video_id, generation,
+                           type(exc).__name__)
+            self.coordination.record_cleanup_failure(video_id, generation, f"{type(exc).__name__}: {exc}")
+            return False
+        self.coordination.mark_cleaned(video_id, generation)
         return True
+
+    def _delete_generation_files(self, video_id, generation):
+        """Idempotent and safe to run concurrently (another sweeper may delete the same files): a file that
+        is already gone is fine, any other error raises, and success means nothing of it is left."""
+        path = self.registry.asset(video_id, f"memory/{generation}.sqlite3")
+        files = [Path(name + suffix) for name in (str(path), str(path)[:-len(".sqlite3")] + ".derived.sqlite3")
+                 for suffix in ("", "-wal", "-shm", ".lock")]
+        for file in files:
+            file.unlink(missing_ok=True)
+        assets = self.registry.asset(video_id, f"cache/{generation}")
+
+        def gone_is_fine(function, target, exc_info):
+            if not isinstance(exc_info[1], FileNotFoundError):
+                raise exc_info[1]
+        if assets.exists():
+            shutil.rmtree(assets, onerror=gone_is_fine)
+        left = [f for f in files if f.exists()] + ([assets] if assets.exists() else [])
+        if left:
+            raise OSError(f"generation files still present: {len(left)}")
 
     def sweep(self):
         """One coordination pass (any instance, idempotent): finish deletions whose readers are gone, and

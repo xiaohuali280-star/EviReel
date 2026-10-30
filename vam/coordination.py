@@ -13,7 +13,10 @@ One lock decides everything about a video's files: the per-video advisory lock (
 * ``acquire`` grants a lease only if the video is not tombstoned and no generation it names has been
   claimed for removal (``StaleSnapshot`` otherwise: the caller re-reads the video and pins again);
 * ``claim_removal`` marks a retired generation removed only if no unexpired lease names it -- files are
-  deleted after that commit, so a lease is either granted first (and blocks removal) or refused;
+  deleted after that commit, so a lease is either granted first (and blocks removal) or refused. The
+  claim is not the cleanup: ``mark_cleaned`` records that the files are confirmed gone, and a claimed but
+  uncleaned generation (deletion failed, process died) stays a sweeper candidate -- re-claiming it returns
+  True again without re-opening it to readers. Deletion is idempotent, so concurrent sweepers are safe;
 * ``claim_reclaim`` re-checks, right before a deleted video's files go, that no lease exists;
 * ``tombstone`` refuses while a pipeline job is active (jobs are inserted under the same lock).
 
@@ -126,7 +129,9 @@ class LocalCoordinator:
         self.leases: dict[str, Lease] = {}
         self.tombstones: set[str] = set()
         self.retired: dict[tuple, float] = {}
-        self.removed: set[tuple] = set()
+        self.removed: set[tuple] = set()       # claimed: no new lease may name it
+        self.cleaned: set[tuple] = set()       # its files are confirmed gone
+        self.cleanup_failures: dict[tuple, int] = {}
         self.lock = threading.Lock()
 
     def acquire(self, video_id, generations=(), purpose='read') -> Lease:
@@ -178,6 +183,7 @@ class LocalCoordinator:
         with self.lock:
             self.tombstones.discard(video_id)
             self.removed = {k for k in self.removed if k[0] != video_id}
+            self.cleaned = {k for k in self.cleaned if k[0] != video_id}
 
     def record_reclaim_failure(self, video_id, error):
         pass
@@ -188,24 +194,37 @@ class LocalCoordinator:
                 self.retired.setdefault((video_id, generation), time.time())
 
     def due_retired(self, grace_s, limit=50):
+        """Claimed generations whose cleanup is not confirmed first (retry), then unclaimed due ones."""
         now = time.time()
         with self.lock:
+            pending = sorted((key for key in self.removed if key not in self.cleaned),
+                             key=lambda k: self.cleanup_failures.get(k, 0))[:max(1, limit // 2)]
             due = [key for key, at in self.retired.items() if now - at >= grace_s]
-        return [key for key in due if not self.active(*key)][:limit]
+        return (pending + [key for key in due if not self.active(*key)])[:limit]
 
     def claim_removal(self, video_id, generation) -> bool:
+        """True when the files may be deleted: newly claimed (no lease names it), or claimed earlier and
+        not yet cleaned (a failed or interrupted cleanup resumes). New leases stay refused either way."""
+        key = (video_id, generation)
         with self.lock:
+            if key in self.removed:
+                return key not in self.cleaned
             if any(l.video_id == video_id and generation in l.generations for l in self.leases.values()):
                 return False
-            self.retired.pop((video_id, generation), None)
-            self.removed.add((video_id, generation))
+            self.retired.pop(key, None)
+            self.removed.add(key)
             return True
 
-    def unretire(self, video_id, generation):
+    def mark_cleaned(self, video_id, generation):
         with self.lock:
-            self.retired.pop((video_id, generation), None)
+            if (video_id, generation) in self.removed:
+                self.cleaned.add((video_id, generation))
 
-    def mark_removed(self, video_id, generation):
+    def record_cleanup_failure(self, video_id, generation, error):
+        with self.lock:
+            self.cleanup_failures[(video_id, generation)] = self.cleanup_failures.get((video_id, generation), 0) + 1
+
+    def unretire(self, video_id, generation):
         with self.lock:
             self.retired.pop((video_id, generation), None)
 
@@ -380,33 +399,54 @@ class PgCoordinator:
                              "ON CONFLICT DO NOTHING", (video_id, generation))
 
     def due_retired(self, grace_s, limit=50):
+        """Claimed generations whose cleanup is not confirmed (failed or interrupted; fewest attempts first,
+        at most half the batch so a cleanup that keeps failing cannot starve new ones), then unclaimed ones
+        past the grace period that no unexpired lease names."""
         with self.db.connect() as conn:
-            return [(r['video_id'], r['generation']) for r in conn.execute(
+            pending = [(r['video_id'], r['generation']) for r in conn.execute(
+                "SELECT video_id, generation FROM retired_generations WHERE removed_at IS NOT NULL AND cleaned_at IS NULL "
+                "ORDER BY cleanup_attempts, removed_at LIMIT %s", (max(1, limit // 2),))]
+            due = [(r['video_id'], r['generation']) for r in conn.execute(
                 "SELECT g.video_id, g.generation FROM retired_generations g WHERE g.removed_at IS NULL "
                 "AND g.retired_at < now() - make_interval(secs => %s) AND NOT EXISTS "
                 "(SELECT 1 FROM read_leases l WHERE l.video_id = g.video_id AND l.expires_at > now() "
-                " AND g.generation = ANY(l.generations)) ORDER BY g.retired_at LIMIT %s", (grace_s, limit))]
+                " AND g.generation = ANY(l.generations)) ORDER BY g.retired_at LIMIT %s",
+                (grace_s, limit - len(pending)))]
+        return pending + due
 
     def claim_removal(self, video_id, generation) -> bool:
-        """Mark a retired generation removed if no unexpired lease names it. From this commit on no lease
-        naming it is granted, so its files may be deleted."""
+        """True when the files may be deleted. Under the video lock: claim it (removed_at) if no unexpired
+        lease names it -- from that commit on no lease naming it is granted -- or find it claimed earlier
+        and not yet cleaned (a failed or interrupted cleanup resumes; readers stay refused)."""
         with self.db.transaction() as conn:
             self._video_lock(conn, video_id)
+            if conn.execute(
+                    "UPDATE retired_generations g SET removed_at=now() WHERE g.video_id=%s AND g.generation=%s "
+                    "AND g.removed_at IS NULL AND NOT EXISTS (SELECT 1 FROM read_leases l WHERE l.video_id=g.video_id "
+                    "AND l.expires_at > now() AND g.generation = ANY(l.generations)) RETURNING 1",
+                    (video_id, generation)).fetchone():
+                return True
             return bool(conn.execute(
-                "UPDATE retired_generations g SET removed_at=now() WHERE g.video_id=%s AND g.generation=%s "
-                "AND g.removed_at IS NULL AND NOT EXISTS (SELECT 1 FROM read_leases l WHERE l.video_id=g.video_id "
-                "AND l.expires_at > now() AND g.generation = ANY(l.generations)) RETURNING 1",
-                (video_id, generation)).fetchone())
+                "SELECT 1 FROM retired_generations WHERE video_id=%s AND generation=%s "
+                "AND removed_at IS NOT NULL AND cleaned_at IS NULL", (video_id, generation)).fetchone())
+
+    def mark_cleaned(self, video_id, generation):
+        """The generation's files are confirmed gone (idempotent; the claim and its refusal of leases stay)."""
+        with self.db.transaction() as conn:
+            conn.execute("UPDATE retired_generations SET cleaned_at=COALESCE(cleaned_at, now()), cleanup_error=NULL "
+                         "WHERE video_id=%s AND generation=%s AND removed_at IS NOT NULL", (video_id, generation))
+
+    def record_cleanup_failure(self, video_id, generation, error):
+        """The claim stays and the generation remains a candidate; the next sweep retries."""
+        with self.db.transaction() as conn:
+            conn.execute("UPDATE retired_generations SET cleanup_attempts=cleanup_attempts+1, cleanup_error=%s "
+                         "WHERE video_id=%s AND generation=%s AND cleaned_at IS NULL",
+                         (str(error)[:300], video_id, generation))
 
     def unretire(self, video_id, generation):
         """A retired generation that is published again: it stays (never marked removed)."""
         with self.db.transaction() as conn:
             conn.execute("DELETE FROM retired_generations WHERE video_id=%s AND generation=%s AND removed_at IS NULL",
-                         (video_id, generation))
-
-    def mark_removed(self, video_id, generation):
-        with self.db.transaction() as conn:
-            conn.execute("UPDATE retired_generations SET removed_at=now() WHERE video_id=%s AND generation=%s",
                          (video_id, generation))
 
     def is_retired(self, video_id, generation) -> bool:
