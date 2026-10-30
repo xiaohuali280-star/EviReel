@@ -77,10 +77,10 @@
 | `asr` | asr | 语音识别，输出原始片段 JSON | **检查点**：`asr:` + sha256(转写键 = 源 sha256 + ASR 身份 + 分块规则, 代码版本)。上传并校验后先登记检查点、再提交阶段。所以“检查点已登记、阶段未提交”时被杀，可以复用。更窄的窗口“对象已上传、检查点行未写入”时被杀会重新识别一次（有测试覆盖），未被引用的对象成为待清理的负债 |
 | `transcript_index` | embed | 片段规范化（时间轴偏移、裁剪规则不变）→ 分块 → 按批 Embedding → 按内容寻址的转写版本发布 | **批次检查点**：`emb:` + sha256(Embedding 身份, 指令, 本批文本, 代码版本)。中断后只算缺的批次。最后一次尝试仍然失败时，与原行为一致：只发布文本，状态 partial |
 | `vision` | media | 抽帧、筛选、图像 Embedding、事件整理（沿用 `index_video_async`），写入 `memory/<attempt_token>.sqlite3` | 阶段级（不可变代次） |
-| `publish` | control | 汇合：两条分支都到终态后**只做决定**（状态、错误、要发布的代次/转写版本/播放路径），不写任何可见状态。决定随带 attempt_token 的账本提交生效；同一事务里按需创建自动笔记任务 | 账本条件提交 |
-| `project` | control | 最终阶段：把账本**已提交**的决定写入读模型（转写 head、registry 中的视频与任务行；笔记则写 study_jobs 终态），由 `jobs.seq` fencing；清理未胜出尝试的代次。publish 失败（包括被扫描判定次数用尽）时，写入失败状态 | 幂等：每次执行都从账本推导出相同的值 |
+| `publish` | control | 汇合：两条分支都到终态后**只做决定**（状态、错误、要发布的代次/转写版本/播放路径），不写任何可见状态。决定随带 attempt_token 的账本提交生效 | 账本条件提交 |
+| `project` | control | 最终阶段：把账本**已提交**的决定写入读模型，由 `jobs.seq` fencing；清理未胜出尝试的代次。<br>• 视频/转写任务：写转写 head、registry 中的视频与任务行。投影成功后，在本阶段的账本提交里创建自动笔记任务（`auto-notes:<job_id>`），因此笔记读取的语料一定已经发布。<br>• 笔记任务：写 study_artifacts 和 study_jobs 终态。<br>• publish 失败（包括被扫描判定次数用尽）时，写入失败状态 | 幂等：每次执行都从账本推导出相同的值 |
 | `notes_draft` | embed | 读取已发布的字幕/事件语料，按批调用笔记模型 | **批次检查点**：`notes:` + sha256(模型身份, 代码版本, 本批 evidence_id 与文本)。无效输出按可重试处理 |
-| `notes_publish` | control | 写入 study_artifacts（确定性 id `a_<job_id>`，`created_at` 取任务创建时间），并更新 study_jobs 读模型 | 幂等 |
+| `notes_publish` | control | **只做决定**：校验草稿产物（sha256、非空）并确定产物 id `a_<job_id>`，不写任何可见状态。产物和终态由 `project` 根据已提交的决定写入（`created_at` 取任务创建时间） | 账本条件提交 |
 | `export` | control | 把笔记产物渲染为 md/pdf/pptx 并上传对象存储；`GET …/study/exports/{job_id}/download` 按引用下载，读取时校验 sha256 | 阶段级 |
 
 **先决定、后投影（第二次验收 P1 + 复验 P2）**：
@@ -90,7 +90,10 @@
   - 转写库：`publish_head` 移动 head，条件是 `transcript_fence.seq ≤ seq`。
 
   旧任务的投影晚到时被拒；同一任务的重放用来修复 PG/SQLite 提交窗口。这是“单调序号 + 可重放投影”，**不是跨库原子提交**。
-- **任务被扫描终结后**：失败或次数用尽的任务同样经过 project 写入终态。笔记的 `job`/`state` 读取在投影完成前也以账本的终态（失败阶段）覆盖旧镜像。
+- **任务被扫描终结后**：失败或次数用尽的任务同样经过 project 写入终态。
+- **笔记读取以账本为准**：
+  - 笔记的 `job`/`state` 读取在投影完成前以账本的终态（失败阶段）覆盖旧镜像；镜像显示成功而账本未提交成功时，也会被纠正。
+  - 只有账本记为成功的笔记任务，其产物才可见（查询和按 id 读取都一样）。
 - **其他阶段不写可见状态**：`transcript_index` 只完成版本；Worker 的进度更新不会重新打开已终结的任务行。
 
 - **检查点只指向已验证的完整产物**：上传后核对大小。读取时按 sha256 校验，不一致就删除检查点、重新计算。
@@ -147,7 +150,7 @@
 - **问答（会话/消息）**：**本轮未迁移**，属需求允许的选择。仍在 API 进程内执行，并保留 P4 的 `conversation_requests` 幂等与终态持久化（SQLite）。浏览器关闭不取消已受理的请求（P4 行为）。
 - **笔记批次、导出（第二次验收后已迁移）**：
   - 笔记：worker 模式下 `POST /api/videos/{id}/study` 持久受理为 `notes` 任务（请求 id `notes:<request_id>`，与原接口一样去重），由 Worker 按批执行。
-  - 自动笔记：在 publish 的提交事务里创建（`auto-notes:<job_id>`），条件是 `STUDY_AUTO_GENERATE` 打开且已配置模型。
+  - 自动笔记：在视频任务 `project` 投影成功后、于其账本提交事务里创建（`auto-notes:<job_id>`），条件是 `STUDY_AUTO_GENERATE` 打开且已配置模型。这样笔记 Worker 不可能先于投影执行。
   - 导出：`POST /api/videos/{id}/study/artifacts/{aid}/exports?format=` 创建导出任务；原有的同步导出接口保留。
   - 读模型：study_jobs/study_artifacts 是 PG 笔记任务的读模型，API 重启不再中断笔记任务。
 - **视觉阶段**：仍是一个整体阶段（阶段级恢复）。帧级批次检查点没有做。

@@ -1,8 +1,24 @@
 # 工程状态
 
-更新：2026-10-29　阶段：**E2 整改复验的 4 项问题（P1×1、P2×3）已修复**：本机与 Linux CI 全部通过，待再次复验。E1 已验收（历史记录见下文）
+更新：2026-10-30　阶段：**E2 第三轮验收的 2 项问题（P2×2，笔记发布链路）已修复**：本机与 Linux CI 全部通过，待复验。E1 已验收（历史记录见下文）
 
-当前提交：E2 实现 `866e8bf` → 修复 `2d8309f` → CI 计数 `85a8278` → 验收整改 `afd21ee` → CI/文档 `8f8ce44` → 复验整改 `d662b61`，状态记录见其后的提交。
+当前提交：E2 实现 `866e8bf` → 修复 `2d8309f` → CI 计数 `85a8278` → 验收整改 `afd21ee` → CI/文档 `8f8ce44` → 复验整改 `d662b61` → 第三轮整改 `7d5868f` → 聊天重复发送修复 `8047089`，状态记录见其后的提交。
+
+## E2 第三轮验收修复（`e955785` 之后，`7d5868f`）
+
+| 发现 | 修复 | 回归测试（真实 PG + MinIO，`tests/test_e2_third.py`） |
+| --- | --- | --- |
+| [P2] notes_publish 在 token 校验前写入公开产物，旧 attempt 能在接管者失败后把笔记改回成功 | notes_publish 只做决定（校验草稿、确定产物 id）；产物和 study_jobs 终态只由 `project` 根据已提交的决定写入。读取在两个方向上都以账本为准（镜像为成功但账本未提交成功时纠正），只有账本记为成功的笔记任务的产物才可见 | 草稿完成 → 旧 notes_publish 暂停 → 接管者永久失败 → project 写入失败 → 旧 attempt 恢复：其提交被拒，没有 study_artifacts 行；`/study` 返回 failed 且产物为 null，`/study/jobs/{id}` 返回 failed 且 artifact_id 为 null，按产物 id 导出返回 404 |
+| [P2] 自动笔记可能先于视频 project 执行，因语料未发布而永久失败 | 自动笔记改为在视频任务 `project` 投影成功后、于其账本提交事务里创建 | publish 已决定、project 未执行时，不存在任何笔记任务；project 完成后才出现 `auto-notes:<job>` 笔记任务，执行成功，产物可见 |
+
+| 类别 | 检查 | 结果 |
+| --- | --- | --- |
+| 真实中间件（本机） | `test_e2_pipeline` + `test_e2_remediation` + `test_e2_rereview` + `test_e2_third` | **26 passed** |
+| 真实中间件（本机） | 全量 `pytest tests` | **265 passed, 14 skipped**（14 个故障测试需要 Linux 和 RabbitMQ，在 CI 上执行） |
+| GitHub CI（`7d5868f`） | E2 pipeline、E1 platform、EviReel CPU tests | E2、E1 **通过**；CPU tests 浏览器步骤 `panels.spec.ts:81` 失败（见下一行） |
+| 浏览器（本机，`8047089`） | 前端 vitest；P5 浏览器完整回归；`chat-actions` + `panels` 重复 2 次 | vitest **42/42**；**21 passed, 2 skipped**；**8/8** |
+| GitHub CI（`8047089`） | E2 pipeline、E1 platform、EviReel CPU tests | **三项全部通过** |
+| 根因与修复 | `afd21ee` 和 `7d5868f` 的 CPU tests 浏览器失败都是 `e2e/panels.spec.ts:81`：同一 `request_id` 被发送两次。原因是 `ChatChannel.send()` 发送后立即做 HTTP 对账，服务端尚未登记请求时返回 404，客户端据此重发。属于客户端重复请求缺陷，不是测试时序问题。修复：首次对账延后一个轮询间隔（`RECONCILE_MS`），确认缺失时仍以原 ID 重发；新增 `frontend/src/chat.test.ts`（测试替身） | 已修复 |
 
 ## E2 整改复验修复（`e001459` 之后，`d662b61`）
 
