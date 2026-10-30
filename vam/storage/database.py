@@ -5,6 +5,26 @@ from pathlib import Path
 import os
 import sqlite3
 
+MIGRATIONS = ("001_registry.sql", "002_transcripts.sql", "003_conversations.sql", "004_study.sql",
+              "005_publication_fence.sql", "006_conversation_owner.sql",
+              "007_publication_objects.sql")
+
+
+def _statements(sql):
+    """Split a migration into complete statements (sqlite3.complete_statement respects quoted ';')."""
+    buffer = ""
+    for line in sql.splitlines(keepends=True):
+        if not buffer and line.lstrip().startswith("--"):
+            continue
+        buffer += line
+        if sqlite3.complete_statement(buffer):
+            if buffer.strip().strip(";").strip():
+                yield buffer.strip()
+            buffer = ""
+    if buffer.strip():
+        yield buffer.strip()
+
+
 class Database:
     """Short-lived connections; schema migrations never replace application data."""
     def __init__(self, path: Path):
@@ -12,24 +32,21 @@ class Database:
         path.parent.mkdir(parents=True, exist_ok=True)
         with self.connect() as conn:
             conn.execute("PRAGMA journal_mode=WAL")
-            version = conn.execute("PRAGMA user_version").fetchone()[0]
-            if version > 5:
+            if conn.execute("PRAGMA user_version").fetchone()[0] > len(MIGRATIONS):
                 raise RuntimeError("unsupported EviReel registry schema")
-            if version < 1:
-                sql = (Path(__file__).parent / "migrations/001_registry.sql").read_text(encoding="utf-8")
-                conn.executescript("BEGIN IMMEDIATE;\n" + sql + "\nPRAGMA user_version=1; COMMIT;")
-            if version < 2:
-                sql = (Path(__file__).parent / "migrations/002_transcripts.sql").read_text(encoding="utf-8")
-                conn.executescript("BEGIN IMMEDIATE;\n" + sql + "\nPRAGMA user_version=2; COMMIT;")
-            if version < 3:
-                sql = (Path(__file__).parent / "migrations/003_conversations.sql").read_text(encoding="utf-8")
-                conn.executescript("BEGIN IMMEDIATE;\n" + sql + "\nPRAGMA user_version=3; COMMIT;")
-            if version < 4:
-                sql = (Path(__file__).parent / "migrations/004_study.sql").read_text(encoding="utf-8")
-                conn.executescript("BEGIN IMMEDIATE;\n" + sql + "\nPRAGMA user_version=4; COMMIT;")
-            if version < 5:
-                sql = (Path(__file__).parent / "migrations/005_publication_fence.sql").read_text(encoding="utf-8")
-                conn.executescript("BEGIN IMMEDIATE;\n" + sql + "\nPRAGMA user_version=5; COMMIT;")
+            for number, name in enumerate(MIGRATIONS, start=1):
+                # The version is re-read inside the write transaction: API instances starting together on
+                # one DATA_ROOT apply each migration exactly once (the loser sees the new version).
+                conn.execute("BEGIN IMMEDIATE")
+                try:
+                    if conn.execute("PRAGMA user_version").fetchone()[0] < number:
+                        for statement in _statements((Path(__file__).parent / "migrations" / name).read_text(encoding="utf-8")):
+                            conn.execute(statement)
+                        conn.execute(f"PRAGMA user_version={number}")
+                    conn.execute("COMMIT")
+                except BaseException:
+                    conn.execute("ROLLBACK")
+                    raise
 
     @contextmanager
     def connect(self, *, write=False):

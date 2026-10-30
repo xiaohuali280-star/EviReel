@@ -23,12 +23,18 @@ class CohereReranker:
     async def rank(self, query, documents):
         if not self.settings.rerank_api_key:
             raise RuntimeError('Rerank credential is not configured')
+        from vam.gateway import estimate_tokens, get_gateway
         async with httpx.AsyncClient(timeout=self.settings.rerank_timeout_s, transport=self.transport, follow_redirects=False) as client:
-            response = await client.post('https://api.cohere.com/v2/rerank',
-                                         headers={'Authorization': 'Bearer ' + self.settings.rerank_api_key},
-                                         json={'model': self.model, 'query': query, 'documents': documents, 'top_n': len(documents)})
-            response.raise_for_status()
-            return validate_ranks(response.json().get('results'), len(documents))
+            async def attempt():
+                response = await client.post('https://api.cohere.com/v2/rerank',
+                                             headers={'Authorization': 'Bearer ' + self.settings.rerank_api_key},
+                                             json={'model': self.model, 'query': query, 'documents': documents, 'top_n': len(documents)})
+                response.raise_for_status()
+                return validate_ranks(response.json().get('results'), len(documents)), None
+            # Best effort inside a short budget: one attempt, the caller falls back to fused order.
+            return await get_gateway().run(operation='rerank', model=self.model, provider='cohere', attempt_fn=attempt,
+                                           est_input_tokens=estimate_tokens(len(query) + sum(len(d) for d in documents)),
+                                           timeout=self.settings.rerank_timeout_s, attempts=1)
 
 
 def validate_ranks(results, count):

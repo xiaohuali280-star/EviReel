@@ -383,11 +383,38 @@ def project(ctx, claim):
     if d["transcript"]["status"] in {"ready", "partial", "empty"}:
         heads_moved = ctx.transcript_store(video_id, job_id).publish_head(d["transcript"]["version"], fence=fence)
     ledger = ctx.repo.job(job_id)
+    current = ctx.registry.get(video_id)
+    previous = current["active_generation"]
+    objects, before = None, {}
+    if ctx.settings.publication_objects:
+        # E3: everything this publication makes visible is stored as objects first; the manifest moves
+        # with the pointer in publish_fenced, so DATA_ROOT stays a rebuildable cache.
+        from vam.publication import manifest, published_paths, store_publication
+        before = manifest(ctx.registry, video_id)
+        paths = published_paths(ctx.registry, video_id,
+                                vision_generation=d["vision_generation"] or current["active_generation"],
+                                transcript_generation=current["transcript_generation"],
+                                playback_path=d["playback_path"] or current["playback_path"])
+        objects = store_publication(ctx, job, fence, paths)
+    if d["vision_generation"] and previous and previous != d["vision_generation"]:
+        # E3: record the retirement *before* publishing, so a crash between the two cannot leak the old
+        # generation (a replay sees previous == new). Removal re-checks the row: a generation that is still
+        # published (this publication lost its fence) is never deleted; older requests keep reading it.
+        ctx.coordination.retire(video_id, previous)
     published = ctx.registry.publish_fenced(
         video_id, job_id, fence=fence, status=d["status"], result=ledger["result"] or {}, error_code=d["error_code"],
         error=d["error"], vision_generation=d["vision_generation"], fingerprint=d["fingerprint"],
         playback_path=d["playback_path"], transcript_status=d["transcript"]["status"],
-        transcript_error=d["transcript"]["error"])
+        transcript_error=d["transcript"]["error"], objects=objects)
+    if objects is not None:
+        from vam.publication import manifest, queue_unreferenced
+        source_key = next((o["object_key"] for o in objects if o.get("source")), None)
+        new_keys = {o["object_key"] for o in objects} - {source_key}
+        old_keys = {o["object_key"] for o in before.values()} - {source_key}
+        # Published: keys that left the manifest. Superseded: this attempt's uploads nobody references.
+        unreferenced = old_keys - new_keys if published else             new_keys - {o["object_key"] for o in manifest(ctx.registry, video_id).values()}
+        unreferenced.discard(source_key)
+        queue_unreferenced(ctx.db, unreferenced, "superseded", video_id)
     if not published:
         ctx.registry.progress_job(job_id, status=d["status"], phase="superseded")   # a newer job already published
     # Deferred cleanup: generations of vision attempts that did not win are never published.

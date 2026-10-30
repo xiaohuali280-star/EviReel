@@ -14,14 +14,15 @@ class DomainError(Exception):
         self.status, self.code, self.message = status, code, message
 
 class VideoRegistry:
-    def __init__(self, root):
+    def __init__(self, root, db=None):
         self.root = Path(root).expanduser().resolve()
         self.root.mkdir(parents=True, exist_ok=True)
         (self.root / "videos").mkdir(exist_ok=True)
         (self.root / ".uploads").mkdir(exist_ok=True)
         if (self.root / "videos").is_symlink() or (self.root / ".uploads").is_symlink():
             raise DomainError(400, "unsafe_path", "Storage subdirectories must not be symbolic links")
-        self.db = Database(self.root / "registry.sqlite3")
+        # E3: `db` is the PostgreSQL read model (vam.storage.pg_registry) when REGISTRY_BACKEND=postgres.
+        self.db = db or Database(self.root / "registry.sqlite3")
 
     def directory(self, video_id):
         if not re.fullmatch(r"v_[0-9a-f]{32}", str(video_id)):
@@ -141,7 +142,7 @@ class VideoRegistry:
 
     def publish_fenced(self, video_id, job_id, *, fence, status, result, error_code=None, error=None,
                        vision_generation=None, fingerprint=None, playback_path=None, transcript_status=None,
-                       transcript_error=None) -> bool:
+                       transcript_error=None, objects=None) -> bool:
         """Worker-mode publication: every user-visible field of the video plus the job's read-model row,
         in one transaction, only if no newer job (higher fence) has published. Re-running the same job's
         publication writes identical values (crash-recovery between this commit and the ledger commit)."""
@@ -158,6 +159,13 @@ class VideoRegistry:
                 fields |= {"transcript_status": transcript_status, "transcript_error": transcript_error}
             conn.execute("UPDATE videos SET " + ",".join(k + "=?" for k in fields) + " WHERE video_id=?",
                          (*fields.values(), video_id))
+            if objects is not None:   # E3: the manifest of published objects moves with the pointer
+                conn.execute("DELETE FROM publication_objects WHERE video_id=?", (video_id,))
+                for o in objects:
+                    conn.execute("INSERT INTO publication_objects(video_id,relative_path,object_key,sha256,size_bytes,"
+                                 "published_seq,created_at) VALUES(?,?,?,?,?,?,?)",
+                                 (video_id, o["relative_path"], o["object_key"], o["sha256"], o["size_bytes"], fence,
+                                  time.time()))
             conn.execute("UPDATE index_jobs SET status=?,phase=?,result=?,error_code=?,error=?,updated_at=? WHERE job_id=?",
                          (status, 'done' if status in {'succeeded', 'partial'} else status,
                           json.dumps(result, ensure_ascii=False), error_code, error, time.time(), job_id))

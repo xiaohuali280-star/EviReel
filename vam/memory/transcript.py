@@ -146,8 +146,15 @@ class TranscriptStore:
             conn.execute('UPDATE transcript_heads SET search_version=? WHERE video_id=?',
                          (None if status == 'empty' else version, self.video_id))
 
-    def list(self, *, kind='chunks', offset=0, limit=50, min_time=0., max_time=None):
+    def list(self, *, kind='chunks', offset=0, limit=50, min_time=0., max_time=None, version=None):
+        """``version`` pins one transcript version across pages (E3): a multi-page read (export, study corpus)
+        must not mix the heads before and after a concurrent publication."""
         state = self.state()
+        if version is not None:
+            pinned = self.version(version)
+            if pinned is None or pinned['status'] == 'staged':
+                raise DomainError(409, 'chat_context_stale', 'Transcript version is no longer available')
+            state = state | {'text_version': version}
         version = state['text_version']
         if version is None:
             raise DomainError(409, 'transcript_not_ready', 'No readable transcript version is available')
@@ -186,25 +193,33 @@ class TranscriptStore:
         norm = math.sqrt(sum(x*x for x in query_vector))
         if norm <= 0:
             raise DomainError(409, 'invalid_query_embedding', 'Query embedding must have a nonzero norm')
-        hits = []
+        import numpy as np
         with self.connect() as conn:
-            for raw in conn.execute('SELECT * FROM transcript_chunks WHERE version=? AND end_t>=? AND start_t<=?',
-                                    (version['version'], min_time, max_time if max_time is not None else float('inf'))):
-                row = dict(raw)
-                if row['embedding'] is None or len(row['embedding']) != 4*dim:
-                    raise DomainError(409, 'corrupt_transcript_index', 'Transcript vector is missing or malformed; rebuild the index')
-                vector = struct.unpack(f'<{dim}f', row['embedding'])
-                length = math.sqrt(sum(x*x for x in vector))
-                if length <= 0 or not math.isfinite(length):
-                    raise DomainError(409, 'corrupt_transcript_index', 'Transcript vector is invalid; rebuild the index')
-                row['score'] = sum(a*b for a, b in zip(vector, query_vector)) / (norm*length)
-                row['quality_warnings'] = ['transcript_time_clipped'] if json.loads(version['metadata']).get('clipped_segments') else []
-                for sid in json.loads(row['segment_ids']):
-                    segment = conn.execute('SELECT quality FROM transcript_segments WHERE version=? AND segment_id=?', (version['version'], sid)).fetchone()
-                    quality = json.loads(segment['quality']) if segment else {}
-                    if quality.get('no_speech_prob', 0) > .6 or quality.get('avg_logprob', 0) < -1:
-                        row['quality_warnings'].append('possible_asr_error')
-                        break
-                hits.append(self.public_item(row))
+            rows = [dict(raw) for raw in conn.execute('SELECT * FROM transcript_chunks WHERE version=? AND end_t>=? AND start_t<=?',
+                                                      (version['version'], min_time, max_time if max_time is not None else float('inf')))]
+            # One read of the segment qualities instead of one query per chunk segment (E3 measurement:
+            # the per-row loop dominated transcript recall under concurrency).
+            quality = {r['segment_id']: r['quality'] for r in
+                       conn.execute('SELECT segment_id, quality FROM transcript_segments WHERE version=?', (version['version'],))}
+        if not rows:
+            return {'video_id': self.video_id, **state, 'results': []}
+        if any(row['embedding'] is None or len(row['embedding']) != 4*dim for row in rows):
+            raise DomainError(409, 'corrupt_transcript_index', 'Transcript vector is missing or malformed; rebuild the index')
+        matrix = np.frombuffer(b''.join(row['embedding'] for row in rows), dtype='<f4').reshape(len(rows), dim).astype(np.float64)
+        lengths = np.sqrt((matrix * matrix).sum(axis=1))
+        if not np.all(np.isfinite(lengths)) or np.any(lengths <= 0):
+            raise DomainError(409, 'corrupt_transcript_index', 'Transcript vector is invalid; rebuild the index')
+        scores = (matrix @ np.asarray(query_vector, dtype=np.float64)) / (norm * lengths)
+        clipped = bool(json.loads(version['metadata']).get('clipped_segments'))
+        hits = []
+        for row, score in zip(rows, scores.tolist()):
+            row['score'] = score
+            row['quality_warnings'] = ['transcript_time_clipped'] if clipped else []
+            for sid in json.loads(row['segment_ids']):
+                value = json.loads(quality[sid]) if sid in quality else {}
+                if value.get('no_speech_prob', 0) > .6 or value.get('avg_logprob', 0) < -1:
+                    row['quality_warnings'].append('possible_asr_error')
+                    break
+            hits.append(row)
         hits.sort(key=lambda h: (-h['score'], h['start_t'], h['doc_id']))
-        return {'video_id': self.video_id, **state, 'results': hits[:top_k]}
+        return {'video_id': self.video_id, **state, 'results': [self.public_item(h) for h in hits[:top_k]]}

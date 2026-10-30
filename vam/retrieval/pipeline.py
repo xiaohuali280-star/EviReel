@@ -33,12 +33,23 @@ def choose_sources(query):
 
 class SearchContext:
     """One video, pinned visual/transcript versions, request-local evidence and audits."""
-    def __init__(self, *, row, visual, transcript, backend, settings=None, reranker=None, warnings=()):
+    def __init__(self, *, row, visual, transcript, backend, settings=None, reranker=None, warnings=(), snapshot=None,
+                 cache=None, cache_scope=None):
         self.row, self.visual, self.transcript, self.backend = row, visual, transcript, backend
         self.settings = settings or get_settings()
         self.reranker = reranker or CohereReranker(self.settings)
-        self.transcript_state = transcript.state() if transcript else {}
-        self.versions = {'visual': row.get('active_generation'), 'transcript': self.transcript_state.get('search_version')}
+        self.snapshot = snapshot
+        # Versioned cache (E3): keys carry the owning workspace + model identity; the request is already authorized.
+        self.cache, self.cache_scope = cache, cache_scope or 'local'
+        if snapshot is not None:
+            # Versions fixed when the request started (E3): a publication during this request is not seen.
+            text, search = snapshot.transcript_text_version, snapshot.transcript_search_version
+            self.transcript_state = {'text_version': text, 'search_version': search, 'searchable': bool(search),
+                                     'readable': bool(text), 'search_uses_older_text': bool(text and search and text != search)}
+            self.versions = {'visual': snapshot.visual_generation, 'transcript': search}
+        else:
+            self.transcript_state = transcript.state() if transcript else {}
+            self.versions = {'visual': row.get('active_generation'), 'transcript': self.transcript_state.get('search_version')}
         self.warnings = list(warnings)
         self.rankings, self.registered, self.images, self.inspections = {}, {}, {}, []
         self.executions = []
@@ -65,7 +76,15 @@ class SearchContext:
             if version['embedding_fingerprint'] != identity:
                 self.warn('incompatible_transcript_model', source)
                 return []
-            vector, dim = await run_sync(self.backend.embed_text, query, instruction='search_query')
+            if self.cache is not None:
+                from vam.cache import cache_key
+                async def compute():
+                    vector, dim = await run_sync(self.backend.embed_text, query, instruction='search_query')
+                    return [vector, dim]
+                vector, dim = await self.cache.get_or_compute(cache_key('qvec', self.cache_scope, identity, 'search_query', query),
+                                                              compute, ttl=self.settings.cache_ttl_s)
+            else:
+                vector, dim = await run_sync(self.backend.embed_text, query, instruction='search_query')
             validate_embeddings([vector], expected_count=1, expected_dim=version['dim'])
             response = await run_sync(self.transcript.search, vector, fingerprint=identity, dim=dim,
                                       top_k=top_k, min_time=min_time, max_time=max_time,

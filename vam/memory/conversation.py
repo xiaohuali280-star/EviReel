@@ -56,7 +56,7 @@ class ConversationStore:
         result.pop('payload', None)
         return result
 
-    def accept(self, cid, rid, video_id, payload, original, capacity):
+    def accept(self, cid, rid, video_id, payload, original, capacity, *, owner=None, lease_s=None):
         self.get(cid, video_id)
         if not re.fullmatch(r'r_[0-9a-f]{32}', str(rid)):
             raise DomainError(422, 'invalid_request_id', 'Invalid request_id')
@@ -70,10 +70,16 @@ class ConversationStore:
                 return False
             if conn.execute("SELECT 1 FROM conversation_requests WHERE conversation_id=? AND status IN ('accepted','running')", (cid,)).fetchone():
                 raise DomainError(409, 'conversation_busy', 'Wait for the current conversation request')
+            # Same write transaction as IndexingService.delete marking the video: a question is either
+            # accepted before the deletion (which then refuses with 409) or refused here.
+            video = conn.execute('SELECT status FROM videos WHERE video_id=?', (video_id,)).fetchone()
+            if video is None or video['status'] in {'deleting', 'delete_failed'}:
+                raise DomainError(409, 'video_deleting', 'Video is being deleted')
+            # One shared count for every API instance (the registry is shared): a bounded global queue.
             if conn.execute("SELECT COUNT(*) FROM conversation_requests WHERE status IN ('accepted','running')").fetchone()[0] >= capacity:
                 raise DomainError(429, 'conversation_capacity', 'Question capacity reached; retry later')
-            conn.execute("INSERT INTO conversation_requests(conversation_id,request_id,payload,original_text,status,created_at,updated_at) VALUES(?,?,?,?,'accepted',?,?)",
-                         (cid, rid, canonical, original, now, now))
+            conn.execute("INSERT INTO conversation_requests(conversation_id,request_id,payload,original_text,status,created_at,updated_at,owner,lease_until) VALUES(?,?,?,?,'accepted',?,?,?,?)",
+                         (cid, rid, canonical, original, now, now, owner, now + lease_s if lease_s else None))
             conn.execute("INSERT INTO messages(conversation_id,request_id,role,content,created_at) VALUES(?,?,'user',?,?)", (cid, rid, original, now))
             conn.execute('UPDATE conversations SET updated_at=? WHERE conversation_id=?', (now, cid))
         return True
@@ -102,8 +108,23 @@ class ConversationStore:
                          (status, code, time.time(), cid, rid))
 
     def recover(self):
+        """Single API instance at startup: nothing else can be running these requests."""
         with self.db.connect(write=True) as conn:
             conn.execute("UPDATE conversation_requests SET status='interrupted',error_code='server_restart',updated_at=? WHERE status IN ('accepted','running')", (time.time(),))
+
+    def recover_expired(self):
+        """Several instances: interrupt only requests whose owner stopped renewing its lease (crashed or
+        stopped). A live instance's running questions are left alone."""
+        now = time.time()
+        with self.db.connect(write=True) as conn:
+            return conn.execute("UPDATE conversation_requests SET status='interrupted',error_code='owner_lost',updated_at=? "
+                                "WHERE status IN ('accepted','running') AND (lease_until IS NULL OR lease_until < ?)",
+                                (now, now)).rowcount
+
+    def renew(self, owner, lease_s):
+        with self.db.connect(write=True) as conn:
+            return conn.execute("UPDATE conversation_requests SET lease_until=? WHERE owner=? AND status IN ('accepted','running')",
+                                (time.time() + lease_s, owner)).rowcount
 
     def delete(self, cid):
         self.get(cid)
@@ -120,7 +141,7 @@ class ConversationStore:
                 JOIN messages u ON u.conversation_id=a.conversation_id AND u.request_id=a.request_id AND u.role='user'
                 JOIN conversation_requests r ON r.conversation_id=a.conversation_id AND r.request_id=a.request_id
                 WHERE a.conversation_id=? AND a.role='assistant' AND r.status='completed'
-                AND a.message_id>? AND (? IS NULL OR a.message_id<?)
+                AND a.message_id>? AND (CAST(? AS INTEGER) IS NULL OR a.message_id<?)
                 ORDER BY a.message_id {order} LIMIT ?""", (cid, after, before, before, limit)).fetchall()
         turns = [dict(row) | {'result': json.loads(row['result'])} for row in rows]
         return turns if ascending else list(reversed(turns))

@@ -110,6 +110,11 @@ class JobRepository:
         raise DomainError(409, "request_conflict", "Concurrent submission with this request id; retry")
 
     def _insert_job(self, conn, video_id, kind, workspace_id, request_id, params, digest):
+        # E3: serialized with deletion by the video's advisory lock (PgCoordinator.tombstone).
+        conn.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s, 7032))", (video_id,))
+        if conn.execute("SELECT 1 FROM video_tombstones WHERE video_id=%s AND reclaimed_at IS NULL",
+                        (video_id,)).fetchone():
+            raise DomainError(409, "video_deleting", "Video is being deleted")
         job_id = uuid.uuid4().hex
         job = conn.execute(
             "INSERT INTO jobs(job_id, workspace_id, video_id, kind, request_id, params, params_digest, status) "
@@ -139,6 +144,8 @@ class JobRepository:
                                  params, sha256_hex(canonical(params)))
         except psycopg.errors.UniqueViolation:
             pass   # another job is active for this video; the user can start notes later
+        except DomainError:
+            pass   # the video is being deleted: no follow-up work
 
     # ------------------------------------------------------------------ claim / heartbeat
     def claim(self, job_id, stage, worker_id):

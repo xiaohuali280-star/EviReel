@@ -17,7 +17,7 @@ import test_p2_transcripts as p2
 from vam.config import Settings
 from vam.indexing.service import IndexingService
 from vam.server.app import create_app
-from vam.storage.database import Database
+from vam.storage.database import MIGRATIONS, Database
 from vam.study import StudyService
 from vam.study_exports import clock, export_study, manuscript
 from vam.video_registry import DomainError
@@ -297,7 +297,7 @@ def test_schema3_upgrade_preserves_conversations(tmp_path):
         conn.execute('PRAGMA user_version=3')
     db = Database(path)
     with db.connect() as conn:
-        assert conn.execute('PRAGMA user_version').fetchone()[0] == 5  # 005: E2 publication fence
+        assert conn.execute('PRAGMA user_version').fetchone()[0] == len(MIGRATIONS)  # 007: E3 publication objects
         assert conn.execute('SELECT video_id FROM conversations').fetchone()[0] == 'old'
         assert conn.execute('SELECT trashed_at FROM videos').fetchone()[0] is None
 

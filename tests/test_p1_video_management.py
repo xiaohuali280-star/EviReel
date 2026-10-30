@@ -165,16 +165,26 @@ def test_delete_only_target(client, media):
     assert client.get(f"/api/videos/{b}/content").status_code == 200
     assert client.get(f"/api/videos/{b}/frames").json()["total"] > 0
 
-def test_delete_busy_read_rejected(client, media):
+def test_delete_while_reading_tombstones_then_reclaims(client, media):
+    """E3 deletion protocol: the tombstone blocks new readers and jobs at once; the reader already
+    streaming keeps its file; reclamation happens after it releases (sweeper or a repeated DELETE)."""
     vid, _ = upload(client, media)
     service = client.app.state.indexing
-    _, release = service.playback_asset(vid)
+    path, release = service.playback_asset(vid)
     try:
-        assert client.delete(f"/api/videos/{vid}").status_code == 409
-        assert client.post(f"/api/videos/{vid}/index").status_code == 409
+        response = client.delete(f"/api/videos/{vid}")
+        assert response.status_code == 202 and response.json()["status"] == "deleting"
+        assert response.json()["waiting_for_readers"] == 1
+        assert path.is_file()                                            # the existing reader is not cut off
+        assert client.post(f"/api/videos/{vid}/index").status_code == 409   # no new job
+        assert client.get(f"/api/videos/{vid}/content").status_code == 409  # no new reader
+        assert service.sweep()["reclaimed"] == 0                         # still leased
     finally:
         release()
-    assert client.delete(f"/api/videos/{vid}").status_code == 204
+    assert service.sweep()["reclaimed"] == 1
+    assert not path.exists()
+    assert client.get(f"/api/videos/{vid}").status_code == 404
+    assert client.delete(f"/api/videos/{vid}").status_code == 404
 
 def test_delete_failure_is_retryable(client, media, monkeypatch):
     vid, _ = upload(client, media)

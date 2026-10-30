@@ -17,6 +17,7 @@ from pathlib import Path
 from vam.memory.transcript import TranscriptStore
 from vam.pipeline.repository import JobRepository
 from vam.platform.object_store import ObjectStoreError
+from vam.storage.pg_registry import registry_database
 from vam.video_registry import DomainError, VideoRegistry
 
 logger = logging.getLogger(__name__)
@@ -81,7 +82,7 @@ class WorkerContext:
         self.repo = JobRepository(self.db, settings)
         # No OwnerLock here: the API owns DATA_ROOT's lifecycle; workers only write attempt-keyed
         # paths and publish through conditional updates (see E2_DELIVERY "data boundaries").
-        self.registry = VideoRegistry(settings.data_root)
+        self.registry = VideoRegistry(settings.data_root, registry_database(settings, settings.data_root))
         self.scratch = Path(settings.pipeline_scratch or (Path(settings.data_root) / ".pipeline")).resolve()
         self.scratch.mkdir(parents=True, exist_ok=True)
         self.worker_id = f"{socket.gethostname()}:{os.getpid()}:{uuid.uuid4().hex[:6]}"
@@ -99,6 +100,13 @@ class WorkerContext:
             from vam.asr.transcriber import FasterWhisperTranscriber
             transcriber = FasterWhisperTranscriber(settings)
         self.backend, self.transcriber = backend, transcriber
+        # E3: workers share the API instances' model limits (Redis) and usage ledger (PostgreSQL).
+        from vam import gateway
+        from vam.coordination import PgCoordinator, redis_client
+        gateway.configure(gateway.build_gateway(settings, redis_client=redis_client(settings), db=self.db))
+        self.coordination = PgCoordinator(self.db, settings, self.worker_id)
+        from vam.publication import PublicationCache
+        self.publications = PublicationCache(self.registry, self.store)
 
     # ------------------------------------------------------------------ scratch & artifacts
     def workdir(self, token) -> Path:
@@ -220,7 +228,7 @@ class _StudyIndexing:
 
     def __init__(self, ctx):
         self.registry, self.settings, self.backend = ctx.registry, ctx.settings, ctx.backend
-        self.memory_locks = {}
+        self.publications = ctx.publications
 
     def _usable_video(self, video_id):
         row = self.registry.get(video_id)
@@ -230,17 +238,21 @@ class _StudyIndexing:
             raise DomainError(409, "video_deleting", "Video is being deleted")
         return row
 
-    def _retain(self, video_id):
+    def _retain(self, video_id, generations=None, purpose='read'):
+        # Workers read the generation pinned by their job; the retirement grace period covers the read.
         return lambda: None
 
     def _transcript_store(self, video_id):
         row = self.registry.get(video_id)
+        self.publications.ensure(video_id, f"memory/{row['transcript_generation']}.sqlite3")
         return TranscriptStore(self.registry.asset(video_id, f"memory/{row['transcript_generation']}.sqlite3"), video_id)
 
     def _store(self, video_id, generation):
         from vam.retrieval.frame_store import FrameStore
         if not re.fullmatch(r"[0-9a-f]{32}", generation):
             raise DomainError(409, "invalid_index_version", "Invalid stored index version")
+        self.publications.ensure(video_id, f"memory/{generation}.sqlite3")
+        self.publications.ensure(video_id, f"cache/{generation}", prefix=True)
         store = FrameStore(backend=self.backend, persist_path=str(self.registry.asset(video_id, f"memory/{generation}.sqlite3")))
         store.asset_root = str(self.registry.asset(video_id, f"cache/{generation}"))
         return store

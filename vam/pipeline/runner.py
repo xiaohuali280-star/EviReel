@@ -33,12 +33,16 @@ class Heartbeat(threading.Thread):
 
 
 def classify(exc) -> StageError:
+    from vam.gateway import ProviderError
     if isinstance(exc, StageError):
         return exc
     if type(exc).__name__ == "SoftTimeLimitExceeded":   # Celery soft limit: graceful, retryable
         return StageError("stage_timeout", "Stage exceeded its soft time limit", transient=True)
+    if isinstance(exc, ProviderError):        # already classified by the ModelGateway (after its retries)
+        return StageError(exc.code, f"model provider: {exc.code}", transient=exc.retryable)
     if isinstance(exc, DomainError):          # validation-style errors do not improve on retry
-        return StageError(exc.code, exc.message, transient=exc.status >= 500)
+        # Model admission (429 rate limit / budget, 503 limiter unavailable) clears with time: retry later.
+        return StageError(exc.code, exc.message, transient=exc.status >= 500 or exc.status == 429)
     if isinstance(exc, (ObjectStoreError, ConnectionError, TimeoutError, OSError)):
         return StageError("transient_io", f"{type(exc).__name__}: {exc}", transient=True)
     status = getattr(exc, "status_code", None) or getattr(getattr(exc, "response", None), "status_code", None)
@@ -67,7 +71,10 @@ def execute(ctx, job_id, stage) -> str:
                 beat.paused = True
                 beat.stopped.wait(ctx.settings.pipeline_lease_s * 3)
                 beat.paused = False
-            result = STAGES[stage](ctx, claim)
+            from vam.gateway import model_scope
+            # Pipeline model calls are offline work charged to the job's workspace (E3 ModelGateway).
+            with model_scope(job.get("workspace_id"), "offline"):
+                result = STAGES[stage](ctx, claim)
         except Exception as exc:
             error = classify(exc)
             logger.warning("stage_failed job_id=%s stage=%s code=%s transient=%s", job_id, stage, error.code, error.transient)

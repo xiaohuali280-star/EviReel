@@ -40,8 +40,10 @@ GRAPHS = {
 # runs whatever the outcome (also after a failed or scanner-exhausted publish).
 JOIN_STAGES = {"publish", "project"}
 TERMINAL = {"succeeded", "failed", "skipped"}
-# Separate queues so a long ASR or vision run never starves the short control/publish work.
+# Separate queues so a long ASR or vision run never starves the short control/publish work. E3: offline
+# note generation (LLM) has its own queue, so a batch of note jobs cannot occupy the embedding workers
+# that new uploads need; its model calls are additionally capped by the gateway's offline slots.
 QUEUES = {"prepare": "media", "audio": "media", "vision": "media", "asr": "asr", "transcript_index": "embed",
-          "notes_draft": "embed", "publish": "control", "project": "control", "notes_publish": "control",
+          "notes_draft": "notes", "publish": "control", "project": "control", "notes_publish": "control",
           "export": "control"}
-ALL_QUEUES = ("media", "asr", "embed", "control")
+ALL_QUEUES = ("media", "asr", "embed", "notes", "control")

@@ -85,7 +85,7 @@ class Stack:
     def dispatcher(self, name="dispatcher", **extra):
         return self.spawn(name, [sys.executable, "-m", "vam.pipeline.dispatcher"], extra)
 
-    def worker(self, name="worker", queues="media,asr,embed,control", concurrency=1, **extra):
+    def worker(self, name="worker", queues="media,asr,embed,notes,control", concurrency=1, **extra):
         return self.spawn(name, [sys.executable, "-m", "celery", "-A", "vam.pipeline.celery_app", "worker",
                                  "-Q", queues, "-c", str(concurrency), "-P", "prefork", "-n", f"{name}@%h",
                                  "--without-gossip", "--without-mingle", "-l", "INFO"], extra)
@@ -290,7 +290,7 @@ def test_stale_worker_cannot_overwrite_the_newer_result(stack, video):
         s.worker("worker-slow", VAM_PIPELINE_FAULT="stall:vision")
         s.dispatcher()
         s.wait(lambda: s.stage(view["job_id"], "vision")["status"] == "running", 120, "vision to start")
-        s.worker("worker-fast", queues="media,asr,embed,control")
+        s.worker("worker-fast", queues="media,asr,embed,notes,control")
         assert s.wait_job(view["job_id"])["status"] == "succeeded"
         s.wait(lambda: "stage_result_discarded" in s.log("worker-slow"), 60, "the stale result to be discarded")
         attempts = s.attempts(view["job_id"], "vision")

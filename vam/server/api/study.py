@@ -1,5 +1,4 @@
 from fastapi import APIRouter, Query, Request, Response
-import asyncio
 from pydantic import Field
 
 from vam.protocol import StrictSchemaModel
@@ -70,17 +69,17 @@ async def export(video_id: str, artifact_id: str, request: Request, format: str 
 async def export_manuscript(video_id: str, request: Request, format: str = Query('txt', pattern='^(txt|srt)$'),
                             version: str | None = Query(None, pattern=r'^[0-9a-f]{32,64}$')):
     service = request.app.state.indexing
-    lock = service.memory_locks.setdefault(video_id, asyncio.Lock())
-    async with lock:
-        async with service.transcript_context(video_id) as store:
-            if version and store.state()['text_version'] != version:
-                raise DomainError(409, 'chat_context_stale', 'Transcript changed; request the current manuscript')
-            page = store.list(kind='segments', limit=200)
-            if not page['items']:
-                raise DomainError(409, 'transcript_empty', 'There is no speech manuscript to export')
-            records = page['items']
-            for offset in range(200, page['total'], 200):
-                records.extend(store.list(kind='segments', offset=offset, limit=200)['items'])
+    async with service.transcript_context(video_id) as store:
+        current = store.state()['text_version']
+        if version and current != version:
+            raise DomainError(409, 'chat_context_stale', 'Transcript changed; request the current manuscript')
+        # Every page at the version read first (E3): a publication between pages cannot mix two versions.
+        page = store.list(kind='segments', limit=200, version=current)
+        if not page['items']:
+            raise DomainError(409, 'transcript_empty', 'There is no speech manuscript to export')
+        records = page['items']
+        for offset in range(200, page['total'], 200):
+            records.extend(store.list(kind='segments', offset=offset, limit=200, version=current)['items'])
     content = await run_sync(manuscript, records, format)
     return Response(content, media_type='text/plain; charset=utf-8',
                     headers={'Content-Disposition': f'attachment; filename="EviReel-{video_id}.{format}"'})

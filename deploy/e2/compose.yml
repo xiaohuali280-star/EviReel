@@ -68,7 +68,7 @@ services:
               "--without-gossip", "--without-mingle", "-l", "INFO"]
   worker-short:    # embeddings and publish/join: short, keeps the pipeline moving
     <<: *app
-    command: ["celery", "-A", "vam.pipeline.celery_app", "worker", "-Q", "embed,control", "-c", "2", "-n", "short@%h",
+    command: ["celery", "-A", "vam.pipeline.celery_app", "worker", "-Q", "embed,notes,control", "-c", "2", "-n", "short@%h",
               "--without-gossip", "--without-mingle", "-l", "INFO"]
 volumes:
   appdata:

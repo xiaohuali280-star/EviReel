@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional, Tuple
 
 import json
+import logging
 import math
 import httpx
 import asyncio
@@ -10,6 +11,8 @@ import os
 import time
 
 from vam.config import get_settings
+
+logger = logging.getLogger(__name__)
 from vam.vision.image_limits import ensure_image_limit
 
 
@@ -207,27 +210,34 @@ class OpenRouterClient:
         connect_timeout_s = _read_timeout_env("DASHSCOPE_CONNECT_TIMEOUT_S", "SILICONFLOW_CONNECT_TIMEOUT_S", "60")
         max_retries = _read_retry_env("DASHSCOPE_MAX_RETRIES", "SILICONFLOW_MAX_RETRIES", "10")
 
+        from vam.gateway import estimate_tokens, get_gateway
+        text_chars = 0
+        for message in messages:
+            content = message.get("content")
+            if isinstance(content, str):
+                text_chars += len(content)
+            elif isinstance(content, list):
+                text_chars += sum(len(str(part.get("text") or "")) for part in content if isinstance(part, dict))
+        estimate_in = estimate_tokens(text_chars) + 1000 * image_count + 4000 * video_count
+
         raw: Dict[str, Any]
         timeout = httpx.Timeout(request_timeout_s, connect=connect_timeout_s)
         async with httpx.AsyncClient(timeout=timeout) as client:
-            last_err: Optional[Exception] = None
-            for i in range(max_retries):
-                try:
-                    resp = await client.post(url, headers=headers, json=payload)
-                    resp.raise_for_status()
-                    raw = resp.json()
-                    break
-                except httpx.HTTPStatusError as e:
-                    print(f"[LLMClient] Error {e.response.status_code}: {e.response.text}")
-                    last_err = e
-                    if e.response.status_code not in {429, 500, 502, 503, 504}:
-                        raise
-                except httpx.HTTPError as e:
-                    last_err = e
-                if i < max_retries - 1:
-                    await asyncio.sleep(1.0 * (i + 1))
-            else:
-                raise last_err if last_err is not None else RuntimeError("LLM chat request failed")
+            async def attempt():
+                resp = await client.post(url, headers=headers, json=payload)
+                if resp.status_code >= 400:
+                    # Status only: provider bodies may echo prompts or credentials.
+                    logger.warning("llm_http_error status=%s model=%s", resp.status_code, self.model_id)
+                resp.raise_for_status()
+                body = resp.json()
+                usage = body.get("usage") if isinstance(body, dict) and isinstance(body.get("usage"), dict) else None
+                return body, ({"input_tokens": int(usage.get("prompt_tokens") or 0),
+                               "output_tokens": int(usage.get("completion_tokens") or 0)} if usage else None)
+
+            # One gateway run = admission + ledger + timeout per attempt, shared retry policy (E3).
+            raw = await get_gateway().run(operation="chat", model=self.model_id, attempt_fn=attempt,
+                                          est_input_tokens=estimate_in, est_output_tokens=int(max_tokens or 1024),
+                                          timeout=request_timeout_s, attempts=max_retries)
 
         text: Optional[str] = None
         try:
@@ -272,33 +282,29 @@ class OpenRouterEmbeddingsClient:
         return payload
 
     def _post(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """One embedding request through the ModelGateway (E3): shared limits, ledger, retries, timeouts."""
+        from vam.gateway import estimate_tokens, get_gateway
         cfg = get_settings()
         base_url = (cfg.embedding_base_url_override or cfg.chat_base_url or "https://api.siliconflow.cn/v1").rstrip("/")
         url = f"{base_url}/embeddings"
-        last_err: Optional[Exception] = None
-        for i in range(4):
-            try:
-                response = httpx.post(
-                    url,
-                    headers=self._headers(),
-                    json=payload,
-                    timeout=httpx.Timeout(60.0, connect=10.0),
-                )
-                response.raise_for_status()
-                raw = response.json()
-                if not isinstance(raw, dict):
-                    raise RuntimeError(f"unexpected embedding response: {raw}")
-                return raw
-            except httpx.HTTPStatusError as exc:
-                last_err = exc
-                if exc.response.status_code not in {429, 500, 502, 503, 504} or i >= 3:
-                    raise
-            except httpx.HTTPError as exc:
-                last_err = exc
-                if i >= 3:
-                    raise
-            time.sleep(1.0 * (i + 1))
-        raise last_err if last_err is not None else RuntimeError("Embedding request failed")
+        headers = self._headers()
+        items = payload.get("input") or []
+        chars = sum(len(item) for item in items if isinstance(item, str))
+        images = sum(1 for item in items if not isinstance(item, str))
+
+        def attempt(timeout: float):
+            response = httpx.post(url, headers=headers, json=payload,
+                                  timeout=httpx.Timeout(min(60.0, timeout), connect=min(10.0, timeout)))
+            response.raise_for_status()
+            raw = response.json()
+            if not isinstance(raw, dict):
+                raise RuntimeError(f"unexpected embedding response: {raw}")
+            usage = raw.get("usage") if isinstance(raw.get("usage"), dict) else None
+            tokens = (usage or {}).get("prompt_tokens") or (usage or {}).get("total_tokens")
+            return raw, ({"input_tokens": int(tokens), "output_tokens": 0} if tokens else None)
+
+        return get_gateway().run_sync(operation="embedding", model=self.model_id, attempt_fn=attempt,
+                                      est_input_tokens=estimate_tokens(chars) + 1000 * images, timeout=60.0, attempts=4)
 
     def _extract_embeddings(self, raw: Dict[str, Any]) -> Tuple[List[List[float]], int]:
         data = raw.get("data")

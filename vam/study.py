@@ -14,6 +14,7 @@ import uuid
 from pydantic import BaseModel, ConfigDict, Field
 
 from vam.retrieval.evidence import adapt_hit
+from vam.runtime import run_sync
 from vam.study_model import request_study
 from vam.video_registry import DomainError
 
@@ -37,6 +38,7 @@ class StudyService:
         self.indexing, self.registry, self.settings = indexing, indexing.registry, indexing.settings
         self.model = model
         self.tasks = {}
+        self.workspace_of = None     # platform: video_id -> owning workspace (model scope)
         self.closed = False
 
     def start(self):
@@ -125,8 +127,8 @@ class StudyService:
         """Worker mode: durable acceptance of a notes job (batches run in pipeline workers)."""
         with self.registry.db.connect() as conn:
             previous = conn.execute('SELECT * FROM study_jobs WHERE video_id=? AND request_id=?', (video_id, request_id)).fetchone()
-        if previous:
-            return dict(previous)
+        if previous:   # a repeated POST answers like GET: the ledger decides, not the mirror (E2 review P3)
+            return self._with_ledger(dict(previous))
         active = pipeline.repo.active_for_video(video_id)
         if active is not None and active['request_id'] != f'notes:{request_id}':
             if active['kind'] == 'notes':
@@ -173,35 +175,38 @@ class StudyService:
         return self.public_artifact(artifact, row)
 
     async def corpus(self, video_id):
-        # Index writers use the same lock. Material is copied before releasing it;
-        # a later rebuild can only mark the finished artifact as stale.
-        lock = self.indexing.memory_locks.setdefault(video_id, asyncio.Lock())
-        async with lock:
-            row = self.indexing._usable_video(video_id)
-            versions = self.versions(row)
+        # E3: no per-video lock. The versions are pinned at the start and every page is read at that pinned
+        # version (published versions are immutable); a later rebuild only marks the artifact as stale.
+        row = self.indexing._usable_video(video_id)
+        versions = self.versions(row)
+        release = self.indexing._retain(video_id, (row['active_generation'], row['transcript_generation']), 'study')
+        try:
             records = []
             if versions['transcript'] and self.registry.transcript_state(row)['readable']:
                 store = self.indexing._transcript_store(video_id)
-                first = store.list(limit=200)
+                first = store.list(limit=200, version=versions['transcript'])
                 if first['total'] > self.settings.asr_max_segments:
                     raise DomainError(422, 'study_budget_exceeded', 'Transcript exceeds study record budget')
                 records.extend(first['items'])
                 for offset in range(200, first['total'], 200):
-                    records.extend(store.list(offset=offset, limit=200)['items'])
+                    records.extend(store.list(offset=offset, limit=200, version=versions['transcript'])['items'])
                 source, version = 'transcript', versions['transcript']
             elif versions['vision']:
-                store = self.indexing._store(video_id, versions['vision'])
+                reader = getattr(self.indexing, '_reader', None) or self.indexing._store
+                store = await run_sync(reader, video_id, versions['vision'])
                 docs = await store.list_memory_documents_in_time_range(min_time=0, max_time=row['duration'], time_mode='relative', kind='event')
                 records = [{'doc_id': d.doc_id, 'text': d.text, 'start_t': d.start_t, 'end_t': d.end_t,
                             'frame_ids': d.frame_ids} for d in docs]
                 source, version = 'event', versions['vision']
             else:
                 raise DomainError(409, 'study_source_not_ready', 'No transcript or visual event text is available')
-            evidence = [adapt_hit(r, video_id=video_id, source=source, version=version, duration=row['duration'])
-                        for r in records if r.get('text', '').strip()]
-            if not evidence:
-                raise DomainError(409, 'study_source_empty', 'No usable text; retry transcription or visual indexing')
-            return row, versions, evidence
+        finally:
+            release()
+        evidence = [adapt_hit(r, video_id=video_id, source=source, version=version, duration=row['duration'])
+                    for r in records if r.get('text', '').strip()]
+        if not evidence:
+            raise DomainError(409, 'study_source_empty', 'No usable text; retry transcription or visual indexing')
+        return row, versions, evidence
 
     def batches(self, records):
         batches, current, size = [], [], 0
@@ -277,8 +282,12 @@ class StudyService:
             conn.execute("UPDATE study_jobs SET status='succeeded',phase='done',artifact_id=?,updated_at=? WHERE job_id=?", (aid, now, job_id))
 
     async def _run(self, video_id, job_id, release):
+        from vam.gateway import model_scope
         try:
-            await asyncio.wait_for(self._generate(video_id, job_id), self.settings.study_timeout_s)
+            workspace = await run_sync(self.workspace_of, video_id) if self.workspace_of else None
+            # Note generation is offline work: its model calls use the offline slot cap (E3).
+            with model_scope(workspace, 'offline'):
+                await asyncio.wait_for(self._generate(video_id, job_id), self.settings.study_timeout_s)
         except asyncio.CancelledError:
             self.update(job_id, status='interrupted', phase='interrupted', error_code='server_shutdown')
             raise

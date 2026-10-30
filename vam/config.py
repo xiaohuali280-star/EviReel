@@ -114,6 +114,53 @@ class Settings(BaseSettings):
     pipeline_sweep_interval_s: float = Field(600, ge=1, le=24 * 3600)
     # Test-only injection point ("module:function" returning (backend, transcriber)); never set in production.
     pipeline_factory: str = ""
+    # E3 coordination. API_MULTI_INSTANCE=true drops the DATA_ROOT OwnerLock; it requires platform mode,
+    # PIPELINE_MODE=worker and REDIS_URL (startup refuses otherwise). Correctness stays in PostgreSQL.
+    api_multi_instance: bool = False
+    api_instance_count: int = Field(1, ge=1, le=64)   # used only to divide limits in the local fallback
+    instance_id: str = ""                              # default: hostname-pid-random
+    redis_url: str = ""                                # redis://host:6379/0 (rate windows, cache, events)
+    redis_timeout_s: float = Field(1.0, gt=0, le=30)
+    read_lease_ttl_s: float = Field(60, ge=5, le=3600)       # renewed every ttl/3 while a request reads
+    read_lease_max_s: float = Field(900, ge=10, le=24 * 3600)  # renewal stops after this (request deadline)
+    generation_retire_grace_s: float = Field(300, ge=0, le=7 * 24 * 3600)
+    coordination_sweep_interval_s: float = Field(15, ge=1, le=3600)
+    reader_cache_entries: int = Field(16, ge=0, le=512)     # open read-only generation handles per process
+    conversation_lease_s: float = Field(30, ge=5, le=600)   # Q&A request ownership, renewed while running
+    # E3 shared read model (videos, jobs, conversations, study): "postgres" keeps it in PostgreSQL so no
+    # instance-local SQLite file is a source of truth; required with API_MULTI_INSTANCE. "auto" schema
+    # derives one schema per DATA_ROOT (tests); deployments use a fixed name.
+    registry_backend: Literal["sqlite", "postgres"] = "sqlite"
+    registry_database_url: str = ""                    # default: DATABASE_URL
+    registry_schema: str = Field("registry", pattern=r"^(auto|[a-z_][a-z0-9_]{0,62})$")
+    # E3 published files (index generations, playback) are also stored as immutable objects with a
+    # PostgreSQL manifest, so a lost or new DATA_ROOT is rebuilt from object storage.
+    publication_objects: bool = True
+    # E3 ModelGateway: limits shared by all API instances and workers via Redis (-1 disables a limit).
+    model_rpm_global: int = Field(600, ge=-1)
+    model_rpm_provider: int = Field(300, ge=-1)
+    model_tpm_provider: int = Field(400000, ge=-1)          # estimated tokens per minute per provider
+    model_rpm_workspace: int = Field(120, ge=-1)
+    model_inflight_provider: int = Field(16, ge=-1)
+    model_inflight_workspace: int = Field(6, ge=-1)
+    model_inflight_offline: int = Field(10, ge=-1)          # offline lane cap < provider total = reserve for Q&A
+    model_queue_wait_s: float = Field(5, ge=0, le=600)       # interactive: wait this long for admission, then 429
+    model_offline_queue_wait_s: float = Field(120, ge=0, le=3600)
+    model_max_waiters: int = Field(64, ge=0, le=10000)       # per process; beyond this, reject immediately
+    model_attempt_timeout_s: float = Field(120, gt=0, le=3600)
+    model_total_timeout_s: float = Field(300, gt=0, le=7200)
+    model_max_attempts: int = Field(4, ge=1, le=20)
+    model_retry_base_s: float = Field(1, ge=0, le=600)
+    model_retry_cap_s: float = Field(30, ge=0, le=3600)
+    model_slot_grace_s: float = Field(30, ge=0, le=3600)    # slot lease = attempt timeout + grace
+    model_limiter_on_redis_error: Literal["reject", "local"] = "reject"
+    model_daily_tokens_workspace: int = Field(0, ge=0)       # 0 = no default daily budget (model_budgets rows still apply)
+    model_prices: str = ""     # JSON {"model": {"input_per_mtok": 1.0, "output_per_mtok": 2.0, "currency": "CNY"}}
+    # E3 versioned cache (query vectors and retrieval candidates; never answers).
+    cache_enabled: bool = True
+    cache_ttl_s: float = Field(600, ge=1, le=7 * 24 * 3600)
+    cache_ttl_jitter: float = Field(0.1, ge=0, le=0.5)
+    cache_lock_s: float = Field(10, gt=0, le=600)
     app_version: str = "0.1.0"
     websocket_path: str = "/ws/agent"
     
@@ -183,6 +230,14 @@ class Settings(BaseSettings):
     @property
     def platform_enabled(self) -> bool:
         return bool(self.database_url)
+
+    def model_prices_map(self) -> dict:
+        import json
+        try:
+            value = json.loads(self.model_prices) if self.model_prices else {}
+        except ValueError:
+            return {}
+        return value if isinstance(value, dict) else {}
 
     @property
     def provider_name(self) -> str:

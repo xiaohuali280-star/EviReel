@@ -471,8 +471,12 @@ def test_no_text_rerank_and_http_auth_error_fallback(settings):
     assert not mock.calls and info['status']=='no_text_candidates' and result==[frame]
     settings.rerank_api_key='test-key'
     adapter = CohereReranker(settings, transport=httpx.MockTransport(lambda r: httpx.Response(401)))
-    with pytest.raises(httpx.HTTPStatusError):
+    # E3: provider calls go through the ModelGateway, which classifies the HTTP error (not retryable, not billed).
+    from vam.gateway import ProviderError
+    with pytest.raises(ProviderError) as failure:
         asyncio.run(adapter.rank('q',['text']))
+    assert failure.value.status == 401 and not failure.value.retryable and not failure.value.sent
+    assert isinstance(failure.value.__cause__, httpx.HTTPStatusError)
 
 
 def test_teacher_concept_and_formula_slide_end_to_end(settings, transcriber, tmp_path):

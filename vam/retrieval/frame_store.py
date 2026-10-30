@@ -12,6 +12,8 @@ import re
 import sqlite3
 import subprocess
 import tempfile
+import threading
+import time
 import uuid
 from dataclasses import dataclass
 from functools import partial
@@ -329,8 +331,48 @@ class MemoryDocument:
     metadata: Optional[Dict[str, Any]] = None
 
 
+_DERIVED_SCHEMA = """
+CREATE TABLE IF NOT EXISTS derived_summaries (
+    window_key TEXT PRIMARY KEY,
+    doc_id TEXT NOT NULL UNIQUE,
+    layer TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    start_t REAL NOT NULL,
+    end_t REAL NOT NULL,
+    absolute_start_t REAL,
+    absolute_end_t REAL,
+    text TEXT NOT NULL,
+    representative_frame_id TEXT,
+    frame_ids_json TEXT,
+    emb BLOB,
+    metadata_json TEXT,
+    model_fingerprint TEXT NOT NULL,
+    updated_at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_derived_summaries_start_end ON derived_summaries(start_t, end_t);
+"""
+
+
+def summary_window_key(start_t, end_t, granularity_s, summary_structure, focus) -> str:
+    """One derived summary per (window, granularity, structure, focus) of a generation."""
+    parts = [round(float(start_t), 6), round(float(end_t), 6), float(granularity_s or 0),
+             " ".join(str(summary_structure or "").split()).lower(), " ".join(str(focus or "").split())]
+    return hashlib.sha256(json.dumps(parts).encode()).hexdigest()
+
+
+class ReadOnlyGeneration(RuntimeError):
+    """A published generation is immutable; derived writes go to its derived-summary file."""
+
+
 class FrameStore:
-    def __init__(self, *, backend: VisionBackend, persist_path: str) -> None:
+    def __init__(self, *, backend: VisionBackend, persist_path: str, read_only: bool = False, derived_path: str = "") -> None:
+        # read_only: a published, immutable generation shared by concurrent readers (E3). Frames are loaded
+        # once on first use; summaries written by the summarize tool go to ``derived_path`` (one row per
+        # window, upserted), never into the base file, so readers need no per-video lock.
+        self._read_only = bool(read_only)
+        self._derived_path = (derived_path or "").strip()
+        self._reader_frames: Optional[List[FrameRecord]] = None
+        self._reader_frames_lock = threading.Lock()
         self._lock = asyncio.Lock()
         self._persist_lock = asyncio.Lock()
         self._frames: List[FrameRecord] = []
@@ -347,7 +389,15 @@ class FrameStore:
         self._latest_dedup_filter: Optional[Dict[str, Any]] = None
         self._latest_event_filter: Optional[Dict[str, Any]] = None
         self._persist_revision: int = 0
-        if self._persist_path:
+        if self._persist_path and self._read_only:
+            if not os.path.isfile(self._persist_path):
+                raise RuntimeError("published generation file is missing")
+            with self._connect_db() as conn:
+                if int(conn.execute("PRAGMA user_version").fetchone()[0]) > _DB_SCHEMA_VERSION:
+                    raise RuntimeError("unsupported memory store schema version")
+            self._load_from_db(include_frames=False)
+            self.validate_model_identity()
+        elif self._persist_path:
             self._init_db()
             self._maybe_migrate_legacy_json()
             self._load_from_db()
@@ -547,7 +597,7 @@ class FrameStore:
             )
         return frames, documents, dim, recent_event_doc_id, latest_dedup_filter, latest_event_filter, revision
 
-    def _load_from_db(self) -> None:
+    def _load_from_db(self, include_frames: bool = True) -> None:
         if torch is None:
             return
         try:
@@ -564,7 +614,7 @@ class FrameStore:
                     FROM frames
                     ORDER BY t ASC, frame_id ASC
                     """
-                ).fetchall()
+                ).fetchall() if include_frames else []
                 doc_rows = conn.execute(
                     """
                     SELECT doc_id, layer, kind, start_t, end_t, absolute_start_t, absolute_end_t,
@@ -761,6 +811,8 @@ class FrameStore:
             }
 
     async def _persist(self) -> None:
+        if self._read_only:
+            raise ReadOnlyGeneration("published generation is read-only")
         if not self._persist_path:
             return
         if torch is None:
@@ -784,8 +836,79 @@ class FrameStore:
     async def _reload_from_db(self) -> None:
         if not self._persist_path or torch is None:
             return
+        if self._read_only:
+            return      # immutable: what was loaded at open is still current
         self.validate_model_identity()
         await run_sync(self._load_from_db)
+
+    # -- read-only generation (E3) -------------------------------------------------------------------
+    def _all_reader_frames(self) -> List[FrameRecord]:
+        """Frames of an immutable generation, loaded once per open handle (thread-safe)."""
+        frames = self._reader_frames
+        if frames is None:
+            with self._reader_frames_lock:
+                if self._reader_frames is None:
+                    with self._connect_db() as conn:
+                        rows = conn.execute("SELECT frame_id, t, absolute_t, image_data_uri, img_emb, memory_tier, event_id "
+                                            "FROM frames ORDER BY t ASC, frame_id ASC").fetchall()
+                    self._reader_frames = [f for f in (self._frame_from_row(r) for r in rows) if f is not None]
+                frames = self._reader_frames
+        return frames
+
+    def _connect_derived(self) -> sqlite3.Connection:
+        conn = sqlite3.connect(self._derived_path, timeout=30.0, isolation_level=None, check_same_thread=False,
+                               factory=ClosingConnection)
+        conn.row_factory = sqlite3.Row
+        return conn
+
+    def _fetch_derived_sync(self, where: List[str], params: List[Any]) -> List[MemoryDocument]:
+        if not self._derived_path or not os.path.isfile(self._derived_path):
+            return []
+        sql = ("SELECT doc_id, layer, kind, start_t, end_t, absolute_start_t, absolute_end_t, text, representative_frame_id, "
+               "frame_ids_json, emb, metadata_json, model_fingerprint FROM derived_summaries")
+        if where:
+            sql += " WHERE " + " AND ".join(where)
+        try:
+            with self._connect_derived() as conn:
+                rows = conn.execute(sql, params).fetchall()
+        except sqlite3.OperationalError as exc:
+            if "no such table" in str(exc):   # file created by a first writer that has not committed yet
+                return []
+            raise
+        identity = self.model_fingerprint()
+        # A derived row embedded by another model identity is not comparable: never mix vector spaces.
+        return [self._document_from_row(row) for row in rows if row["model_fingerprint"] == identity]
+
+    def _upsert_derived_sync(self, key: str, doc: MemoryDocument) -> MemoryDocument:
+        with self._connect_derived() as conn:
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.executescript(_DERIVED_SCHEMA)
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                """INSERT INTO derived_summaries (window_key, doc_id, layer, kind, start_t, end_t, absolute_start_t,
+                       absolute_end_t, text, representative_frame_id, frame_ids_json, emb, metadata_json, model_fingerprint, updated_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                   ON CONFLICT(window_key) DO UPDATE SET text=excluded.text, start_t=excluded.start_t, end_t=excluded.end_t,
+                       absolute_start_t=excluded.absolute_start_t, absolute_end_t=excluded.absolute_end_t,
+                       representative_frame_id=excluded.representative_frame_id, frame_ids_json=excluded.frame_ids_json,
+                       emb=excluded.emb, metadata_json=excluded.metadata_json, model_fingerprint=excluded.model_fingerprint,
+                       updated_at=excluded.updated_at
+                   RETURNING doc_id""",
+                (key, doc.doc_id, doc.layer, doc.kind, float(doc.start_t), float(doc.end_t),
+                 float(doc.absolute_start_t) if doc.absolute_start_t is not None else None,
+                 float(doc.absolute_end_t) if doc.absolute_end_t is not None else None, doc.text, doc.representative_frame_id,
+                 json.dumps(list(doc.frame_ids or []), ensure_ascii=False), _tensor_to_blob(doc.emb),
+                 json.dumps(doc.metadata or {}, ensure_ascii=False) if doc.metadata else None,
+                 self.model_fingerprint(), time.time())).fetchone()
+            conn.commit()
+        doc.doc_id = str(row["doc_id"])   # the window keeps the id of its first summary
+        return doc
+
+    @staticmethod
+    def _doc_window_key(doc: MemoryDocument) -> str:
+        metadata = dict(doc.metadata or {})
+        return summary_window_key(doc.start_t, doc.end_t, metadata.get("granularity_seconds"),
+                                  metadata.get("summary_structure") or metadata.get("summary_type"), metadata.get("focus"))
 
     def _frame_from_row(self, row: sqlite3.Row) -> Optional[FrameRecord]:
         emb = _blob_to_tensor(row["img_emb"])
@@ -825,6 +948,17 @@ class FrameStore:
         max_time: float = float("inf"),
         time_mode: str = "auto",
     ) -> List[FrameRecord]:
+        if self._read_only:
+            frames = self._all_reader_frames()
+            if frame_ids:
+                wanted = set(frame_ids)
+                frames = [f for f in frames if f.frame_id in wanted]
+            if min_time > 0.0 or max_time < float("inf"):
+                if self._should_use_absolute_time_range(min_time=min_time, max_time=max_time, time_mode=time_mode):
+                    frames = [f for f in frames if f.absolute_t is not None and float(min_time) <= f.absolute_t <= float(max_time)]
+                else:
+                    frames = [f for f in frames if float(min_time) <= f.t <= float(max_time)]
+            return list(frames)
         where: List[str] = []
         params: List[Any] = []
         if frame_ids:
@@ -900,7 +1034,15 @@ class FrameStore:
         sql += " ORDER BY start_t ASC, doc_id ASC"
         with self._connect_db() as conn:
             rows = conn.execute(sql, params).fetchall()
-        return [self._document_from_row(row) for row in rows]
+        documents = [self._document_from_row(row) for row in rows]
+        if self._read_only and self._derived_path:
+            derived = self._fetch_derived_sync(where, params)
+            if derived:
+                # A derived summary replaces a pre-E3 summary of the same window stored in the base file.
+                keys = {self._doc_window_key(doc) for doc in derived}
+                documents = [d for d in documents if d.kind != "summary" or self._doc_window_key(d) not in keys] + derived
+                documents.sort(key=lambda d: (float(d.start_t), str(d.doc_id)))
+        return documents
 
     def _fetch_recent_event_doc_id_sync(self) -> Optional[str]:
         with self._connect_db() as conn:
@@ -1841,6 +1983,8 @@ class FrameStore:
         )
         if retrieval_payload:
             doc_metadata["_retrieval"] = retrieval_payload
+        if self._read_only and not (kind == "summary" and self._derived_path):
+            raise ReadOnlyGeneration("published generation is read-only")
         doc = MemoryDocument(
             doc_id=uuid.uuid4().hex,
             layer=layer,
@@ -1855,6 +1999,8 @@ class FrameStore:
             emb=await self._embed_text_for_memory(dense_content),
             metadata=doc_metadata or None,
         )
+        if self._read_only:
+            return await run_sync(self._upsert_derived_sync, self._doc_window_key(doc), doc)
         async with self._lock:
             self._memory_documents.append(doc)
             if layer == "long" and kind == "event":
@@ -1944,6 +2090,17 @@ class FrameStore:
         if retrieval_payload:
             metadata["_retrieval"] = retrieval_payload
         summary_emb = await self._embed_text_for_memory(dense_content)
+
+        if self._read_only:
+            if not self._derived_path:
+                raise ReadOnlyGeneration("published generation is read-only")
+            doc = MemoryDocument(doc_id=uuid.uuid4().hex, layer="summary", kind="summary", start_t=float(start_t),
+                                 end_t=float(end_t), text=content, representative_frame_id=representative_frame_id,
+                                 frame_ids=list(frame_ids), absolute_start_t=absolute_start_t, absolute_end_t=absolute_end_t,
+                                 emb=summary_emb, metadata=metadata or None)
+            # Single-row atomic upsert keyed by the window: concurrent summarizers of one window converge on
+            # one row (last writer's text), without rewriting the shared base index.
+            return await run_sync(self._upsert_derived_sync, self._doc_window_key(doc), doc)
 
         documents = await self.list_memory_documents_in_time_range(
             min_time=match_start_t,
@@ -2832,7 +2989,20 @@ class FrameStore:
                 batch_size=int(batch_size),
             )
 
-        emb_list, _ = await run_sync(_embed_sync, texts)
+        cache = getattr(self, "query_cache", None)
+        if cache is not None and not document and len(texts) == 1:
+            # E3 versioned cache: one query vector per (owning workspace, embedding identity, instruction, text),
+            # shared by the frame/event/summary channels of a request and by concurrent identical questions.
+            from vam.cache import cache_key
+            store_cache, scope, ttl = cache
+            key = cache_key("qvec", scope, self.model_fingerprint(), prompts.EMBED_INSTRUCTION_RETRIEVE_RELEVANT, texts[0])
+
+            async def compute():
+                vectors, _ = await run_sync(_embed_sync, texts)
+                return vectors
+            emb_list = await store_cache.get_or_compute(key, compute, ttl=ttl)
+        else:
+            emb_list, _ = await run_sync(_embed_sync, texts)
         validate_embeddings(emb_list, expected_count=len(texts), expected_dim=self._dim)
         if self._dim is None and emb_list:
             self._dim = len(emb_list[0])

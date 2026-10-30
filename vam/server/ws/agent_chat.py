@@ -102,6 +102,10 @@ async def agent_chat(websocket: WebSocket):
                 row, fresh = service.submit(request)
                 if row['status'] in {'accepted', 'running'}:
                     service.subscribe(request.conversation_id, request.request_id, queue)
+                    # Subscribe first, then read the committed row again: a final committed in between (here
+                    # or on another instance) is replayed from the row instead of being missed. Duplicates
+                    # are harmless: clients ignore events for a request that already ended.
+                    row = service.store.request(request.conversation_id, request.request_id)
                 accepted = service.envelope({'type': 'accepted', 'status': row['status'], 'replayed': not fresh},
                                              request.conversation_id, request.request_id)
                 if not await _safe_send_text(websocket, accepted):

@@ -13,25 +13,57 @@ from vam.protocol import RetrieveToolArgs, SummarizeToolArgs
 from vam.video_registry import DomainError
 from vam.chat_actions import ChatActions
 from vam.chat_text import answer_text
+from vam.events import LocalEventBus
 
 logger = logging.getLogger(__name__)
 PROTOCOL_VERSION = 2
 
 
 class ConversationService:
-    def __init__(self, indexing, *, study, model=None, chat_model=None):
+    """Question answering. Requests run as tasks of the instance that accepted them; that instance owns the
+    request row (owner + lease_until, renewed while it runs). Events go through an event bus so a socket on
+    another instance follows the request live; the committed row is the durable outcome (E3)."""
+    def __init__(self, indexing, *, study, model=None, chat_model=None, events=None, instance=None):
         self.indexing, self.settings = indexing, indexing.settings
         self.store = ConversationStore(indexing.registry)
         self.contexts = ContextManager(self.store, self.settings, model)
         self.actions = ChatActions(indexing, study, model=chat_model)
-        self.tasks, self.subscribers = {}, {}
+        self.tasks = {}
+        self.events = events or LocalEventBus()
+        self.instance = instance
+        self.shared = bool(instance) and self.settings.api_multi_instance
+        self.workspace_of = None    # platform: video_id -> owning workspace (model scope, cache scope)
+        self.heartbeat = None
         self.closed = False
 
+    @property
+    def subscribers(self):
+        return self.events.subscribers
+
     def start(self):
-        self.store.recover()
+        if self.shared:
+            self.store.recover_expired()
+            self.heartbeat = asyncio.get_event_loop().create_task(self._heartbeat())
+        else:
+            self.store.recover()
+
+    async def _heartbeat(self):
+        from vam.runtime import run_sync
+        interval = max(1.0, self.settings.conversation_lease_s / 3)
+        while True:
+            await asyncio.sleep(interval)
+            try:
+                if self.tasks:
+                    await run_sync(self.store.renew, self.instance, self.settings.conversation_lease_s)
+                # Any instance may interrupt requests whose owner died (lease expired): idempotent.
+                await run_sync(self.store.recover_expired)
+            except Exception:
+                logger.warning('conversation_lease_heartbeat_failed')
 
     async def close(self):
         self.closed = True
+        if self.heartbeat is not None:
+            self.heartbeat.cancel()
         tasks = list(self.tasks.values())
         for task in tasks:
             task.cancel()
@@ -43,21 +75,13 @@ class ConversationService:
                         'conversation_id': cid, 'request_id': rid}
 
     def subscribe(self, cid, rid, queue):
-        self.subscribers.setdefault((cid, rid), set()).add(queue)
+        self.events.subscribe((cid, rid), queue)
 
     def unsubscribe(self, queue):
-        for key in list(self.subscribers):
-            self.subscribers[key].discard(queue)
-            if not self.subscribers[key]:
-                del self.subscribers[key]
+        self.events.unsubscribe(queue)
 
     def publish(self, cid, rid, event):
-        for queue in self.subscribers.get((cid, rid), ()):
-            if queue.full():
-                queue.get_nowait()
-            queue.put_nowait(event)
-        if event.get('type') in {'final', 'error'}:
-            self.subscribers.pop((cid, rid), None)
+        self.events.publish((cid, rid), event)
 
     def submit(self, request):
         if self.closed:
@@ -78,9 +102,15 @@ class ConversationService:
             payload['action'] = request.action
         if request.scope:
             payload['scope'] = request.scope.model_dump()
-        fresh = self.store.accept(cid, rid, request.video_id, payload, original, self.settings.conversation_max_running)
+        fresh = self.store.accept(cid, rid, request.video_id, payload, original, self.settings.conversation_max_running,
+                                  owner=self.instance if self.shared else None,
+                                  lease_s=self.settings.conversation_lease_s if self.shared else None)
         if fresh:
-            release = self.indexing._retain(request.video_id)
+            try:
+                release = self.indexing._retain(request.video_id, purpose='question')
+            except DomainError:
+                self.store.fail(cid, rid, 'video_deleting')
+                raise
             self.tasks[(cid, rid)] = asyncio.create_task(self._run(request, original, release))
         return self.store.request(cid, rid), fresh
 
@@ -94,9 +124,14 @@ class ConversationService:
         return None
 
     async def _run(self, request, original, release):
+        from vam.gateway import model_scope
+        from vam.runtime import run_sync
         cid, rid = request.conversation_id, request.request_id
         try:
-            await asyncio.wait_for(self._execute(request, original), self.settings.conversation_request_timeout_s)
+            workspace = await run_sync(self.workspace_of, request.video_id) if self.workspace_of else None
+            # Every model call of this question is 'interactive' and charged to the video's workspace.
+            with model_scope(workspace, 'interactive'):
+                await asyncio.wait_for(self._execute(request, original), self.settings.conversation_request_timeout_s)
         except asyncio.CancelledError:
             self.store.fail(cid, rid, 'server_shutdown', 'interrupted')
             self.publish(cid, rid, self.terminal(self.store.request(cid, rid)))
@@ -107,7 +142,7 @@ class ConversationService:
             self.store.fail(cid, rid, code)
             self.publish(cid, rid, self.terminal(self.store.request(cid, rid)))
         finally:
-            release()
+            await run_sync(release)
             self.tasks.pop((cid, rid), None)
 
     async def _execute(self, request, original):

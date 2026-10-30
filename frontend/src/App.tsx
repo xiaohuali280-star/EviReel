@@ -370,7 +370,13 @@ export default function App() {
   }
   async function purge() {
     if (!confirm) return;
-    try {await api(`/api/videos/${confirm.video_id}`, {method: 'DELETE'}); setConfirm(null); refresh(); setNotice('视频及关联记录已永久删除。')}
+    try {
+      // 204: deleted now. 202: new reads are already refused; files are reclaimed once current playback/searches end.
+      const result = await api<{status?: string} | undefined>(`/api/videos/${confirm.video_id}`, {method: 'DELETE'});
+      if (confirm.video_id === videoId) chooseVideo('');
+      setConfirm(null); refresh();
+      setNotice(result?.status === 'deleting' ? '视频正在删除：已停止新的访问，正在进行的播放或检索结束后自动清理。' : '视频及关联记录已永久删除。')
+    }
     catch (e) {setError(errorText(e))}
   }
   function selectChapter(c: Chapter, index: number) {setChapterIndex(index); setSelectedChapter(c); seek(c.start_t)}
@@ -390,7 +396,7 @@ export default function App() {
       <div id="sidebar-library" className="sidebar-library" ref={sidebar.library} hidden={!sidebar.expanded}>
       <div className="library-title">{trash ? '已删除的视频' : '视频资料库'}<span>{videos.total}</span></div>
       <div className="video-list" ref={sidebar.list} onScroll={sidebar.rememberScroll}>{videos.items.map(v => <div key={v.video_id} className={`video-item ${videoId === v.video_id ? 'selected' : ''}`}>
-        <button className="video-pick" disabled={trash} onClick={() => {chooseVideo(v.video_id); sidebar.selected()}}><span className="video-thumb"><Play size={17} /></span><span><strong>{v.original_name}</strong><small>{time(v.duration)} · {isProcessing(v.status) ? '处理中' : v.status === 'failed' ? '处理失败' : trash ? '已移入回收站' : '视频资料'}</small></span></button>
+        <button className="video-pick" disabled={trash || v.status === 'deleting'} onClick={() => {chooseVideo(v.video_id); sidebar.selected()}}><span className="video-thumb"><Play size={17} /></span><span><strong>{v.original_name}</strong><small>{time(v.duration)} · {v.status === 'deleting' ? '删除中' : isProcessing(v.status) ? '处理中' : v.status === 'failed' ? '处理失败' : trash ? '已移入回收站' : '视频资料'}</small></span></button>
         <div className="video-actions">{trash ? <><button onClick={() => move(v, true)}>恢复</button><button className="danger" onClick={() => setConfirm(v)} aria-label={`永久删除 ${v.original_name}`}><Trash2 size={14} /></button></> : <button onClick={() => move(v)} aria-label={`移入回收站 ${v.original_name}`}><Trash2 size={14} /></button>}</div>
       </div>)}{videos.total === 0 && <p className="library-empty">{search ? '没有匹配的视频' : trash ? '回收站为空' : '上传视频，开始积累知识'}</p>}</div>
       {videos.total > 20 && <div className="pagination"><button disabled={offset === 0} onClick={() => setOffset(n => Math.max(0, n - 20))}>上一页</button><span>{Math.floor(offset / 20) + 1}</span><button disabled={offset + 20 >= videos.total} onClick={() => setOffset(n => n + 20)}>下一页</button></div>}

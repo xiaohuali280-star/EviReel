@@ -31,4 +31,5 @@ async def search(video_id: str, body: SearchRequest, request: Request):
             return await context.answer(body.query)
         return {'video_id': video_id, 'index_version': context.versions['visual'], 'evidence': evidence,
                 'results': evidence, 'warnings': context.warnings,
-                'execution': {'versions': context.versions, 'searches': context.executions}}
+                'execution': {'versions': context.versions, 'searches': context.executions,
+                              'snapshot': context.snapshot.as_dict() if context.snapshot else None}}

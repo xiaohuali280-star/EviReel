@@ -1,0 +1,101 @@
+name: E3 concurrency (real PostgreSQL + MinIO + RabbitMQ + Redis, two API instances)
+on:
+  push:
+    branches: ["main"]
+    paths: ["vam/**", "tests/**", "deploy/**", "scripts/e3/**", "pyproject.toml", "setup.cfg", ".github/workflows/e3-concurrency.yml"]
+  pull_request:
+    paths: ["vam/**", "tests/**", "deploy/**", "scripts/e3/**", "pyproject.toml", "setup.cfg", ".github/workflows/e3-concurrency.yml"]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: e3-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  e3:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      SILICONFLOW_API_KEY: ""
+      OPENROUTER_API_KEY: ""
+      DASHSCOPE_API_KEY: ""
+      COMPOSE: docker compose --env-file deploy/e1/dev.env -f deploy/e3/compose.yml
+    steps:
+      - uses: actions/checkout@v4
+      - name: Throwaway CI credentials (never reused)
+        run: |
+          {
+            echo "EVIREEL_PG_USER=evireel"
+            echo "EVIREEL_PG_PASSWORD=ci-$(openssl rand -hex 12)"
+            echo "EVIREEL_S3_ACCESS_KEY=ci-$(openssl rand -hex 6)"
+            echo "EVIREEL_S3_SECRET_KEY=ci-$(openssl rand -hex 16)"
+            echo "EVIREEL_MQ_USER=evireel"
+            echo "EVIREEL_MQ_PASSWORD=ci-$(openssl rand -hex 12)"
+            echo "EVIREEL_WEB_ORIGINS=http://127.0.0.1:8000"
+          } > deploy/e1/dev.env
+      - name: Start middleware from the committed E3 compose file (health-gated)
+        run: |
+          $COMPOSE up -d --wait --wait-timeout 300 postgres minio rabbitmq redis
+          $COMPOSE ps
+          $COMPOSE exec -T redis redis-cli ping
+      - name: Export test endpoints
+        run: |
+          set -a; . deploy/e1/dev.env; set +a
+          echo "::add-mask::$EVIREEL_PG_PASSWORD"; echo "::add-mask::$EVIREEL_S3_SECRET_KEY"; echo "::add-mask::$EVIREEL_MQ_PASSWORD"
+          echo "EVIREEL_TEST_DATABASE_URL=postgresql://$EVIREEL_PG_USER:$EVIREEL_PG_PASSWORD@127.0.0.1:5432/postgres" >> "$GITHUB_ENV"
+          echo "EVIREEL_TEST_REGISTRY_URL=postgresql://$EVIREEL_PG_USER:$EVIREEL_PG_PASSWORD@127.0.0.1:5432/evireel" >> "$GITHUB_ENV"
+          echo "EVIREEL_TEST_S3_ENDPOINT=http://127.0.0.1:9000" >> "$GITHUB_ENV"
+          echo "EVIREEL_TEST_S3_ACCESS_KEY=$EVIREEL_S3_ACCESS_KEY" >> "$GITHUB_ENV"
+          echo "EVIREEL_TEST_S3_SECRET_KEY=$EVIREEL_S3_SECRET_KEY" >> "$GITHUB_ENV"
+          echo "EVIREEL_TEST_REDIS_URL=redis://127.0.0.1:6379/15" >> "$GITHUB_ENV"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install -e ".[dev,platform,pipeline]"
+      - name: E3 tests (units; real Redis; real PostgreSQL + MinIO; two API instances)
+        id: e3
+        run: python -m pytest tests/test_e3_unit.py tests/test_e3_redis.py tests/test_e3_platform.py -v -rs --junitxml=e3-results.xml
+      - name: Report E3 failures as annotations
+        if: failure() && steps.e3.outcome == 'failure'
+        run: python .github/scripts/junit_annotations.py e3-results.xml
+      - name: E3 tests must not be skipped here
+        if: ${{ !cancelled() }}
+        run: python .github/scripts/junit_annotations.py --summary --no-skips e3-results.xml
+      - name: Product regression with the PostgreSQL read model (P1/P4/P5 on REGISTRY_BACKEND=postgres)
+        if: ${{ !cancelled() }}
+        env:
+          REGISTRY_BACKEND: postgres
+          REGISTRY_SCHEMA: auto
+        run: |
+          export REGISTRY_DATABASE_URL="$EVIREEL_TEST_REGISTRY_URL"
+          python -m pytest tests/test_p1_video_management.py tests/test_p4_conversations.py tests/test_p5_study.py tests/test_chat_actions.py -q -rs --junitxml=e3-pg-registry-results.xml
+      - name: E1/E2 regression on the same middleware (E3 schema 7)
+        if: ${{ !cancelled() }}
+        run: python -m pytest tests/test_e1_unit.py tests/test_e1_platform.py tests/test_e2_pipeline.py tests/test_e2_remediation.py tests/test_e2_rereview.py tests/test_e2_third.py -q -rs
+      - name: Container stack (built image; two APIs behind nginx, dispatcher, media/embed/notes workers)
+        if: ${{ !cancelled() }}
+        run: |
+          $COMPOSE up -d --build --wait --wait-timeout 600
+          $COMPOSE ps
+          $COMPOSE exec -T worker-notes celery -A vam.pipeline.celery_app inspect active_queues -t 20 | tee /dev/stderr | grep -q "'name': 'notes'"
+          $COMPOSE exec -T worker-embed celery -A vam.pipeline.celery_app inspect active_queues -t 20 | tee /dev/stderr | grep -q "'name': 'embed'"
+          export EVIREEL_NEW_PASSWORD="ci-$(openssl rand -hex 10)"
+          echo "::add-mask::$EVIREEL_NEW_PASSWORD"
+          $COMPOSE exec -T -e EVIREEL_NEW_PASSWORD api-1 python -m vam.platform.migrate create-user --username ci-smoke
+          python scripts/e3/stack_smoke.py --url http://127.0.0.1:8000 --username ci-smoke --stop "$COMPOSE stop api-1" --start "$COMPOSE start api-1"
+      - name: Logs
+        if: always()
+        run: $COMPOSE logs --no-color > e3-stack.log 2>&1 || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: E3-validation
+          path: |
+            e3-results.xml
+            e3-pg-registry-results.xml
+            e3-stack.log

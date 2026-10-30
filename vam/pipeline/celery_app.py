@@ -1,6 +1,6 @@
 """Celery wiring for stage workers (Linux/containers; Celery does not support native Windows workers).
 
-    celery -A vam.pipeline.celery_app worker -Q media,asr,embed,control --concurrency 1
+    celery -A vam.pipeline.celery_app worker -Q media,asr,embed,notes,control --concurrency 1
 
 Delivery semantics actually relied on (verified in tests/test_e2_faults.py, not assumed):
 * task_acks_late: the message is ACKed only after execute() returned, i.e. after the ledger commit.

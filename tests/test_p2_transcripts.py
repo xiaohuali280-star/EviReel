@@ -22,7 +22,7 @@ from vam.asr.transcriber import FasterWhisperTranscriber, MockTranscriber
 from vam.asr.worker import run as run_worker
 from vam.retrieval.frame_store import FrameStore
 from vam.server.app import create_app
-from vam.storage.database import Database
+from vam.storage.database import MIGRATIONS, Database
 
 media = p1.media
 settings = p1.settings
@@ -272,7 +272,7 @@ def test_restart_and_registry_v1_migration(settings, audio_media, transcriber, t
         conn.execute('PRAGMA user_version=1')
     database = Database(legacy)
     with database.connect() as conn:
-        assert conn.execute('PRAGMA user_version').fetchone()[0] == 5  # 005: E2 publication fence
+        assert conn.execute('PRAGMA user_version').fetchone()[0] == len(MIGRATIONS)  # 007: E3 publication objects
         assert conn.execute('SELECT original_name,transcript_status FROM videos').fetchone()[1] == 'not_started'
 
 

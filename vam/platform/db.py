@@ -7,9 +7,10 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from pathlib import Path
+import os
 import re
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 MIGRATIONS = Path(__file__).parent / "migrations"
 
 
@@ -26,17 +27,81 @@ def _driver():
     return psycopg, dict_row
 
 
+class ConnectionPool:
+    """Reuses idle connections (E3): a new PostgreSQL connection costs tens of ms and a TCP port in
+    TIME_WAIT; per-statement connections under concurrent requests exhausted client ports in tests.
+
+    Semantics match ``with psycopg.connect() as conn``: commit on success, rollback on error. A connection
+    goes back to the idle list only if it is healthy and outside a transaction; at most ``max_idle`` are
+    kept. Fork-aware: a child process (Celery prefork) never reuses its parent's sockets."""
+
+    def __init__(self, factory, *, max_idle=8, max_idle_s=60):
+        import threading
+        self.factory, self.max_idle, self.max_idle_s = factory, max_idle, max_idle_s
+        self.idle, self.lock, self.pid = [], threading.Lock(), os.getpid()
+
+    def _take(self):
+        import time
+        stale = []
+        conn = None
+        with self.lock:
+            if self.pid != os.getpid():
+                self.idle, self.pid = [], os.getpid()
+            while self.idle:
+                candidate, since = self.idle.pop()
+                # Idle connections may have been closed by the server or a proxy; old ones are replaced.
+                if candidate.closed or time.monotonic() - since > self.max_idle_s:
+                    stale.append(candidate)
+                    continue
+                conn = candidate
+                break
+        for old in stale:
+            old.close()
+        return conn or self.factory()
+
+    def _give(self, conn):
+        from psycopg.pq import TransactionStatus
+        if conn.closed or conn.broken or conn.info.transaction_status != TransactionStatus.IDLE:
+            conn.close()
+            return
+        with self.lock:
+            if self.pid == os.getpid() and len(self.idle) < self.max_idle:
+                import time
+                self.idle.append((conn, time.monotonic()))
+                return
+        conn.close()
+
+    @contextmanager
+    def connection(self):
+        conn = self._take()
+        try:
+            yield conn
+            if not conn.closed:
+                conn.commit()
+        except BaseException:
+            if not conn.closed and not conn.broken:
+                try:
+                    conn.rollback()
+                except Exception:
+                    conn.close()
+            raise
+        finally:
+            self._give(conn)
+
+
 class PlatformDB:
-    def __init__(self, url: str, *, connect_timeout: int = 5):
+    def __init__(self, url: str, *, connect_timeout: int = 5, max_idle: int = 8):
         if not url:
             raise PlatformDatabaseError("DATABASE_URL is empty")
         self.url = url
         self.connect_timeout = connect_timeout
+        psycopg, dict_row = _driver()
+        self.pool = ConnectionPool(lambda: psycopg.connect(self.url, row_factory=dict_row,
+                                                           connect_timeout=self.connect_timeout), max_idle=max_idle)
 
     @contextmanager
     def connect(self):
-        psycopg, dict_row = _driver()
-        with psycopg.connect(self.url, row_factory=dict_row, connect_timeout=self.connect_timeout) as conn:
+        with self.pool.connection() as conn:
             yield conn
 
     @contextmanager

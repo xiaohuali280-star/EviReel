@@ -1,0 +1,113 @@
+# E3 stack (Linux / WSL2): two API instances behind nginx + Redis + the E2 dispatcher and workers, with
+# separate worker pools for media/ASR, embeddings + control, and offline note generation.
+#   cp deploy/e1/dev.env.example deploy/e1/dev.env
+#   cat deploy/e2/dev.env.example >> deploy/e1/dev.env
+#   docker compose --env-file deploy/e1/dev.env -f deploy/e3/compose.yml up -d --build --wait
+# Correctness lives in PostgreSQL (job ledger, read model REGISTRY_BACKEND=postgres, leases, tombstones,
+# model usage). Redis holds only rate windows, slot leases, cache entries and Pub/Sub notifications.
+# Limit: the API instances and workers share one DATA_ROOT volume (index generations are also stored as
+# objects and rebuilt from object storage when missing, but the transcript store file is updated in place),
+# so this is a single-host deployment. Development only: ports bind to 127.0.0.1.
+name: evireel-e3
+include:
+  - ../e1/compose.yml
+x-app: &app
+  build: {context: ../.., dockerfile: deploy/e2/app.Dockerfile}
+  image: evireel-app:e3
+  environment: &app-env
+    DATABASE_URL: postgresql://${EVIREEL_PG_USER}:${EVIREEL_PG_PASSWORD}@postgres:5432/evireel
+    S3_ENDPOINT: http://minio:9000
+    S3_PUBLIC_ENDPOINT: http://127.0.0.1:${EVIREEL_S3_PORT:-9000}
+    S3_ACCESS_KEY: ${EVIREEL_S3_ACCESS_KEY}
+    S3_SECRET_KEY: ${EVIREEL_S3_SECRET_KEY}
+    S3_BUCKET: evireel
+    PIPELINE_MODE: worker
+    BROKER_URL: amqp://${EVIREEL_MQ_USER:?set in dev.env}:${EVIREEL_MQ_PASSWORD:?set in dev.env}@rabbitmq:5672/evireel
+    DATA_ROOT: /data/evireel
+    REDIS_URL: redis://redis:6379/0
+    REGISTRY_BACKEND: postgres
+    API_MULTI_INSTANCE: "true"
+    API_INSTANCE_COUNT: "2"
+    MODEL_LIMITER_ON_REDIS_ERROR: reject
+  volumes: [appdata:/data]
+  depends_on: &app-deps
+    postgres: {condition: service_healthy}
+    minio: {condition: service_healthy}
+    rabbitmq: {condition: service_healthy}
+    redis: {condition: service_healthy}
+    migrate: {condition: service_completed_successfully}
+x-api: &api
+  <<: *app
+  healthcheck:
+    test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:8000/api/health"]
+    interval: 5s
+    timeout: 3s
+    retries: 30
+services:
+  migrate:
+    <<: *app
+    command: ["python", "-m", "vam.platform.migrate", "schema"]
+    restart: "no"
+    depends_on:
+      postgres: {condition: service_healthy}
+  rabbitmq:
+    image: rabbitmq:4.1.4-management-alpine
+    environment:
+      RABBITMQ_DEFAULT_USER: ${EVIREEL_MQ_USER:?set in dev.env}
+      RABBITMQ_DEFAULT_PASS: ${EVIREEL_MQ_PASSWORD:?set in dev.env}
+      RABBITMQ_DEFAULT_VHOST: evireel
+    ports: ["127.0.0.1:${EVIREEL_MQ_PORT:-5672}:5672"]
+    volumes:
+      - mqdata:/var/lib/rabbitmq
+      - ../e2/rabbitmq.conf:/etc/rabbitmq/conf.d/90-evireel.conf:ro
+    healthcheck:
+      test: ["CMD-SHELL", "rabbitmq-diagnostics -q check_running && rabbitmq-diagnostics -q check_port_connectivity && rabbitmq-diagnostics -q check_virtual_hosts"]
+      interval: 5s
+      timeout: 10s
+      retries: 30
+  redis:
+    image: redis:7.4.1-alpine
+    # Rate windows, slots and cache entries are reproducible state: no persistence, bounded memory.
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "256mb", "--maxmemory-policy", "volatile-lru"]
+    ports: ["127.0.0.1:${EVIREEL_REDIS_PORT:-6379}:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+  api-1:
+    <<: *api
+    environment: {<<: *app-env, INSTANCE_ID: api-1}
+  api-2:
+    <<: *api
+    environment: {<<: *app-env, INSTANCE_ID: api-2}
+  lb:
+    image: nginx:1.27.2-alpine
+    volumes: ["./nginx.conf:/etc/nginx/conf.d/default.conf:ro"]
+    ports: ["127.0.0.1:${EVIREEL_WEB_PORT:-8000}:8080"]
+    depends_on:
+      api-1: {condition: service_healthy}
+      api-2: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/api/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+  dispatcher:
+    <<: *app
+    command: ["python", "-m", "vam.pipeline.dispatcher"]
+  worker-media:    # media preparation, vision and ASR: long, CPU heavy
+    <<: *app
+    command: ["celery", "-A", "vam.pipeline.celery_app", "worker", "-Q", "media,asr", "-c", "1", "-n", "media@%h",
+              "--without-gossip", "--without-mingle", "-l", "INFO"]
+  worker-embed:    # embeddings for new uploads and publish/join: short, keeps uploads moving
+    <<: *app
+    command: ["celery", "-A", "vam.pipeline.celery_app", "worker", "-Q", "embed,control", "-c", "2", "-n", "embed@%h",
+              "--without-gossip", "--without-mingle", "-l", "INFO"]
+  worker-notes:    # offline note generation (LLM): its own pool, plus the gateway's offline slot cap
+    <<: *app
+    command: ["celery", "-A", "vam.pipeline.celery_app", "worker", "-Q", "notes", "-c", "1", "-n", "notes@%h",
+              "--without-gossip", "--without-mingle", "-l", "INFO"]
+volumes:
+  appdata:
+  mqdata:

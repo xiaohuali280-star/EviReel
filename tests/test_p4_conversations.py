@@ -18,7 +18,7 @@ from vam.memory.context_manager import ContextManager, ConversationContext, SUMM
 from vam.memory.conversation import ConversationStore
 from vam.protocol import VideoAgentRequest
 from vam.server.app import create_app
-from vam.storage.database import Database
+from vam.storage.database import MIGRATIONS, Database
 from vam.video_registry import DomainError, VideoRegistry
 
 settings, media, audio_media, transcriber = p2.settings, p2.media, p2.audio_media, p2.transcriber
@@ -107,7 +107,7 @@ def test_registry_migration_preserves_old_video(tmp_path, version):
         conn.execute(f'PRAGMA user_version={version}')
     db = Database(path)
     with db.connect() as conn:
-        assert conn.execute('PRAGMA user_version').fetchone()[0] == 5  # 005: E2 publication fence
+        assert conn.execute('PRAGMA user_version').fetchone()[0] == len(MIGRATIONS)  # 007: E3 publication objects
         assert conn.execute('SELECT original_name FROM videos').fetchone()[0] == 'old.mp4'
         assert conn.execute('SELECT COUNT(*) FROM conversations').fetchone()[0] == 0
 

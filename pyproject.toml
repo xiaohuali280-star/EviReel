@@ -40,7 +40,7 @@ namespaces = false
 include = ["vam*"]
 
 [tool.setuptools.package-data]
-"vam.storage" = ["migrations/*.sql"]
+"vam.storage" = ["migrations/*.sql", "migrations_pg/*.sql"]
 "vam.memory" = ["migrations/*.sql"]
 "vam.platform" = ["migrations/*.sql"]
 "vam.server" = ["static/*", "static/assets/*"]
@@ -48,7 +48,8 @@ include = ["vam*"]
 [project.optional-dependencies]
 dev = ["pytest>=8"]
 # E1 platform mode: PostgreSQL metadata + S3-compatible object storage
-platform = ["psycopg[binary]>=3.2,<3.3", "boto3>=1.35,<2"]
+# E3: Redis carries shared model limits, the query-vector cache and cross-instance notifications.
+platform = ["psycopg[binary]>=3.2,<3.3", "boto3>=1.35,<2", "redis>=5.2,<6"]
 # E2 worker pipeline: Celery workers + outbox dispatcher on RabbitMQ (Linux / containers)
 pipeline = ["celery>=5.5,<5.7"]
 asr = ["faster-whisper>=1.2.1,<2"]

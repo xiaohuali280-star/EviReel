@@ -4,7 +4,7 @@ import logging
 import re
 
 from fastapi import APIRouter, Request, UploadFile, File, Query
-from starlette.responses import FileResponse
+from starlette.responses import FileResponse, JSONResponse, Response
 
 from vam.runtime import run_sync
 from vam.server.platform_auth import principal_of
@@ -23,7 +23,7 @@ class LeasedFileResponse(FileResponse):
         try:
             await super().__call__(scope, receive, send)
         finally:
-            self.release()
+            await run_sync(self.release)   # a shared (PostgreSQL) lease release is a short DB call
 
 @router.post("/videos", status_code=202)
 async def upload_video(request: Request, video: UploadFile = File(...)):
@@ -40,11 +40,11 @@ async def list_videos(request: Request, offset: int = Query(0, ge=0), limit: int
 
 @router.post('/videos/{video_id}/trash')
 async def trash_video(video_id: str, request: Request):
-    return request.app.state.indexing.trash(video_id)
+    return await run_sync(request.app.state.indexing.trash, video_id)
 
 @router.post('/videos/{video_id}/restore')
 async def restore_video(video_id: str, request: Request):
-    return request.app.state.indexing.trash(video_id, restore=True)
+    return await run_sync(lambda: request.app.state.indexing.trash(video_id, restore=True))
 
 @router.get("/videos/{video_id}")
 async def video_detail(video_id: str, request: Request):
@@ -53,22 +53,29 @@ async def video_detail(video_id: str, request: Request):
 
 @router.get("/videos/{video_id}/content")
 async def video_content(video_id: str, request: Request):
-    path, release = request.app.state.indexing.playback_asset(video_id)
+    path, release = await run_sync(request.app.state.indexing.playback_asset, video_id)
     return LeasedFileResponse(str(path), release, media_type="video/mp4")
 
-@router.delete("/videos/{video_id}", status_code=204)
+@router.delete("/videos/{video_id}")
 async def delete_video(video_id: str, request: Request):
-    request.app.state.indexing.delete(video_id)
-    platform = getattr(request.app.state, 'platform', None)
-    if platform is not None:
-        # SQLite row is gone; releasing ownership frees quota and queues the object in one
-        # transaction. A failed or interrupted delete here is retried by the upload reconciler.
-        released = await run_sync(platform.identity.release_video, video_id)
-        if released and released.get('object_key'):
-            try:
-                await run_sync(platform.uploads.cleaner.delete_now, released['object_key'])
-            except Exception:  # the deletion is already queued; never fail a completed logical delete
-                logger.warning("object_delete_deferred video_id=%s", video_id, exc_info=True)
+    """204: deleted now. 202: tombstoned -- no new reader or job can start; requests already reading finish
+    first and any instance's coordination sweeper reclaims the files, ownership and quota afterwards."""
+    principal = principal_of(request)
+    result = await run_sync(request.app.state.indexing.delete, video_id, principal.user_id if principal else None)
+    if result["status"] == "deleting":
+        return JSONResponse(result, status_code=202)
+    return Response(status_code=204)
+
+
+def release_platform_video(platform, video_id):
+    """Reclaim hook (platform mode): the SQLite row is gone; releasing ownership frees quota and queues the
+    object in one transaction. A failed release is retried by the upload reconciler (orphan ownership)."""
+    released = platform.identity.release_video(video_id)
+    if released and released.get('object_key'):
+        try:
+            platform.uploads.cleaner.delete_now(released['object_key'])
+        except Exception:  # the deletion is already queued; never fail a completed logical delete
+            logger.warning("object_delete_deferred video_id=%s", video_id, exc_info=True)
 
 def idempotency_key(request: Request):
     """Optional `Idempotency-Key` header: same key + same parameters -> same job; different -> 409."""

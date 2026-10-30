@@ -22,10 +22,14 @@ Correctness rules
 * Merge-succeeded/DB-failed windows are closed by ``reconcile()``: a session
   stuck in completing/verifying past its lease is re-driven idempotently.
 
-Single-instance assumption (E1): background verification runs as in-process
-asyncio tasks of the API process that owns DATA_ROOT. Leases plus the attempt
-token keep a stale verifier from publishing, but E1 does not claim multi-API
-execution; E2 moves this onto durable workers.
+Several API instances (E3): verification runs as an asyncio task of whichever
+instance received ``complete`` or whose reconciler found an expired lease. A
+verifier must first claim the session (conditional UPDATE: state='verifying' and
+no live lease; it bumps ``state_version``), renews the lease while it streams,
+and every later transition checks that version. Two instances can therefore
+both try, but only the current claimant can register the video; a verifier
+whose instance died is replaced after ``UPLOAD_LEASE_S``. The staging file is
+attempt-keyed under the shared DATA_ROOT.
 """
 from __future__ import annotations
 

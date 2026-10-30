@@ -104,6 +104,8 @@ async def request_study(settings, messages):
     if not settings.api_key:
         raise DomainError(503, 'model_not_configured', 'Configure a model provider to generate notes')
 
+    from vam.gateway import ProviderError, estimate_tokens, get_gateway
+
     async def attempt():
         async with httpx.AsyncClient(timeout=settings.study_model_timeout_s) as client:
             async with client.stream('POST', settings.chat_base_url.rstrip('/') + '/chat/completions',
@@ -111,23 +113,23 @@ async def request_study(settings, messages):
                 json={'model': settings.model_id, 'messages': messages, 'temperature': 0,
                       'max_tokens': 6000, 'stream': settings.study_stream}) as response:
                 if not response.is_success:
-                    exc = _status_error(response.status_code)
                     # Retry only transient statuses, without logging response bodies.
-                    return None, exc, response.status_code in (429, 500, 502, 503, 504)
+                    status = response.status_code
+                    raise ProviderError(_status_error(status).code, status=status,
+                                        retryable=status in (429, 500, 502, 503, 504), sent=status >= 500)
                 content_type = response.headers.get('content-type', '').split(';', 1)[0].strip().lower()
                 raw = await (_stream_content(response) if content_type == 'text/event-stream' else _json_content(response))
-                return raw, None, False
+                return raw, None     # streamed responses carry no usage: the ledger keeps the estimate
 
-    for number in range(settings.study_model_attempts):
-        try:
-            raw, exc, retry = await asyncio.wait_for(attempt(), settings.study_model_timeout_s)
-            if exc is None:
-                return raw
-        except (TimeoutError, asyncio.TimeoutError, httpx.TimeoutException):
-            exc, retry = _error('study_timeout'), True
-        except httpx.TransportError:
-            exc, retry = _error('study_model_connection_failed'), True
-        if not retry or number + 1 == settings.study_model_attempts:
-            raise exc from None
-        logger.info('study_model_retry code=%s attempt=%s', exc.code, number + 1)
-        await asyncio.sleep(.5 * (number + 1))
+    chars = sum(len(m.get('content') or '') for m in messages if isinstance(m.get('content'), str))
+    try:
+        # E3: admission, budget reservation, per-attempt timeout and retries happen in the ModelGateway.
+        return await get_gateway().run(operation='study', model=settings.model_id, attempt_fn=attempt,
+                                       est_input_tokens=estimate_tokens(chars), est_output_tokens=6000,
+                                       timeout=settings.study_model_timeout_s, attempts=settings.study_model_attempts)
+    except ProviderError as exc:
+        if exc.status is not None:
+            raise _status_error(exc.status) from None
+        if exc.code == 'provider_timeout':
+            raise _error('study_timeout') from None
+        raise _error('study_model_connection_failed') from None
