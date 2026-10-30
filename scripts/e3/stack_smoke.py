@@ -56,23 +56,23 @@ def main():
         headers = {"Authorization": f"Bearer {token}"}
         served = {}
         for _ in range(12):     # the session row is in PostgreSQL: every instance accepts it
-            me = client.get("/api/auth/me", headers=headers)
-            assert me.status_code == 200, me.text
-            served[me.headers["x-evireel-instance"]] = True
-            assert client.get("/api/videos", headers=headers).status_code == 200
+            for path in ("/api/auth/me", "/api/videos"):
+                response = client.get(path, headers=headers)
+                assert response.status_code == 200, response.text
+                served[response.headers["x-evireel-instance"]] = True
         report["session_on"] = sorted(served)
+        assert report["session_on"] == ["api-1", "api-2"], report
         subprocess.run(shlex.split(args.stop), check=True)
-        failures, ok = 0, 0
+        outcomes = {}
         for _ in range(20):
             try:
-                response = client.get("/api/videos", headers=headers)
-                ok += response.status_code == 200
-                failures += response.status_code != 200
-            except httpx.HTTPError:
-                failures += 1
+                key = str(client.get("/api/videos", headers=headers).status_code)
+            except httpx.HTTPError as exc:
+                key = type(exc).__name__
+            outcomes[key] = outcomes.get(key, 0) + 1
             time.sleep(0.1)
-        report["one_instance_stopped"] = {"ok": ok, "failed": failures, "instances": sorted(set(instances(client)))}
-        assert report["one_instance_stopped"]["instances"] == ["api-2"] and ok >= 18, report
+        report["one_instance_stopped"] = {"outcomes": outcomes, "instances": sorted(set(instances(client)))}
+        assert report["one_instance_stopped"]["instances"] == ["api-2"] and outcomes == {"200": 20}, report
         subprocess.run(shlex.split(args.start), check=True)
         assert wait_both(client), "the restarted instance must rejoin"
         report["after_restart"] = sorted(set(instances(client)))
