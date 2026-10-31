@@ -1,0 +1,100 @@
+{
+ "started_at": "2026-10-31T03:19:12-0400",
+ "git": {
+  "commit": "294366164ecb01058d0e10cd29006ddb12a4794b",
+  "dirty": true
+ },
+ "environment": {
+  "python": "3.11.16",
+  "os": "Windows-10-10.0.26200-SP0",
+  "cpu_count": 32
+ },
+ "dataset": {
+  "path": "C:/Users/27316/.codex/.chatgpt-projects/g-p-6ad2333387008191a176fb9bf0ebccb3/work/EviReel/eval/synthetic/questions.jsonl",
+  "sha256": "d85dd257f3467fffd38e97b293dd315ce04baa426d79288b81deab137a9f93b2",
+  "split": "tune",
+  "questions": 17,
+  "by_split": {
+   "tune": 17
+  },
+  "by_category": {
+   "transcript": 6,
+   "visual": 4,
+   "cross_segment": 2,
+   "no_answer": 3,
+   "follow_up": 2
+  },
+  "by_label_source": {
+   "synthetic": 17
+  },
+  "by_tag": {
+   "zh_term": 3,
+   "code_symbol": 5
+  }
+ },
+ "fixture": {
+  "path": "C:/Users/27316/.codex/.chatgpt-projects/g-p-6ad2333387008191a176fb9bf0ebccb3/work/EviReel/eval/synthetic/fixture.json",
+  "sha256": "8964ef7d79ef717daed9ef19050d81ac54d2fad1d580a9adb7ea8f9cfd9e5e33"
+ },
+ "models": "simulator",
+ "configs": {
+  "auto": {
+   "sources": null,
+   "keyword": false,
+   "rerank": false,
+   "mode": "auto"
+  },
+  "auto_keyword": {
+   "sources": null,
+   "keyword": true,
+   "rerank": false,
+   "mode": "auto"
+  }
+ },
+ "top_k": 5,
+ "followup": "history",
+ "repeat": 1,
+ "metric_tolerance_s": 2.0,
+ "caps": {
+  "max_calls": null,
+  "max_tokens": null
+ },
+ "not_run": {},
+ "warm_up": "one untimed query per config and video before measuring (not in results or usage)",
+ "model_identities": {
+  "embedding": {
+   "backend": "e4-lexical-simulator",
+   "dim": 512,
+   "encoding_version": 1
+  },
+  "rerank": "sim-rerank",
+  "vlm": "sim-vlm",
+  "llm": "sim-llm",
+  "note": "deterministic simulator: scores verify the tool, not answer quality"
+ },
+ "videos": {
+  "algo": {
+   "video_id": "v_4a6b8c981b44433b9aec9f027a54153a",
+   "generation": "ac8f2fd0116f4f4880138bcb0cf4cba1",
+   "transcript_version": "7438d44669b34e22b69877fffe7e59bb"
+  },
+  "py": {
+   "video_id": "v_30e11809108141af80eee0d62321b18e",
+   "generation": "3d30366ccb324ba5aae06f8c35f84e20",
+   "transcript_version": "b7af4b05eef544a9a3f2e7beebea558e"
+  }
+ },
+ "settings": {
+  "retrieval_candidates_per_source": 20,
+  "retrieval_min_similarity": 0.05,
+  "retrieval_max_evidence": 24,
+  "retrieval_rrf_k": 60,
+  "retrieval_inspect_frames": 6,
+  "route_min_similarity": 0.3,
+  "route_min_keyword_coverage": 0.6,
+  "route_escalation_timeout_s": 60.0,
+  "model_id": "Qwen/Qwen3-VL-8B-Instruct",
+  "rerank_model": "rerank-v4.0-pro"
+ },
+ "finished_at": "2026-10-31T03:19:52-0400"
+}

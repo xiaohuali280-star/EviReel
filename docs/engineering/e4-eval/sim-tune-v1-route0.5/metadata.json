@@ -1,0 +1,100 @@
+{
+ "started_at": "2026-10-31T03:05:27-0400",
+ "git": {
+  "commit": "294366164ecb01058d0e10cd29006ddb12a4794b",
+  "dirty": true
+ },
+ "environment": {
+  "python": "3.11.16",
+  "os": "Windows-10-10.0.26200-SP0",
+  "cpu_count": 32
+ },
+ "dataset": {
+  "path": "eval/synthetic/questions.jsonl",
+  "sha256": "d85dd257f3467fffd38e97b293dd315ce04baa426d79288b81deab137a9f93b2",
+  "split": "tune",
+  "questions": 17,
+  "by_split": {
+   "tune": 17
+  },
+  "by_category": {
+   "transcript": 6,
+   "visual": 4,
+   "cross_segment": 2,
+   "no_answer": 3,
+   "follow_up": 2
+  },
+  "by_label_source": {
+   "synthetic": 17
+  },
+  "by_tag": {
+   "zh_term": 3,
+   "code_symbol": 5
+  }
+ },
+ "fixture": {
+  "path": "eval/synthetic/fixture.json",
+  "sha256": "8964ef7d79ef717daed9ef19050d81ac54d2fad1d580a9adb7ea8f9cfd9e5e33"
+ },
+ "models": "simulator",
+ "configs": {
+  "auto": {
+   "sources": null,
+   "keyword": false,
+   "rerank": false,
+   "mode": "auto"
+  },
+  "auto_keyword": {
+   "sources": null,
+   "keyword": true,
+   "rerank": false,
+   "mode": "auto"
+  }
+ },
+ "top_k": 5,
+ "followup": "history",
+ "repeat": 1,
+ "metric_tolerance_s": 2.0,
+ "caps": {
+  "max_calls": null,
+  "max_tokens": null
+ },
+ "not_run": {},
+ "warm_up": "one untimed query per config and video before measuring (not in results or usage)",
+ "model_identities": {
+  "embedding": {
+   "backend": "e4-lexical-simulator",
+   "dim": 512,
+   "encoding_version": 1
+  },
+  "rerank": "sim-rerank",
+  "vlm": "sim-vlm",
+  "llm": "sim-llm",
+  "note": "deterministic simulator: scores verify the tool, not answer quality"
+ },
+ "videos": {
+  "algo": {
+   "video_id": "v_55dc7ad8ba1c4314925dcc9aa650ac4d",
+   "generation": "ee99e3511f5b4b2baca8d591a01d524c",
+   "transcript_version": "7907f7f2a17b484db84050441ca26968"
+  },
+  "py": {
+   "video_id": "v_be9884e9412f46edbfefc827d65df56f",
+   "generation": "c47bad0474214d25b3375a607c836b05",
+   "transcript_version": "562ec5d1bccf4182b97eae3c2f2361d7"
+  }
+ },
+ "settings": {
+  "retrieval_candidates_per_source": 20,
+  "retrieval_min_similarity": 0.05,
+  "retrieval_max_evidence": 24,
+  "retrieval_rrf_k": 60,
+  "retrieval_inspect_frames": 6,
+  "route_min_similarity": 0.5,
+  "route_min_keyword_coverage": 0.6,
+  "route_escalation_timeout_s": 60.0,
+  "model_id": "Qwen/Qwen3-VL-8B-Instruct",
+  "rerank_model": "rerank-v4.0-pro"
+ },
+ "finished_at": "2026-10-31T03:05:55-0400"
+}

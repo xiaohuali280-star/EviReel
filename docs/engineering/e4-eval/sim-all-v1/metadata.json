@@ -1,0 +1,133 @@
+{
+ "started_at": "2026-10-31T03:07:27-0400",
+ "git": {
+  "commit": "294366164ecb01058d0e10cd29006ddb12a4794b",
+  "dirty": true
+ },
+ "environment": {
+  "python": "3.11.16",
+  "os": "Windows-10-10.0.26200-SP0",
+  "cpu_count": 32
+ },
+ "dataset": {
+  "path": "eval/synthetic/questions.jsonl",
+  "sha256": "d85dd257f3467fffd38e97b293dd315ce04baa426d79288b81deab137a9f93b2",
+  "split": "all",
+  "questions": 32,
+  "by_split": {
+   "tune": 17,
+   "holdout": 15
+  },
+  "by_category": {
+   "transcript": 11,
+   "visual": 8,
+   "cross_segment": 4,
+   "no_answer": 5,
+   "follow_up": 4
+  },
+  "by_label_source": {
+   "synthetic": 32
+  },
+  "by_tag": {
+   "zh_term": 5,
+   "code_symbol": 10
+  }
+ },
+ "fixture": {
+  "path": "eval/synthetic/fixture.json",
+  "sha256": "8964ef7d79ef717daed9ef19050d81ac54d2fad1d580a9adb7ea8f9cfd9e5e33"
+ },
+ "models": "simulator",
+ "configs": {
+  "transcript": {
+   "sources": [
+    "transcript"
+   ],
+   "keyword": false,
+   "rerank": false,
+   "mode": "cheap"
+  },
+  "fusion": {
+   "sources": null,
+   "keyword": false,
+   "rerank": false,
+   "mode": "cheap"
+  },
+  "fusion_keyword": {
+   "sources": null,
+   "keyword": true,
+   "rerank": false,
+   "mode": "cheap"
+  },
+  "fusion_rerank": {
+   "sources": null,
+   "keyword": false,
+   "rerank": true,
+   "mode": "cheap"
+  },
+  "deep": {
+   "sources": null,
+   "keyword": false,
+   "rerank": false,
+   "mode": "deep"
+  },
+  "auto": {
+   "sources": null,
+   "keyword": false,
+   "rerank": false,
+   "mode": "auto"
+  },
+  "auto_keyword": {
+   "sources": null,
+   "keyword": true,
+   "rerank": false,
+   "mode": "auto"
+  }
+ },
+ "top_k": 5,
+ "followup": "history",
+ "repeat": 2,
+ "metric_tolerance_s": 2.0,
+ "caps": {
+  "max_calls": null,
+  "max_tokens": null
+ },
+ "not_run": {},
+ "warm_up": "one untimed query per config and video before measuring (not in results or usage)",
+ "model_identities": {
+  "embedding": {
+   "backend": "e4-lexical-simulator",
+   "dim": 512,
+   "encoding_version": 1
+  },
+  "rerank": "sim-rerank",
+  "vlm": "sim-vlm",
+  "llm": "sim-llm",
+  "note": "deterministic simulator: scores verify the tool, not answer quality"
+ },
+ "videos": {
+  "algo": {
+   "video_id": "v_955548f0f67e4d94bbb4ad3a2d2d95e2",
+   "generation": "22f79854561742aa83815582fe104935",
+   "transcript_version": "0c6b70be71c84718b975e47a5737197d"
+  },
+  "py": {
+   "video_id": "v_bdd35e5e10634d99bb4291c7f475e509",
+   "generation": "05a70645e8d4434aa0d912443c5751d4",
+   "transcript_version": "2968a7876ebf455199244586a2efae07"
+  }
+ },
+ "settings": {
+  "retrieval_candidates_per_source": 20,
+  "retrieval_min_similarity": 0.05,
+  "retrieval_max_evidence": 24,
+  "retrieval_rrf_k": 60,
+  "retrieval_inspect_frames": 6,
+  "route_min_similarity": 0.2,
+  "route_min_keyword_coverage": 0.6,
+  "route_escalation_timeout_s": 60.0,
+  "model_id": "Qwen/Qwen3-VL-8B-Instruct",
+  "rerank_model": "rerank-v4.0-pro"
+ },
+ "finished_at": "2026-10-31T03:13:42-0400"
+}
