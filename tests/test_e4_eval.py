@@ -59,7 +59,10 @@ def test_route_assessment_rules():
     # A question about the screen needs strong visual evidence, or an inspection.
     assert needs_visual('幻灯片上写的是什么') and not needs_visual('老师怎么解释的')
     visual = assess('幻灯片上写的是什么', [evidence('e1', 'transcript')], strong_text, s)
-    assert not visual.sufficient and 'visual_question_without_strong_visual_evidence' in visual.reasons
+    assert not visual.sufficient and 'visual_question_needs_inspection' in visual.reasons
+    # Strong event/frame evidence locates the moment but does not read the screen: still needs inspection.
+    strong_frame = {'a': [ranking('e2', 'frame', 0.9)]}
+    assert not assess('幻灯片上写的是什么', [evidence('e2', 'frame')], strong_frame, s).sufficient
     assert assess('幻灯片上写的是什么', [evidence('e1', 'transcript')], strong_text, s, inspected=True).sufficient
 
 
@@ -124,3 +127,117 @@ def test_simulator_run_end_to_end_records_results_metadata_and_routes(tmp_path):
     auto = summaries['auto']['overall']
     assert set(auto['routes']) <= {'cheap', 'deep', 'refused'} and auto['questions'] == 15
     assert (tmp_path / 'comparison.md').read_text(encoding='utf-8').count('Simulator run') == 1
+
+
+# ---------------------------------------------------------------------------- retrieval invariants on the fixture
+@pytest.fixture
+def corpus():
+    """The synthetic corpus in a temporary DATA_ROOT, served by a real IndexingService with the simulator."""
+    from vam.evaluation.runner import _environment
+    with _environment('simulator', None, fixture=FIXTURE, max_calls=None, max_tokens=None, overrides={}) as env:
+        yield env
+
+
+def search_once(service, video_id, query, *, sources=None, keyword=False, min_time=0, max_time=float('inf'),
+                mode='auto', answer_client=None):
+    import asyncio
+    from vam.evaluation import simulator
+
+    async def go():
+        async with service.retrieval_context(video_id) as ctx:
+            ctx.use_keyword = keyword
+            ctx.answer_client = answer_client or simulator.SimAnswerClient()
+            ctx.inspector = simulator.SimInspector(latency_s=0)
+            await ctx.search(query, top_k=5, sources=sources, min_time=min_time, max_time=max_time)
+            evidence = await ctx.prepare(query, top_k=5)
+            return ctx.snapshot, evidence, await ctx.answer(query, mode=mode)
+    return asyncio.run(go())
+
+
+def test_keyword_channel_recalls_chinese_terms_and_code_symbols(corpus):
+    _, service, _, ids, _ = corpus
+    from vam.memory.transcript import TranscriptStore
+    row = service.registry.get(ids['algo']['video_id'])
+    store = TranscriptStore(service.registry.asset(row['video_id'], f"memory/{row['transcript_generation']}.sqlite3"), row['video_id'])
+    term = store.keyword_search('并查集', top_k=3)['results']
+    assert (term[0]['start_t'], term[0]['coverage']) == (90.0, 1.0)              # "我们用并查集"
+    symbol = store.keyword_search('heapq.heappop', top_k=3)['results']
+    assert symbol[0]['start_t'] == 225.0                                          # the chunk naming heapq.heappop
+    assert store.keyword_search('Bellman-Ford 负权环', top_k=3)['results'] == []   # nothing shares a token
+
+
+def test_evidence_is_always_of_the_requested_video_and_its_pinned_versions(corpus):
+    _, service, _, ids, _ = corpus
+    vid = ids['algo']['video_id']
+    snapshot, evidence, answer = search_once(service, vid, 'Kruskal 用什么判断连通', keyword=True)
+    assert evidence and all(e['video_id'] == vid for e in evidence)
+    for e in evidence:
+        expected = snapshot.transcript_search_version if e['source'] == 'transcript' else snapshot.visual_generation
+        assert e['index_version'] == expected
+    assert all(c['video_id'] == vid for c in answer['citations'])
+
+
+def test_candidates_filtered_to_nothing_are_refused_without_a_model_call(corpus):
+    _, service, ledger, ids, _ = corpus
+    ledger.current = 'empty-window'
+    _, evidence, answer = search_once(service, ids['algo']['video_id'], '并查集', min_time=470, max_time=478,
+                                      sources=['transcript'], keyword=True)
+    assert evidence == [] and answer['status'] == 'refused' and answer['route']['path'] == 'refused'
+    assert 'chat' not in ledger.usage('empty-window')['calls']                    # no answer model was called
+
+
+def test_a_new_transcript_version_never_lets_old_evidence_be_cited(corpus):
+    """After a new transcript version is published, a retrieval pins the new one; an answer citing evidence
+    of the old version (an id from an earlier retrieval) is rejected by citation validation."""
+    _, service, _, ids, backend = corpus
+    from vam.asr.chunker import Chunk, Segment
+    from vam.memory.transcript import TranscriptStore, embedding_fingerprint
+    vid = ids['algo']['video_id']
+    old_snapshot, old_evidence, _ = search_once(service, vid, '并查集', sources=['transcript'], keyword=True)
+    row = service.registry.get(vid)
+    store = TranscriptStore(service.registry.asset(vid, f"memory/{row['transcript_generation']}.sqlite3"), vid)
+    version = 'f' * 32
+    segment = Segment('s0', 90.0, 105.0, '判断连通我们改用并查集数据结构', 'zh', {}, '判断连通我们改用并查集数据结构', 90.0, 105.0, False)
+    store.stage(version=version, transcription_key='v2', source_sha256='1' * 64, asr_fingerprint='v2', chunk_config='v2',
+                embedding_identity=embedding_fingerprint(backend), segments=[segment],
+                chunks=[Chunk('c0', 90.0, 105.0, segment.text, ['s0'])], language='zh', metadata={})
+    store.publish(version, vectors=[backend._vector(segment.text)], dim=backend.dim)
+    stale_id = old_evidence[0]['evidence_id']
+
+    class CitesOldEvidence:
+        async def chat(self, messages, temperature=0, max_tokens=1600):
+            return json.dumps({'claims': [{'text': '用并查集', 'evidence_ids': [stale_id]}], 'warnings': []}), None
+    snapshot, evidence, answer = search_once(service, vid, '并查集', sources=['transcript'], keyword=True, mode='cheap',
+                                             answer_client=CitesOldEvidence())
+    assert snapshot.transcript_search_version == version != old_snapshot.transcript_search_version
+    assert all(e['index_version'] == version for e in evidence if e['source'] == 'transcript')
+    assert stale_id not in {e['evidence_id'] for e in evidence}
+    assert answer['status'] == 'uncertain' and answer['citations'] == []
+    assert any(w['code'] == 'answer_validation_failed' for w in answer['warnings'])
+
+
+def test_auto_escalates_visual_questions_and_uncertain_cheap_answers_once(corpus):
+    _, service, _, ids, _ = corpus
+    _, _, visual = search_once(service, ids['algo']['video_id'], '画面上写的作业提交平台是哪个？')
+    assert visual['route']['path'] == 'deep' and visual['route']['escalated'] and visual['route']['rounds'] == 1
+    assert visual['execution']['visual_checks']            # the frames were inspected before answering
+    _, _, cheap = search_once(service, ids['algo']['video_id'], '画面上写的作业提交平台是哪个？', mode='cheap')
+    assert cheap['status'] == 'refused' and not cheap['execution']['visual_checks']   # cheap never calls the VLM
+
+
+def test_search_api_accepts_answer_mode_and_keyword(corpus):
+    from fastapi.testclient import TestClient
+    from vam.server.app import create_app
+    settings, service, _, ids, backend = corpus
+    app = create_app(settings=settings, backend=backend)
+    with TestClient(app) as client:
+        vid = ids['algo']['video_id']
+        body = {'query': '红黑树的旋转操作怎么做', 'answer': True, 'answer_mode': 'auto', 'keyword': True, 'top_k': 5}
+        response = client.post(f'/api/videos/{vid}/search', json=body)
+        assert response.status_code == 200, response.text
+        data = response.json()
+        # Weak evidence, not a visual question: refused by rule, no model call needed.
+        assert data['status'] == 'refused' and data['route']['path'] == 'refused'
+        assert any(s.get('keyword') for s in data['execution']['searches'] if 'keyword' in s)
+        bad = client.post(f'/api/videos/{vid}/search', json=body | {'answer_mode': 'turbo'})
+        assert bad.status_code == 422

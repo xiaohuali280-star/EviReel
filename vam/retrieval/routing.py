@@ -12,7 +12,8 @@
 "Strong" evidence (the rules are deliberately simple and their thresholds are evaluated, not assumed):
 * a semantic channel scored it at least ROUTE_MIN_SIMILARITY, or
 * the keyword channel found at least ROUTE_MIN_KEYWORD_COVERAGE of the question's distinct tokens in it.
-"Sufficient" = at least one strong item, and for a visual question at least one strong frame/event item.
+"Sufficient" = at least one strong item, and for a visual question the frames have been inspected.
+A cheap answer the model marks uncertain is escalated once (inspection + a second answer) when frames exist.
 
 Every answer carries ``status``: ``answered``, ``uncertain`` (the model or the rules flagged insufficient
 evidence) or ``refused`` (no answer given); and ``route`` records the decisions, so the evaluation can
@@ -74,8 +75,10 @@ def assess(question, evidence, rankings, settings, *, inspected=False) -> Assess
         reasons.append('no_evidence')
     elif not strong:
         reasons.append('no_strong_evidence')
-    visual_ok = (not visual) or inspected or any(
-        e['source'] in {'frame', 'event'} for e in evidence if e['evidence_id'] in strong)
+    # A question about what is on screen is answered only after the frames were looked at: event summaries and
+    # frame similarity locate the moment but do not read the slide (E4 evaluation: answering visual questions
+    # on the cheap path abstained on every one of them, run e4-eval/sim-all-v1).
+    visual_ok = (not visual) or inspected
     if visual and not visual_ok:
-        reasons.append('visual_question_without_strong_visual_evidence')
+        reasons.append('visual_question_needs_inspection')
     return Assessment(sufficient=bool(strong) and visual_ok, strong=strong, needs_visual=visual, reasons=reasons)

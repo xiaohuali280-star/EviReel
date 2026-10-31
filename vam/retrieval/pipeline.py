@@ -395,13 +395,21 @@ class SearchContext:
             if first.sufficient:
                 route['path'] = 'cheap'
                 answer, citations, codes, ok = await self._grounded(question, evidence)
+                # Answer feedback: the model found the evidence insufficient -> one deeper round, if frames exist.
+                has_frames = any(e['related_frame_ids'] for e in evidence)
+                escalate = mode == 'auto' and (not ok or 'insufficient_evidence' in codes) and has_frames
+                route['cheap_answer_uncertain'] = escalate
             elif mode == 'cheap' or not (first.strong or first.needs_visual):
                 # Nothing strong (or no escalation allowed): refuse without a model call; sources still returned.
                 self.warn('insufficient_evidence')
                 route['path'] = 'refused'
                 answer = '证据不足，无法给出可核对的回答。请查看列出的原始片段。'
+                escalate = False
             else:
+                escalate = True
+            if escalate:
                 route.update(path='deep', escalated=True, rounds=1)
+                self.warnings = [w for w in self.warnings if w['code'] not in {'insufficient_evidence', 'answer_validation_failed'}]
                 try:
                     await asyncio.wait_for(self._inspect_evidence(question, evidence),
                                            self.settings.route_escalation_timeout_s)

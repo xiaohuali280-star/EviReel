@@ -21,6 +21,8 @@ import math
 import statistics
 
 TOLERANCE_S = 2.0
+CHANNEL_FAILURES = {'model_rate_limited', 'channel_search_failed', 'model_limiter_unavailable', 'model_deadline_exceeded',
+                    'visual_inspection_failed', 'visual_inspection_timeout', 'rerank_failed_fallback_rrf'}
 KS = (1, 3, 5)
 
 
@@ -109,6 +111,13 @@ def summarize(rows) -> dict:
             path = (r.get('route') or {}).get('path')
             routes[path] = routes.get(path, 0) + 1
         s['routes'] = routes
+    failures = {}
+    for r in rows:
+        for code in r.get('warnings') or []:
+            if code in CHANNEL_FAILURES:
+                failures[code] = failures.get(code, 0) + 1
+    s['channel_failures'] = failures   # throttled or failed channels: such a run's results are partial
+    s['errors'] = sum(1 for r in rows if r.get('error'))
     latency = [r['latency']['total_s'] for r in rows]
     retrieval = [r['latency']['retrieval_s'] for r in rows]
     s['latency_total_s'] = {'p50': _pct(latency, .5), 'p95': _pct(latency, .95), 'mean': _mean(latency)}

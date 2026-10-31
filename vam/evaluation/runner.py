@@ -170,12 +170,17 @@ def _environment(models, data_root, *, fixture, max_calls, max_tokens, overrides
     from vam.indexing.service import IndexingService
     temporary = None
     if models == 'simulator':
-        temporary = tempfile.TemporaryDirectory(prefix='evireel-eval-')
+        temporary = tempfile.TemporaryDirectory(prefix='evireel-eval-', ignore_cleanup_errors=True)
         data_root = Path(temporary.name) / 'data'
         settings = Settings(_env_file=None, data_root=str(data_root), enable_retrieval=True, rerank_enabled=False,
                             asr_enabled=False, query_include_latest_segment_video=False, study_auto_generate=False,
                             frame_store_path=str(Path(temporary.name) / 'default.sqlite3'), siliconflow_api_key='',
-                            openrouter_api_key='', dashscope_api_key='', model_prices='', **overrides)
+                            openrouter_api_key='', dashscope_api_key='', model_prices='',
+                            # The simulator has no provider quota to protect; rate windows would only make results
+                            # depend on timing. Real runs keep the configured limits (and report any throttling).
+                            model_rpm_global=-1, model_rpm_provider=-1, model_tpm_provider=-1, model_rpm_workspace=-1,
+                            model_inflight_provider=-1, model_inflight_workspace=-1, model_inflight_offline=-1,
+                            **overrides)
         backend = simulator.LexicalBackend()
     else:
         settings = Settings(data_root=str(data_root), **overrides)
@@ -194,6 +199,10 @@ def _environment(models, data_root, *, fixture, max_calls, max_tokens, overrides
     finally:
         gw.configure(previous)
         if temporary is not None:
+            # Shared read-only index handles keep their SQLite files open (Windows refuses to delete them).
+            import gc
+            service.readers.items.clear()
+            gc.collect()
             temporary.cleanup()
 
 
@@ -268,6 +277,10 @@ def run(*, dataset_path, out, configs, models, fixture=None, data_root=None, spl
     (out / 'metadata.json').write_text(json.dumps(metadata, ensure_ascii=False, indent=1, default=str), encoding='utf-8')
     (out / 'summary.json').write_text(json.dumps(summaries, ensure_ascii=False, indent=1, default=str), encoding='utf-8')
     (out / 'comparison.md').write_text(comparison(summaries, metadata), encoding='utf-8')
+    for part in ('tune', 'holdout'):
+        if any(part in s_['by_split'] for s_ in summaries.values()):
+            text = f'Split: **{part}**\n\n' + comparison(summaries, metadata, split=part)
+            (out / f'comparison-{part}.md').write_text(text, encoding='utf-8')
     return summaries, metadata
 
 
@@ -292,7 +305,8 @@ def comparison(summaries, metadata, split=None) -> str:
                      f"{_fmt(o['mrr'])} | {_fmt(o.get('citation_support_auto'), True)} | "
                      f"{_fmt(o.get('abstention_on_unanswerable'), True)} | {_fmt(o.get('false_abstention_on_answerable'), True)} | "
                      f"{_fmt(o.get('time_error_s_median'))} | {_fmt(o['latency_total_s']['p50'])} / {_fmt(o['latency_total_s']['p95'])} | "
-                     f"{calls:.1f} | {tokens:.0f} |")
+                     f"{calls:.1f} | {tokens:.0f} |"
+                     + (f" channel failures {o['channel_failures']}, errors {o['errors']}" if o.get('channel_failures') or o.get('errors') else ''))
     note = (f"\nmodels: **{metadata['models']}** · dataset {metadata['dataset']['questions']} questions "
             f"({metadata['dataset']['by_label_source']}) · commit {metadata['git']['commit']} · top_k {metadata['top_k']}\n")
     if metadata['models'] == 'simulator':
