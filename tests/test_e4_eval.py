@@ -503,3 +503,164 @@ def test_a_run_with_failed_agent_questions_is_marked_incomplete(tmp_path):
     assert '**agent is incomplete**' in (tmp_path / 'comparison.md').read_text(encoding='utf-8')
     assert metadata['model_identities']['consistent']
     assert {o['model'] for o in metadata['model_identities']['observed']} >= {'sim-planner', 'sim-llm'}
+
+
+# ---------------------------------------------------------------------------- run caps under concurrency (review 2)
+class GatedLedger(PlatformLedger):
+    """Platform ledger double whose reservation blocks until released (the PostgreSQL wait window), then
+    admits, refuses or raises."""
+    def __init__(self, outcome='admit'):
+        super().__init__()
+        import threading
+        self.entered, self.release, self.outcome, self.calls = threading.Event(), threading.Event(), outcome, 0
+
+    def reserve(self, call):
+        from vam.video_registry import DomainError
+        self.calls += 1
+        self.entered.set()
+        assert self.release.wait(10)
+        if self.outcome == 'refuse':
+            raise DomainError(429, 'model_budget_exceeded', 'workspace budget')
+        if self.outcome == 'raise':
+            raise RuntimeError('database unavailable')
+        self.events.append(('reserve', call.call_id))
+
+
+def cap_gateway(inner=None, **caps):
+    from vam.evaluation.runner import EvalLedger
+    from vam.gateway import ModelGateway
+    from vam.gateway.limiter import LocalLimiter
+    s = settings(model_rpm_global=-1, model_rpm_provider=-1, model_rpm_workspace=-1, model_tpm_provider=-1,
+                 model_inflight_provider=-1, model_inflight_workspace=-1, model_retry_base_s=0)
+    ledger = EvalLedger(s, inner=inner, **caps)
+    ledger.current = ('cfg', 0, 'q1')
+    return ModelGateway(s, LocalLimiter(s), ledger), ledger
+
+
+def provider(sent, *, tokens=10, error=None):
+    async def attempt():
+        sent.append(1)
+        if error is not None:
+            raise error
+        return 'ok', {'input_tokens': tokens, 'output_tokens': 0}
+    return attempt
+
+
+@pytest.mark.parametrize('caps', [{'max_calls': 1}, {'max_tokens': 10}], ids=['last_call', 'last_tokens'])
+def test_parallel_calls_cannot_both_take_the_last_share_of_the_run_budget(caps):
+    """The reviewer's probe: two calls race for the last call / the last 10 tokens while the platform
+    reservation of the first one is still pending. Only one is sent; the other's attempt never runs."""
+    import asyncio
+    from vam.runtime import run_sync
+    from vam.video_registry import DomainError
+    inner = GatedLedger()
+    gateway, ledger = cap_gateway(inner, **caps)
+    sent = []
+
+    async def race():
+        first = asyncio.create_task(gateway.run(operation='chat', model='m', attempt_fn=provider(sent),
+                                                est_input_tokens=10, attempts=1))
+        await run_sync(inner.entered.wait, 5)                  # the first call holds the budget, platform pending
+        second = await asyncio.gather(gateway.run(operation='chat', model='m', attempt_fn=provider(sent),
+                                                  est_input_tokens=10, attempts=1), return_exceptions=True)
+        inner.release.set()
+        return await first, second[0]
+    ok, refused = asyncio.run(race())
+    assert ok == 'ok' and isinstance(refused, DomainError) and refused.code == 'eval_budget_exceeded'
+    assert len(sent) == 1 and inner.calls == 1 and len(ledger.rows) == 1 and ledger._used() == 10
+
+
+def test_many_threads_never_exceed_the_run_caps():
+    import threading
+    from vam.video_registry import DomainError
+    gateway, ledger = cap_gateway(PlatformLedger(), max_calls=5, max_tokens=1000)
+    sent, refused, barrier = [], [], threading.Barrier(20)
+
+    def one():
+        barrier.wait()
+        try:
+            gateway.run_sync(operation='embedding', model='m', attempts=1, est_input_tokens=10,
+                             attempt_fn=lambda timeout: (sent.append(1), ('ok', {'input_tokens': 10, 'output_tokens': 0}))[1])
+        except DomainError as exc:
+            refused.append(exc.code)
+    threads = [threading.Thread(target=one) for _ in range(20)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(20)
+    assert len(sent) == 5 and refused == ['eval_budget_exceeded'] * 15 and len(ledger.rows) == 5
+
+
+@pytest.mark.parametrize('outcome', ['refuse', 'raise'])
+def test_a_platform_refusal_or_error_after_blocking_gives_the_run_budget_back(outcome):
+    """While the platform reservation blocks, the run budget is held (a competing call is refused); when the
+    platform then refuses or fails, the hold is released, the attempt never runs, and the next call fits."""
+    import asyncio
+    from vam.runtime import run_sync
+    from vam.video_registry import DomainError
+    inner = GatedLedger(outcome)
+    gateway, ledger = cap_gateway(inner, max_calls=1, max_tokens=10)
+    sent = []
+
+    async def go():
+        first = asyncio.create_task(gateway.run(operation='chat', model='m', attempt_fn=provider(sent),
+                                                est_input_tokens=10, attempts=1))
+        await run_sync(inner.entered.wait, 5)
+        with pytest.raises(DomainError):                       # budget held during the platform wait
+            await gateway.run(operation='chat', model='m', attempt_fn=provider(sent), est_input_tokens=10, attempts=1)
+        inner.release.set()
+        return (await asyncio.gather(first, return_exceptions=True))[0]
+    error = asyncio.run(go())
+    expected = DomainError if outcome == 'refuse' else RuntimeError
+    assert isinstance(error, expected) and sent == [] and ledger.rows == [] and ledger._used() == 0
+    inner.outcome = 'admit'
+    assert asyncio.run(gateway.run(operation='chat', model='m', attempt_fn=provider(sent), est_input_tokens=10,
+                                   attempts=1)) == 'ok' and sent == [1]
+
+
+def test_a_call_cancelled_during_the_platform_reservation_is_never_sent_and_is_closed():
+    import asyncio
+    from vam.runtime import run_sync
+    inner = GatedLedger()
+    gateway, ledger = cap_gateway(inner, max_calls=2, max_tokens=20)
+    sent = []
+
+    async def go():
+        task = asyncio.create_task(gateway.run(operation='chat', model='m', attempt_fn=provider(sent),
+                                               est_input_tokens=10, attempts=1))
+        await run_sync(inner.entered.wait, 5)
+        task.cancel()
+        await asyncio.sleep(0.05)
+        inner.release.set()                                    # the reservation completes in its thread
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    asyncio.run(go())
+    assert sent == [] and [r['status'] for r in ledger.rows] == ['failed']
+    assert ledger.rows[0]['error'] == 'cancelled_before_send' and ledger._used() == 0
+    assert inner.events[-1] == ('fail', ledger.rows[0]['call_id'], 'cancelled_before_send')
+
+
+def test_settled_failed_and_unknown_outcomes_count_against_the_run_budget_as_recorded():
+    """settled: the billed tokens; failed (certainly not billed): no tokens, still an attempt; unknown (may
+    have been billed): the estimate."""
+    import asyncio
+    from vam.gateway import ProviderError
+    from vam.video_registry import DomainError
+    gateway, ledger = cap_gateway(PlatformLedger(), max_calls=4, max_tokens=25)
+    sent = []
+
+    def call(attempt):
+        return asyncio.run(gateway.run(operation='chat', model='m', attempt_fn=attempt, est_input_tokens=10, attempts=1))
+    assert call(provider(sent, tokens=3)) == 'ok' and ledger._used() == 3            # settled: billed, not estimate
+    with pytest.raises(ProviderError):
+        call(provider(sent, error=ProviderError('provider_http_400', status=400, retryable=False, sent=False)))
+    assert ledger._used() == 3 and len(ledger.rows) == 2                            # failed: 0 tokens, 1 call
+    with pytest.raises(ProviderError):
+        call(provider(sent, error=ProviderError('provider_timeout', retryable=True, sent=True)))
+    assert ledger._used() == 13                                                     # unknown: the estimate
+    assert [r['status'] for r in ledger.rows] == ['settled', 'failed', 'unknown']
+    with pytest.raises(DomainError) as cap:                                         # 13 + 20 > 25: not sent
+        asyncio.run(gateway.run(operation='chat', model='m', attempt_fn=provider(sent), est_input_tokens=20, attempts=1))
+    assert cap.value.code == 'eval_budget_exceeded' and len(sent) == 3
+    usage = ledger.usage(('cfg', 0, 'q1'))
+    assert usage['attempts'] == 3 and usage['unknown_outcomes'] == 1 and usage['input_tokens'] == 13

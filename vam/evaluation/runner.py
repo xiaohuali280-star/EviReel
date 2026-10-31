@@ -18,6 +18,7 @@ import os
 import platform
 import subprocess
 import tempfile
+import threading
 import time
 from contextlib import contextmanager
 from decimal import Decimal
@@ -56,58 +57,83 @@ class EvalLedger:
     cap would be passed -- the call is never sent).
 
     ``inner`` is the platform's own ledger (PgLedger in platform mode): every reservation, settlement, failure
-    and unknown outcome goes there first, so the workspace budget, the persistent record and the reconciler see
-    evaluation calls exactly like API calls. The run caps are checked before the inner reservation; a refusal by
-    the inner ledger (workspace budget) is raised unchanged and no evaluation row is written."""
+    and unknown outcome goes there too, so the workspace budget, the persistent record and the reconciler see
+    evaluation calls exactly like API calls.
+
+    Concurrency (gateway calls run in parallel threads): the cap check and the local hold are one step under
+    ``_lock``. The hold (a ``reserving`` row counted at its estimate) exists before the possibly blocking inner
+    reservation, so a parallel call sees the budget as taken; if the inner ledger refuses or raises, the hold is
+    removed again and the call is never sent. Settle / fail / unknown and every read of the rows take the same
+    lock. Budget per row: reserving / reserved / unknown count their estimate, settled its billed tokens
+    (``billed_tokens``), failed 0 tokens; every row counts as one call, failed ones included (an attempt)."""
 
     def __init__(self, settings, *, inner=None, max_calls=None, max_tokens=None):
         self.settings, self.inner, self.max_calls, self.max_tokens = settings, inner, max_calls, max_tokens
         self.rows, self.current = [], None
+        self._lock = threading.Lock()
 
     @property
     def persistent(self):
         return bool(getattr(self.inner, 'persistent', False))
 
-    def _used(self):
+    def _tokens_held(self):
         return sum(sum(billed_tokens(r)) for r in self.rows if r['status'] != 'failed')
+
+    def _used(self):
+        with self._lock:
+            return self._tokens_held()
 
     def reserve(self, call):
         from vam.gateway.ledger import price_basis
-        if self.max_calls is not None and len(self.rows) >= self.max_calls:
-            raise DomainError(429, 'eval_budget_exceeded', 'Evaluation call cap reached')
-        if self.max_tokens is not None and self._used() + call.est_input_tokens + call.est_output_tokens > self.max_tokens:
-            raise DomainError(429, 'eval_budget_exceeded', 'Evaluation token cap reached')
-        if self.inner is not None:
-            self.inner.reserve(call)
         basis, prices = price_basis(self.settings, call.model)
-        self.rows.append({'call_id': call.call_id, 'question': self.current, 'operation': call.operation, 'model': call.model,
-                          'provider': call.provider, 'workspace': call.workspace, 'attempt': call.attempt,
-                          'status': 'reserved', 'est_in': call.est_input_tokens, 'est_out': call.est_output_tokens,
-                          'input_tokens': None, 'output_tokens': None, 'usage_source': None, 'prices': prices,
-                          'price_basis': basis})
+        row = {'call_id': call.call_id, 'question': self.current, 'operation': call.operation, 'model': call.model,
+               'provider': call.provider, 'workspace': call.workspace, 'attempt': call.attempt,
+               'status': 'reserving', 'est_in': call.est_input_tokens, 'est_out': call.est_output_tokens,
+               'input_tokens': None, 'output_tokens': None, 'usage_source': None, 'prices': prices,
+               'price_basis': basis}
+        with self._lock:
+            if self.max_calls is not None and len(self.rows) >= self.max_calls:
+                raise DomainError(429, 'eval_budget_exceeded', 'Evaluation call cap reached')
+            if self.max_tokens is not None and \
+                    self._tokens_held() + call.est_input_tokens + call.est_output_tokens > self.max_tokens:
+                raise DomainError(429, 'eval_budget_exceeded', 'Evaluation token cap reached')
+            self.rows.append(row)        # holds this run's budget while the platform ledger decides
+        if self.inner is not None:
+            try:
+                self.inner.reserve(call)
+            except BaseException:
+                # Workspace budget refused, database error, interruption: nothing was reserved upstream and
+                # nothing will be sent -- give the run's budget back.
+                with self._lock:
+                    self.rows.remove(row)
+                raise
+        with self._lock:
+            row['status'] = 'reserved'
 
     def _row(self, call):
         return next((r for r in reversed(self.rows) if r['call_id'] == call.call_id), None)
 
-    def _update(self, call, **fields):
-        row = self._row(call)
-        if row is not None:
-            row.update(fields)
+    def _close(self, call, inner_close, **fields):
+        """Platform ledger first (the record), then the local row -- even when the platform write fails, so the
+        run's budget follows the outcome the gateway observed."""
+        try:
+            if self.inner is not None:
+                inner_close()
+        finally:
+            with self._lock:
+                row = self._row(call)
+                if row is not None:
+                    row.update(fields)
 
     def settle(self, call, input_tokens, output_tokens, source):
-        if self.inner is not None:
-            self.inner.settle(call, input_tokens, output_tokens, source)
-        self._update(call, status='settled', input_tokens=input_tokens, output_tokens=output_tokens, usage_source=source)
+        self._close(call, lambda: self.inner.settle(call, input_tokens, output_tokens, source), status='settled',
+                    input_tokens=input_tokens, output_tokens=output_tokens, usage_source=source)
 
     def fail(self, call, code):
-        if self.inner is not None:
-            self.inner.fail(call, code)
-        self._update(call, status='failed', error=code)
+        self._close(call, lambda: self.inner.fail(call, code), status='failed', error=code)
 
     def unknown(self, call, code):
-        if self.inner is not None:
-            self.inner.unknown(call, code)
-        self._update(call, status='unknown', error=code)
+        self._close(call, lambda: self.inner.unknown(call, code), status='unknown', error=code)
 
     def reconcile(self):
         return self.inner.reconcile() if self.inner is not None else 0
@@ -115,13 +141,16 @@ class EvalLedger:
     def observed_models(self):
         """(operation, provider, model) the gateway actually saw, with the price basis each was charged on."""
         seen = {}
-        for r in self.rows:
+        with self._lock:
+            rows = [dict(r) for r in self.rows]
+        for r in rows:
             seen.setdefault((r['operation'], r['provider'], r['model']), r['price_basis'])
         return [{'operation': o, 'provider': p, 'model': m, 'price_basis': b} for (o, p, m), b in sorted(seen.items())]
 
     def usage(self, question):
         from vam.gateway.ledger import cost_of
-        rows = [r for r in self.rows if r['question'] == question]
+        with self._lock:
+            rows = [dict(r) for r in self.rows if r['question'] == question]
         calls, tin, tout, cost, known = {}, 0, 0, Decimal(0), True
         for r in rows:
             calls[r['operation']] = calls.get(r['operation'], 0) + 1

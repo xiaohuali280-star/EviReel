@@ -221,6 +221,10 @@ class ModelGateway:
         base = min(self.settings.model_retry_cap_s, self.settings.model_retry_base_s * 2 ** (number - 1))
         return min(max(exc.retry_after or 0, random.uniform(0, base)), remaining)
 
+    def _unsent(self, call, permit, limiter):
+        self.ledger.fail(call, 'cancelled_before_send')
+        limiter.release(permit)
+
     def _caller_error(self, call, permit, limiter):
         self.ledger.unknown(call, 'caller_error')
         limiter.release(permit)
@@ -260,7 +264,19 @@ class ModelGateway:
                     await asyncio.sleep(pause)
                 self._leave_wait(run)
                 permit, limiter = admitted
-                budget = await run_sync(self._reserve, run, call, permit, limiter)
+                reserved = []
+
+                def reserve():
+                    reserved.append(self._reserve(run, call, permit, limiter))
+                    return reserved[0]
+                try:
+                    budget = await run_sync(reserve)
+                except asyncio.CancelledError:
+                    # Cancelled while the reservation ran in its thread (run_sync waited for it): if it was
+                    # granted, nothing was sent -- close it as failed and give the permit back.
+                    if reserved:
+                        await run_sync(self._unsent, call, permit, limiter)
+                    raise
                 try:
                     try:
                         result, usage = await asyncio.wait_for(attempt_fn(), budget)

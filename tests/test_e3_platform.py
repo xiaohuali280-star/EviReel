@@ -605,9 +605,32 @@ def test_a_real_evaluation_run_uses_the_platform_leases_ledger_workspace_and_obj
             assert cap.value.code == "eval_budget_exceeded"
             assert len(pg_rows(app, "SELECT 1 FROM model_usage WHERE model='probe-model'")) == 2   # never reserved
 
+            # Review 2: four threads race for the last call of the run; the PostgreSQL reservation is the
+            # slow part. Exactly one is reserved in PG and sent; the others never run their attempt.
+            import threading
+            ledger.max_calls, sent, codes = len(ledger.rows) + 1, [], []
+            barrier = threading.Barrier(4)
+
+            def racer():
+                barrier.wait()
+                try:
+                    with model_scope(workspace, "interactive"):
+                        get_gateway().run_sync(operation="chat", model="probe-model", attempts=1, est_input_tokens=1,
+                                               attempt_fn=lambda timeout: (sent.append(1), ("ok", None))[1])
+                except DomainError as exc:
+                    codes.append(exc.code)
+            threads = [threading.Thread(target=racer) for _ in range(4)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join(30)
+            assert len(sent) == 1 and codes == ["eval_budget_exceeded"] * 3
+            assert len(pg_rows(app, "SELECT 1 FROM model_usage WHERE model='probe-model'")) == 3
+            assert {r["question"] for r in ledger.rows} == {("cfg", 0, "q1")}   # attribution kept
+
             ledger.max_calls = None
             with app.state.platform.db.transaction() as conn:          # the workspace budget still applies
                 conn.execute("INSERT INTO model_budgets(workspace_id, daily_token_limit) VALUES (%s, 12)", (workspace,))
             with pytest.raises(DomainError) as budget:
                 probe(1)
-            assert budget.value.code == "model_budget_exceeded" and len(ledger.rows) == 2
+            assert budget.value.code == "model_budget_exceeded" and len(ledger.rows) == 3

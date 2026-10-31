@@ -1,6 +1,6 @@
 # E4 交付：评测驱动的检索优化与面试交付
 
-状态：**整改完成，待复验**（首轮验收 `E4_ACCEPTANCE_REVIEW_20261031.md`：部分完成、暂不通过，P1×1、P2×2，另有两项建议和一处文档表述）。代码提交与 CI 见 `STATUS.md`；评测方法和结果见 `EVALUATION.md`；演示见 `DEMO.md`；面试材料见 `INTERVIEW.md`。
+状态：**第二轮整改完成，待复验**（首轮验收 `E4_ACCEPTANCE_REVIEW_20261031.md`：部分完成、暂不通过，P1×1、P2×2，另有两项建议和一处文档表述；第二轮验收 `E4_REACCEPTANCE_REVIEW_20261031.md`：原三项关闭，新增 P2×1，见第 0.1 节）。代码提交与 CI 见 `STATUS.md`；评测方法和结果见 `EVALUATION.md`；演示见 `DEMO.md`；面试材料见 `INTERVIEW.md`。
 
 ## 0. 首轮验收整改
 
@@ -14,6 +14,12 @@
 | 文档：`INTERVIEW.md` 写“每个阶段都经过独立验收”；简历数字缺少“模型模拟器”限定 | 改为“E1–E3 已验收、E4 整改后待复验”；E3 性能数字在介绍和简历条目里都注明“模型调用为模拟器，非真实供应商性能” | — |
 
 整改过程中顺带发现并修正：多轮循环的轮次上限读的是进程全局设置，而不是本次检索上下文的设置（与 P1 的配置不一致是同一类问题），现改为读上下文的设置。
+
+### 0.1 第二轮验收整改：并行调用突破本轮上限
+
+| 问题 | 整改 | 验证 |
+| --- | --- | --- |
+| **P2** `EvalLedger.reserve` 先检查上限、再做可能阻塞的平台预占、最后才登记，中间没有互斥。两个并行调用会看到同样的剩余额度，平台预占返回后都被发送（验收探针：上限 1 次 / 10 token，实际 2 次 / 20 token） | **检查和占用合为一步**：在锁内检查调用次数和 token 上限，并立即写入一条 `reserving` 行，按估算占住额度；之后才在锁外做平台预占（可能阻塞，不持锁，不会把并行调用串行化）。平台拒绝（工作区预算）、抛异常或被中断时，在锁内删除这条行、归还额度，调用不会发送。结算、失败、未知结果和所有读取都用同一把锁；平台账本写入失败时本地行仍按网关观察到的结果关闭。额度口径：预占中、已预占、未知结果按估算计，已结算按实际计费 token，失败为 0 token，每行都计 1 次调用（失败的尝试也算）。<br>**取消**：调用方在平台预占进行时被取消，预占仍会在线程里完成（`run_sync` 会等它结束）。此前网关不会关闭这笔预占：PG 行要等过期后由对账程序标为未知结果，本地行一直按估算占着额度。现在网关在预占已完成的情况下把它记为失败（`cancelled_before_send`）并释放限流许可，调用不会发送。这是 `vam/gateway/__init__.py` 中异步入口的局部改动，同步入口没有这个时间窗。E3 的共享限流、持久账本和工作区预算不变 | `test_e4_eval.py`：<br>· `test_parallel_calls_cannot_both_take_the_last_share_of_the_run_budget`（最后一次调用 / 最后一份 token，平台预占阻塞时第二个被拒）；<br>· `test_many_threads_never_exceed_the_run_caps`（20 个线程争 5 次额度）；<br>· `test_a_platform_refusal_or_error_after_blocking_gives_the_run_budget_back`（平台阻塞后拒绝 / 抛异常）；<br>· `test_a_call_cancelled_during_the_platform_reservation_is_never_sent_and_is_closed`；<br>· `test_settled_failed_and_unknown_outcomes_count_against_the_run_budget_as_recorded`；<br>每个用例都断言没拿到额度的 `attempt_fn` 没有执行。<br>`test_e3_platform.py`（真实 PostgreSQL）：4 个线程争最后一次额度，只有 1 个在 PG 中预占并发送，逐题归属和工作区预算仍然有效。<br>验收探针 `e4-second-cap-probe.py` 在新代码上：0 个 attempt 执行、0 行（探针里的屏障替身等不到第二方，抛错后额度被释放） |
 
 整改**没有**改变的事实：真实视频、人工标注、真实模型的质量 / 延迟 / 成本、人工引用复核仍然没有做。工具修好不等于真实效果已经验证。
 
