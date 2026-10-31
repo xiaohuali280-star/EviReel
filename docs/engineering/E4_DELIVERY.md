@@ -1,6 +1,8 @@
 # E4 交付：评测驱动的检索优化与面试交付
 
-状态：**第二轮整改完成，待复验**（首轮验收 `E4_ACCEPTANCE_REVIEW_20261031.md`：部分完成、暂不通过，P1×1、P2×2，另有两项建议和一处文档表述；第二轮验收 `E4_REACCEPTANCE_REVIEW_20261031.md`：原三项关闭，新增 P2×1，见第 0.1 节）。代码提交与 CI 见 `STATUS.md`；评测方法和结果见 `EVALUATION.md`；演示见 `DEMO.md`；面试材料见 `INTERVIEW.md`。
+状态：**工具与合成验证交付已验收通过**（第三轮 `E4_THIRD_ACCEPTANCE_REVIEW_20261031.md`，`09a370b`，Standards 0、Spec 0）。E4 的验收范围是“评测工具、合成验证与工程/面试交付”。真实视频、人工标签、真实模型效果、实际费用 / 延迟和人工引用审核仍待补齐，不在这次通过范围内；合成结果不能作为真实准确率提升或成本降低的证明。
+
+验收经过（首轮验收 `E4_ACCEPTANCE_REVIEW_20261031.md`：部分完成、暂不通过，P1×1、P2×2，另有两项建议和一处文档表述；第二轮验收 `E4_REACCEPTANCE_REVIEW_20261031.md`：原三项关闭，新增 P2×1，见第 0.1 节）。代码提交与 CI 见 `STATUS.md`；评测方法和结果见 `EVALUATION.md`；演示见 `DEMO.md`；面试材料见 `INTERVIEW.md`。
 
 ## 0. 首轮验收整改
 
@@ -19,7 +21,7 @@
 
 | 问题 | 整改 | 验证 |
 | --- | --- | --- |
-| **P2** `EvalLedger.reserve` 先检查上限、再做可能阻塞的平台预占、最后才登记，中间没有互斥。两个并行调用会看到同样的剩余额度，平台预占返回后都被发送（验收探针：上限 1 次 / 10 token，实际 2 次 / 20 token） | **检查和占用合为一步**：在锁内检查调用次数和 token 上限，并立即写入一条 `reserving` 行，按估算占住额度；之后才在锁外做平台预占（可能阻塞，不持锁，不会把并行调用串行化）。平台拒绝（工作区预算）、抛异常或被中断时，在锁内删除这条行、归还额度，调用不会发送。结算、失败、未知结果和所有读取都用同一把锁；平台账本写入失败时本地行仍按网关观察到的结果关闭。额度口径：预占中、已预占、未知结果按估算计，已结算按实际计费 token，失败为 0 token，每行都计 1 次调用（失败的尝试也算）。<br>**取消**：调用方在平台预占进行时被取消，预占仍会在线程里完成（`run_sync` 会等它结束）。此前网关不会关闭这笔预占：PG 行要等过期后由对账程序标为未知结果，本地行一直按估算占着额度。现在网关在预占已完成的情况下把它记为失败（`cancelled_before_send`）并释放限流许可，调用不会发送。这是 `vam/gateway/__init__.py` 中异步入口的局部改动，同步入口没有这个时间窗。E3 的共享限流、持久账本和工作区预算不变 | `test_e4_eval.py`：<br>· `test_parallel_calls_cannot_both_take_the_last_share_of_the_run_budget`（最后一次调用 / 最后一份 token，平台预占阻塞时第二个被拒）；<br>· `test_many_threads_never_exceed_the_run_caps`（20 个线程争 5 次额度）；<br>· `test_a_platform_refusal_or_error_after_blocking_gives_the_run_budget_back`（平台阻塞后拒绝 / 抛异常）；<br>· `test_a_call_cancelled_during_the_platform_reservation_is_never_sent_and_is_closed`；<br>· `test_settled_failed_and_unknown_outcomes_count_against_the_run_budget_as_recorded`；<br>每个用例都断言没拿到额度的 `attempt_fn` 没有执行。<br>`test_e3_platform.py`（真实 PostgreSQL）：4 个线程争最后一次额度，只有 1 个在 PG 中预占并发送，逐题归属和工作区预算仍然有效。<br>验收探针 `e4-second-cap-probe.py` 在新代码上：0 个 attempt 执行、0 行（探针里的屏障替身等不到第二方，抛错后额度被释放） |
+| **P2** `EvalLedger.reserve` 先检查上限、再做可能阻塞的平台预占、最后才登记，中间没有互斥。两个并行调用会看到同样的剩余额度，平台预占返回后都被发送（验收探针：上限 1 次 / 10 token，实际 2 次 / 20 token） | **检查和占用合为一步**：在锁内检查调用次数和 token 上限，并立即写入一条 `reserving` 行，按估算占住额度；之后才在锁外做平台预占（可能阻塞，不持锁，不会把并行调用串行化）。平台拒绝（工作区预算）、抛异常或被中断时，在锁内删除这条行、归还额度，调用不会发送。结算、失败、未知结果和所有读取都用同一把锁；平台账本写入失败时本地行仍按网关观察到的结果关闭。额度口径：预占中、已预占、未知结果按估算计，已结算按实际计费 token，失败为 0 token，每行都计 1 次调用（失败的尝试也算）。<br>**取消**：调用方在平台预占进行时被取消，预占仍会在线程里完成（`run_sync` 会等它结束）。此前网关不会关闭这笔预占：PG 行要等过期后由对账程序标为未知结果，本地行一直按估算占着额度。现在网关在预占已完成的情况下把它记为失败（`cancelled_before_send`）并释放限流许可，调用不会发送。这是 `vam/gateway/__init__.py` 中异步入口的局部改动，同步入口没有这个时间窗。E3 的共享限流、持久账本和工作区预算不变 | `test_e4_eval.py`：<br>· `test_parallel_calls_cannot_both_take_the_last_share_of_the_run_budget`（最后一次调用 / 最后一份 token，平台预占阻塞时第二个被拒）；<br>· `test_many_threads_never_exceed_the_run_caps`（20 个线程争 5 次额度）；<br>· `test_a_platform_refusal_or_error_after_blocking_gives_the_run_budget_back`（平台阻塞后拒绝 / 抛异常）；<br>· `test_a_call_cancelled_during_the_platform_reservation_is_never_sent_and_is_closed`；<br>· `test_settled_failed_and_unknown_outcomes_count_against_the_run_budget_as_recorded`；<br>每个用例都断言没拿到额度的 `attempt_fn` 没有执行。<br>`test_e3_platform.py`（真实 PostgreSQL）：4 个线程争最后一次额度，只有 1 个在 PG 中预占并发送，逐题归属和工作区预算仍然有效。<br>第二轮的屏障探针 `e4-second-cap-probe.py` 在新代码上 0 个 attempt 执行，但这是因为屏障等不到第二方而超时，不能单独证明修复；第三轮验收用允许获胜者正常完成的正向探针复测（8 个请求争 1 次调用或 10 token，均只有 1 个执行，其余在执行前被拒） |
 
 整改**没有**改变的事实：真实视频、人工标注、真实模型的质量 / 延迟 / 成本、人工引用复核仍然没有做。工具修好不等于真实效果已经验证。
 

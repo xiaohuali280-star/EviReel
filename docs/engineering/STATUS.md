@@ -1,8 +1,14 @@
 # 工程状态
 
-更新：2026-10-31　阶段：**E4 整改完成，待复验**（首轮验收：部分完成、暂不通过，P1×1、P2×2；第二轮验收：原三项关闭，新增 P2×1（并行调用突破本轮上限），已整改；CI 和自测通过不等于验收通过）。E1、E2、E3 已验收（E3：`53bbe0c`）。
+更新：2026-10-31　阶段：**E4 工具与合成验证交付已验收通过**（第三轮，`09a370b`，`E4_THIRD_ACCEPTANCE_REVIEW_20261031.md`）；**真实效果验证待补齐**。E1、E2、E3 已验收（E3：`53bbe0c`）。
 
-## E4（当前）
+## E4 验收结论
+
+第三轮验收通过：Standards 0、Spec 0，第二轮的 P2（并行调用突破本轮上限）已关闭。E4 的验收范围是“评测工具、合成验证与工程/面试交付”。真实视频、人工标签、真实模型效果、实际费用 / 延迟和人工引用审核仍待补齐，不在这次通过范围内。合成题集 + 模拟器的结果只证明工具和规则在工作，**不能**作为真实准确率提升或成本降低的证明。工具验收通过也不等于授权付费调用。
+
+验收经过：首轮部分完成、暂不通过（P1×1、P2×2）→ `84a85c6` 整改 → 第二轮原三项关闭、新增 P2×1 → `fb48b7c` 整改 → 第三轮通过。
+
+## E4
 
 - **代码**：`2943661`（暂停时的检查点）→ `0ed66d9`（评测工具修正、路由规则修订、补充测试）→ **`84a85c6`（首轮验收整改：real 评测复用平台装配、多轮 Agent 对照、视觉问题最终状态、零 token、路由字段）→ **`fb48b7c`（第二轮验收整改：本轮调用 / token 上限在并发下成立，平台预占拒绝、异常、取消时归还额度）**。整改明细见 `E4_DELIVERY.md` 第 0、0.1 节。设计、取舍、限制见 `E4_DELIVERY.md`；评测方法与结果见 `EVALUATION.md`；演示 `DEMO.md`；面试材料 `INTERVIEW.md`。
 - **真实评测未做**：
@@ -11,12 +17,12 @@
   - 没有模型预算授权，重排序 key 为空；
   - 没有调用任何付费模型。补齐步骤见 `EVALUATION.md` 第 6 节。
   - 工具修好不等于真实效果已验证。
-- **下一步**：等待 E4 复验。
+- **下一步**：等待真实评测的材料和预算授权（有授权的视频、人工标注、调用次数和 token 上限、重排序 key、模型价格），按 `EVALUATION.md` 第 6 节执行。在此之前不启动付费调用。
 
 | 类别 | 检查 | 结果 |
 | --- | --- | --- |
 | 模拟器评测（合成题集 32 题，整改后） | `docs/engineering/e4-eval/sim-all-v3/`，`84a85c6`，`dirty=false`，全部配置（含 `agent`）× 2 遍 | 通道失败 0，运行错误 0，没有不完整的配置，模型身份一致。结果只说明工具和路由规则在工作，不代表真实效果（`EVALUATION.md` 第 4、5 节） |
-| 本机第二轮整改后（`fb48b7c`），真实 PG 16 + MinIO 与无中间件测试一起 | 全量 `pytest tests`（E1 本地测试环境） | **342 passed, 24 skipped, 0 failed**；新增并发上限测试 7 个（含真实 PG 上 4 线程争最后一次额度）；验收探针 `e4-second-cap-probe.py` 在新代码上 0 个调用被执行 |
+| 本机第二轮整改后（`fb48b7c`），真实 PG 16 + MinIO 与无中间件测试一起 | 全量 `pytest tests`（E1 本地测试环境） | **342 passed, 24 skipped, 0 failed**；新增并发上限测试 7 个（含真实 PG 上 4 线程争最后一次额度）；验收方另用允许获胜者正常完成的正向探针复测：8 个请求争 1 次调用或 10 token，均只有 1 个执行（第二轮的屏障探针在修复后会因等不到第二方而超时，其“0 次执行”不能单独证明修复） |
 | CI `fb48b7c` | E1、CPU、E2、E3 | 四项**全部通过**：[E3](https://github.com/xiaohuali280-star/EviReel/actions/runs/41196830336) 测试 49 passed，PG 读模型回归 98，E1/E2 回归 50；[E2](https://github.com/xiaohuali280-star/EviReel/actions/runs/41196830318)；[CPU](https://github.com/xiaohuali280-star/EviReel/actions/runs/41196830351) 280 passed、浏览器 21；[E1](https://github.com/xiaohuali280-star/EviReel/actions/runs/41196830339) |
 | 本机首轮整改后，真实 PG 16 + MinIO 与无中间件测试一起 | 全量 `pytest tests`（E1 本地测试环境） | **335 passed, 24 skipped, 0 failed**（跳过的需要 Linux + RabbitMQ 或 Redis，由 CI 覆盖；另 1 个是 deep 模式没有单独升级时限的参数组合） |
 | CI `84a85c6`（整改后） | E1、CPU、E2、E3 | 四项**全部通过**：[E3](https://github.com/xiaohuali280-star/EviReel/actions/runs/41193905838) 测试 49 passed（含两个新的评测装配测试：真实 PG + MinIO、真实 Redis），PG 读模型回归 98，E1/E2 回归 50；[E2](https://github.com/xiaohuali280-star/EviReel/actions/runs/41193906022)；[CPU](https://github.com/xiaohuali280-star/EviReel/actions/runs/41193905787) 273 passed、vitest 42、浏览器 21；[E1](https://github.com/xiaohuali280-star/EviReel/actions/runs/41193906067) |
