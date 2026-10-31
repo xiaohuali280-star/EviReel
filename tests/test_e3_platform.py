@@ -57,6 +57,7 @@ def instances(tmp_path, infra, monkeypatch):  # noqa: F811
     def worker(**overrides):
         return WorkerContext(Settings(**values("a", **overrides)))
     start.worker = worker
+    start.values = values
     return start
 
 
@@ -550,3 +551,63 @@ def test_an_active_reader_still_blocks_the_claim(instances, media):
         assert not retired_row(app, vid, old)["claimed"]
         lease.release()
         assert service.sweep()["generations_removed"] == 1
+
+
+# ---------------------------------------------------------------------------- E4: the evaluation runner on the platform
+def test_a_real_evaluation_run_uses_the_platform_leases_ledger_workspace_and_object_restore(instances, media, tmp_path):
+    """E4 review P1: the real-mode evaluation environment is the API's wiring (vam.server.assembly). Its reads
+    hold PostgreSQL leases, its DATA_ROOT is rebuilt from object storage, its model calls are reserved in the
+    persistent ledger under the video's workspace (budget included), and the run caps sit on top. No provider
+    is called: the probe calls go through the gateway with a local attempt function."""
+    from vam.config import Settings
+    from vam.evaluation.runner import _environment
+    from vam.gateway import get_gateway, model_scope
+    from vam.video_registry import DomainError
+    _, app = instances("a")
+    with TestClient(app) as a:
+        alice, info = users(a, app, "alice")["alice"]
+        view = upload_video(a, alice, media["red"])
+        vid = view["video_id"]
+        assert drain_inline(instances.worker(), view["job_id"])["status"] == "succeeded"
+        values = instances.values("eval")
+        values.pop("data_root")
+        eval_root = tmp_path / "eval-data-root"                       # empty: everything comes from storage
+        with _environment("real", eval_root, fixture=None, max_calls=2, max_tokens=None,
+                          overrides=values) as (settings, service, ledger, _, _):
+            wiring = service.runtime.describe(service)
+            assert wiring | {"cache": None} == wiring | {
+                "platform": True, "coordination": "PgCoordinator", "ledger": "PgLedger", "ledger_persistent": True,
+                "evaluation_ledger_on_top": True, "workspace_of": True, "publications": True, "cache": None}
+            workspace = service.workspace_of(vid)
+            assert workspace == info["workspace_id"]
+
+            async def read():
+                async with service.retrieval_context(vid) as ctx:
+                    held = pg_rows(app, "SELECT holder FROM read_leases WHERE video_id=%s AND expires_at > now()", vid)
+                    return ctx.versions, held
+            versions, held = asyncio.run(read())
+            assert versions["visual"] and held                          # a lease other processes can see
+            assert service.publications.restored >= 1                   # restored into the empty DATA_ROOT
+
+            def probe(tokens):
+                with model_scope(workspace, "interactive"):
+                    return get_gateway().run_sync(operation="chat", model="probe-model", attempt_fn=lambda timeout: (
+                        "ok", {"input_tokens": tokens, "output_tokens": 0}), est_input_tokens=10)
+            ledger.current = ("cfg", 0, "q1")
+            assert probe(0) == "ok" and probe(5) == "ok"
+            rows = pg_rows(app, "SELECT workspace_id, status, input_tokens FROM model_usage WHERE model='probe-model' "
+                                "ORDER BY created_at")
+            assert [(r["workspace_id"], r["status"], r["input_tokens"]) for r in rows] == [
+                (workspace, "settled", 0), (workspace, "settled", 5)]
+            assert ledger.usage(("cfg", 0, "q1"))["input_tokens"] == 5   # 0 is a real report, not the estimate
+            with pytest.raises(DomainError) as cap:
+                probe(1)
+            assert cap.value.code == "eval_budget_exceeded"
+            assert len(pg_rows(app, "SELECT 1 FROM model_usage WHERE model='probe-model'")) == 2   # never reserved
+
+            ledger.max_calls = None
+            with app.state.platform.db.transaction() as conn:          # the workspace budget still applies
+                conn.execute("INSERT INTO model_budgets(workspace_id, daily_token_limit) VALUES (%s, 12)", (workspace,))
+            with pytest.raises(DomainError) as budget:
+                probe(1)
+            assert budget.value.code == "model_budget_exceeded" and len(ledger.rows) == 2

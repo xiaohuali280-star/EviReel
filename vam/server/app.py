@@ -76,8 +76,6 @@ def create_app(*, settings=None, backend=None, indexer=None, transcriber=None, r
     @asynccontextmanager
     async def lifespan(app):
         from vam import gateway as model_gateway
-        from vam.cache import LocalCache, RedisCache
-        from vam.coordination import PgCoordinator, instance_id, redis_client
         from vam.events import LocalEventBus, RedisEventBus
         platform = None
         if settings.pipeline_mode == "worker" and not settings.platform_enabled:
@@ -99,28 +97,17 @@ def create_app(*, settings=None, backend=None, indexer=None, transcriber=None, r
             # keep their sum under the configured limits.
             raise RuntimeError("MODEL_LIMITER_ON_REDIS_ERROR=local is only allowed for a single API process "
                                "without pipeline workers; use reject")
-        if settings.platform_enabled:
-            from vam.platform import build_platform
-            platform = await run_sync(build_platform, settings, store=object_store)
-        instance = instance_id(settings)
-        redis = redis_client(settings)
-        app.state.instance_id, app.state.redis = instance, redis
+        from vam.server.assembly import assemble
         service = IndexingService(settings, backend=backend, indexer=indexer, transcriber=transcriber, reranker=reranker)
         app.state.indexing = service
-        if platform is not None:
-            # Leases/tombstones/retired generations in PostgreSQL: shared with other API instances and workers.
-            service.coordination = PgCoordinator(platform.db, settings, instance)
-        gateway = model_gateway.build_gateway(settings, redis_client=redis, db=platform.db if platform else None)
+        # Leases, shared model limits + persistent ledger, cache, workspace ownership, object restore (E3);
+        # the same wiring is used by the offline evaluation runner (vam.server.assembly).
+        runtime = await run_sync(assemble, settings, service, object_store=object_store)
+        platform, instance, redis, gateway = runtime.platform, runtime.instance, runtime.redis, runtime.gateway
+        app.state.instance_id, app.state.redis = instance, redis
         model_gateway.configure(gateway)
         app.state.gateway = gateway
-        app.state.cache = (RedisCache(redis, settings) if redis is not None else LocalCache(settings)) if settings.cache_enabled else None
-        service.cache = app.state.cache
-        if platform is not None:
-            from vam.publication import PublicationCache, queue_unreferenced
-            service.workspace_of = platform.identity.video_workspace
-            if settings.publication_objects:
-                service.publications = PublicationCache(service.registry, platform.store)
-                service.queue_objects = lambda video_id, keys: queue_unreferenced(platform.db, keys, "video_deleted", video_id)
+        app.state.cache = service.cache
         events = RedisEventBus(redis, instance) if redis is not None else LocalEventBus()
         app.state.events = events
         if platform is not None and service.worker_mode:

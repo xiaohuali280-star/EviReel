@@ -63,7 +63,7 @@ def test_route_assessment_rules():
     # Strong event/frame evidence locates the moment but does not read the screen: still needs inspection.
     strong_frame = {'a': [ranking('e2', 'frame', 0.9)]}
     assert not assess('幻灯片上写的是什么', [evidence('e2', 'frame')], strong_frame, s).sufficient
-    assert assess('幻灯片上写的是什么', [evidence('e1', 'transcript')], strong_text, s, inspected=True).sufficient
+    assert assess('幻灯片上写的是什么', [evidence('e1', 'transcript')], strong_text, s, inspected_ids={'e1'}).sufficient
 
 
 # ---------------------------------------------------------------------------- metrics
@@ -241,3 +241,265 @@ def test_search_api_accepts_answer_mode_and_keyword(corpus):
         assert any(s.get('keyword') for s in data['execution']['searches'] if 'keyword' in s)
         bad = client.post(f'/api/videos/{vid}/search', json=body | {'answer_mode': 'turbo'})
         assert bad.status_code == 422
+
+
+
+# ---------------------------------------------------------------------------- visual questions: final status
+class CitesFirst:
+    """Answer double: always cites a valid evidence id and never reports insufficiency."""
+    def __init__(self, pick=lambda payload: payload['evidence'][0]['evidence_id']):
+        self.pick = pick
+
+    async def chat(self, messages, temperature=0, max_tokens=1600):
+        payload = json.loads(messages[-1]['content'])
+        return json.dumps({'claims': [{'text': '答案', 'evidence_ids': [self.pick(payload)]}], 'warnings': []}), None
+
+
+def ask_visual(service, video_id, question, *, mode, inspector, answer_client=None, drop_visual=False):
+    import asyncio
+
+    async def go():
+        async with service.retrieval_context(video_id) as ctx:
+            ctx.answer_client = answer_client or CitesFirst()
+            ctx.inspector = inspector
+            await ctx.search(question, top_k=5)
+            await ctx.prepare(question, top_k=5)
+            if drop_visual:
+                ctx.visual = None      # no usable frame store for the check
+            return await ctx.answer(question, mode=mode)
+    return asyncio.run(go())
+
+
+VISUAL_Q = '画面上写的作业提交平台是哪个？'
+
+
+@pytest.mark.parametrize('mode', ['auto', 'deep'])
+@pytest.mark.parametrize('case', ['failed', 'timeout', 'empty', 'no_frames'])
+def test_a_visual_question_is_not_answered_when_the_frames_were_not_actually_read(corpus, mode, case):
+    import asyncio
+    _, service, _, ids, _ = corpus
+    if case == 'timeout' and mode == 'deep':
+        pytest.skip('deep has no escalation deadline of its own (the request deadline applies)')
+    service.settings.route_escalation_timeout_s = 0.3
+
+    async def failing(frames, prompt):
+        raise RuntimeError('vlm down')
+
+    async def slow(frames, prompt):
+        await asyncio.sleep(5)
+        return 'late'
+
+    async def empty(frames, prompt):
+        return '   '
+    inspector = {'failed': failing, 'timeout': slow, 'empty': empty, 'no_frames': empty}[case]
+    answer = ask_visual(service, ids['algo']['video_id'], VISUAL_Q, mode=mode, inspector=inspector,
+                        drop_visual=case == 'no_frames')
+    expected = {'failed': 'visual_inspection_failed', 'timeout': 'visual_inspection_timeout',
+                'empty': 'visual_inspection_empty', 'no_frames': 'visual_inspection_unavailable'}[case]
+    # The answer double returned a valid citation and no insufficiency flag: still not "answered".
+    assert answer['citations'] and answer['status'] == 'uncertain'
+    assert expected in answer['route']['status_reasons']
+    assert any(w['code'] == 'visual_evidence_unverified' for w in answer['warnings'])
+    if mode == 'auto':
+        assert answer['route']['after_escalation']['sufficient'] is False
+
+
+def test_a_visual_answer_must_cite_evidence_whose_frames_were_read(corpus):
+    from vam.evaluation import simulator
+    _, service, _, ids, _ = corpus
+    vid = ids['algo']['video_id']
+    def inspected(payload):
+        return payload['visual_checks'][0]['evidence_ids'][0]
+    read = ask_visual(service, vid, VISUAL_Q, mode='auto', inspector=simulator.SimInspector(latency_s=0),
+                      answer_client=CitesFirst(inspected))
+    assert read['status'] == 'answered' and read['route']['status_reasons'] == []
+    assert read['route']['after_escalation']['sufficient'] is True
+
+    def uninspected(payload):
+        seen = {eid for check in payload['visual_checks'] for eid in check['evidence_ids']}
+        return next(e['evidence_id'] for e in payload['evidence'] if e['evidence_id'] not in seen)
+    service.settings.retrieval_inspect_frames = 1      # one frame read: some evidence stays unread
+    other = ask_visual(service, vid, VISUAL_Q, mode='auto', inspector=simulator.SimInspector(latency_s=0),
+                       answer_client=CitesFirst(uninspected))
+    assert other['status'] == 'uncertain' and 'citations_not_visually_verified' in other['route']['status_reasons']
+
+
+def test_route_records_model_uncertainty_separately_from_the_escalation_decision(corpus):
+    _, service, _, ids, _ = corpus
+
+    class Unsure:
+        async def chat(self, messages, temperature=0, max_tokens=1600):
+            payload = json.loads(messages[-1]['content'])
+            return json.dumps({'claims': [{'text': '?', 'evidence_ids': [payload['evidence'][0]['evidence_id']]}],
+                               'warnings': ['insufficient_evidence']}), None
+    _, _, cheap = search_once(service, ids['algo']['video_id'], '并查集', sources=['transcript'], keyword=True,
+                              mode='cheap', answer_client=Unsure())
+    route = cheap['route']
+    assert route['path'] == 'cheap' and route['cheap_answer_uncertain'] is True and route['escalated'] is False
+    assert route['escalation_reason'] == 'not_allowed_in_cheap_mode' and cheap['status'] == 'uncertain'
+    _, _, auto = search_once(service, ids['algo']['video_id'], '并查集', sources=['transcript'], keyword=True,
+                             mode='auto', answer_client=Unsure())
+    assert auto['route']['cheap_answer_uncertain'] is True
+    assert auto['route']['escalated'] == (auto['route']['escalation_reason'] == 'cheap_answer_uncertain')
+
+
+# ---------------------------------------------------------------------------- evaluation ledger
+class Call:
+    def __init__(self, n, est_in=10, est_out=0, model='m'):
+        self.call_id, self.operation, self.model, self.provider, self.workspace = f'c{n}', 'chat', model, 'p', 'ws'
+        self.attempt, self.est_input_tokens, self.est_output_tokens = 1, est_in, est_out
+
+
+def test_eval_ledger_counts_a_reported_zero_as_zero_not_as_the_estimate():
+    from vam.evaluation.runner import EvalLedger
+    ledger = EvalLedger(settings(), max_tokens=25)
+    ledger.current = ('cfg', 0, 'q1')
+    for n in range(3):          # each estimated at 10 tokens, each reported by the provider as 0
+        ledger.reserve(Call(n))
+        ledger.settle(Call(n), 0, 0, 'provider')
+    assert ledger._used() == 0 and ledger.usage(('cfg', 0, 'q1'))['input_tokens'] == 0
+    ledger.reserve(Call(9, est_in=20))          # 0 + 20 <= 25: admitted (the estimate fallback would refuse)
+
+
+class PlatformLedger:
+    persistent = True
+
+    def __init__(self):
+        self.events, self.refuse = [], False
+
+    def reserve(self, call):
+        from vam.video_registry import DomainError
+        if self.refuse:
+            raise DomainError(429, 'model_budget_exceeded', 'workspace budget')
+        self.events.append(('reserve', call.call_id))
+
+    def settle(self, call, i, o, source):
+        self.events.append(('settle', call.call_id, i, o))
+
+    def fail(self, call, code):
+        self.events.append(('fail', call.call_id, code))
+
+    def unknown(self, call, code):
+        self.events.append(('unknown', call.call_id, code))
+
+    def reconcile(self):
+        return 7
+
+
+def test_eval_ledger_layers_caps_and_attribution_on_the_platform_ledger():
+    from vam.evaluation.runner import EvalLedger
+    from vam.video_registry import DomainError
+    inner = PlatformLedger()
+    ledger = EvalLedger(settings(), inner=inner, max_calls=2)
+    assert ledger.persistent and ledger.reconcile() == 7
+    ledger.current = ('cfg', 0, 'q1')
+    ledger.reserve(Call(1))
+    ledger.settle(Call(1), 3, 4, 'provider')
+    inner.refuse = True
+    with pytest.raises(DomainError, match='workspace budget'):     # the workspace budget still applies
+        ledger.reserve(Call(2))
+    assert len(ledger.rows) == 1                                   # refused upstream: no evaluation row
+    inner.refuse = False
+    ledger.reserve(Call(3))
+    ledger.unknown(Call(3), 'timeout')
+    with pytest.raises(DomainError) as cap:                        # run cap: refused before the platform
+        ledger.reserve(Call(4))
+    assert cap.value.code == 'eval_budget_exceeded' and ('reserve', 'c4') not in inner.events
+    assert inner.events == [('reserve', 'c1'), ('settle', 'c1', 3, 4), ('reserve', 'c3'), ('unknown', 'c3', 'timeout')]
+    assert ledger.usage(('cfg', 0, 'q1'))['unknown_outcomes'] == 1
+
+
+# ---------------------------------------------------------------------------- real-mode wiring (no provider call)
+def test_real_runs_refuse_to_bypass_the_platform_and_use_one_settings_object(tmp_path):
+    from vam import config as config_module
+    from vam.config import get_settings
+    from vam.evaluation.runner import _environment, model_identities
+    base = dict(_env_file=None, enable_retrieval=False, database_url='', redis_url='', siliconflow_api_key='',
+                embedding_model_override='probe-embedding-model')
+    before = config_module._settings
+    with pytest.raises(SystemExit, match='platform protections'):
+        with _environment('real', tmp_path / 'a', fixture=None, max_calls=1, max_tokens=1, overrides=base):
+            pass
+    assert config_module._settings is before
+    with _environment('real', tmp_path / 'b', fixture=None, max_calls=1, max_tokens=1, overrides=base,
+                      standalone=True) as (s, service, ledger, _, _):
+        assert get_settings() is s and s.embedding_model_id == 'probe-embedding-model'
+        assert service.runtime.describe(service)['evaluation_ledger_on_top'] is True
+        identities = model_identities(s, service, ledger, 'real')
+        assert identities['configured']['settings_are_process_settings'] is True
+        assert identities['configured']['chat_and_planner'] == s.model_id and identities['consistent']
+    assert config_module._settings is before
+
+
+# ---------------------------------------------------------------------------- multi-turn agent
+def agent_rows(corpus, planner_factory, *, questions=('syn-02', 'syn-04'), max_calls=None, **overrides):
+    import asyncio
+    from vam.evaluation import dataset as ds, simulator
+    from vam.evaluation.runner import CONFIGS, run_config
+    _, service, ledger, ids, _ = corpus
+    for key, value in overrides.items():
+        setattr(service.settings, key, value)
+    ledger.max_calls = max_calls
+    picked = [q for q in ds.load(DATASET) if q.id in questions]
+    sims = {'reranker': simulator.SimReranker(latency_s=0), 'answer': simulator.SimAnswerClient(latency_s=0),
+            'inspector': simulator.SimInspector(latency_s=0), 'planner': planner_factory}
+    video_ids = {k: v['video_id'] for k, v in ids.items()}
+    return asyncio.run(run_config(service, picked, video_ids, 'agent', CONFIGS['agent'], models='simulator', top_k=5,
+                                  followup='history', ledger=ledger, sims=sims))
+
+
+def test_agent_config_runs_the_tool_loop_with_the_same_versions_and_usage_records(corpus):
+    from vam.evaluation import simulator
+    rows = agent_rows(corpus, lambda goal: simulator.SimPlanner(goal, latency_s=0))
+    assert len(rows) == 2
+    for row in rows:
+        assert row['error'] is None and row['agent']['planner_turns'] == 2 and row['agent']['searches'] >= 1
+        assert row['agent']['inspections'] >= 1 and row['snapshot_versions']['visual']
+        assert row['usage']['calls']['chat'] >= 3 and row['answer']['status'] in {'answered', 'uncertain'}
+        assert row['route']['mode'] == 'deep'
+
+
+def test_agent_turns_and_candidates_are_bounded(corpus):
+    from vam.evaluation import simulator
+
+    class Greedy(simulator.SimPlanner):
+        async def chat(self, messages, temperature=0, max_tokens=500):
+            self.turn = 0       # never answers: always another search, asking for 200 candidates
+            text, usage = await super().chat(messages, temperature, max_tokens)
+            plan = json.loads(text)
+            plan['queries'][0]['top_k'] = 200
+            return json.dumps(plan), usage
+    row = agent_rows(corpus, lambda goal: Greedy(goal, latency_s=0), questions=('syn-02',), retrieval_max_turns=3)[0]
+    assert row['error'] is None and row['agent']['planner_turns'] == 3            # RETRIEVAL_MAX_TURNS
+    assert 0 < row['agent']['max_candidates'] <= corpus[1].settings.retrieval_max_evidence
+
+
+def test_agent_timeout_budget_exhaustion_and_planner_failure_are_errors_not_answers(corpus):
+    import asyncio
+    from vam.evaluation import simulator
+
+    class Slow(simulator.SimPlanner):
+        async def chat(self, messages, temperature=0, max_tokens=500):
+            await asyncio.sleep(5)
+
+    class Broken(simulator.SimPlanner):
+        async def chat(self, messages, temperature=0, max_tokens=500):
+            raise RuntimeError('planner crashed')
+    timeout = agent_rows(corpus, Slow, questions=('syn-02',), conversation_request_timeout_s=0.5)
+    assert timeout[0]['error'] == 'agent_timeout' and timeout[0]['answer']['status'] == 'error'
+    broken = agent_rows(corpus, Broken, questions=('syn-02',), conversation_request_timeout_s=60)
+    assert broken[0]['error'] == 'agent_failed' and broken[0]['agent']['exception'] == 'RuntimeError'
+    ledger = corpus[2]
+    budget = agent_rows(corpus, lambda goal: simulator.SimPlanner(goal, latency_s=0), max_calls=len(ledger.rows) + 3)
+    assert 'eval_budget_exceeded' in {r['error'] for r in budget}
+    assert all(r['answer']['status'] == 'error' for r in budget if r['error'])
+
+
+def test_a_run_with_failed_agent_questions_is_marked_incomplete(tmp_path):
+    from vam.evaluation.runner import run
+    summaries, metadata = run(dataset_path=DATASET, out=tmp_path, configs=['agent'], models='simulator',
+                              fixture=FIXTURE, split='holdout', max_calls=40)
+    assert 'not_run' not in metadata and metadata['incomplete']['agent']['errors'] > 0
+    assert '**agent is incomplete**' in (tmp_path / 'comparison.md').read_text(encoding='utf-8')
+    assert metadata['model_identities']['consistent']
+    assert {o['model'] for o in metadata['model_identities']['observed']} >= {'sim-planner', 'sim-llm'}

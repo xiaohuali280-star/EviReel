@@ -61,6 +61,7 @@ class SearchContext:
         # E4 injection points (evaluation simulator, tests); None = the configured providers via ModelGateway.
         self.answer_client = None    # .chat(messages, temperature=, max_tokens=) -> (text, usage)
         self.inspector = None        # async (frames, prompt) -> text
+        self.planner_client = None   # multi-turn agent planner, .chat(...) like answer_client
         self.source_priority = []
 
     def warn(self, code, source=None):
@@ -369,6 +370,38 @@ class SearchContext:
         if not self.inspections or not set(needed) <= covered:
             await self.inspect([legacy_hit(e) for e in evidence], inspect_k=len(evidence), prompt=question, joint=True)
 
+    def _read_evidence_ids(self):
+        """Evidence ids whose frames a visual check of this request actually read (non-empty result)."""
+        return {eid for check in self.inspections if (check.get('text') or '').strip() for eid in check['evidence_ids']}
+
+    def _status_reasons(self, question, route, citations, codes, ok):
+        """Why an answer is not ``answered`` (empty = answered). A visual question needs a citation whose frames
+        were read: a failed, timed-out or empty check, or no usable frame, leaves it uncertain even when the
+        model returned valid citation ids."""
+        from vam.retrieval.routing import needs_visual
+        reasons = []
+        if not ok:
+            reasons.append('answer_validation_failed')
+        if 'insufficient_evidence' in codes:
+            reasons.append('model_reported_insufficient_evidence')
+        if ok and not citations:
+            reasons.append('no_citations')
+        if route.get('after_escalation') and not route['after_escalation']['sufficient']:
+            reasons.append('insufficient_after_escalation')
+        if ok and needs_visual(question):
+            read = self._read_evidence_ids()
+            if not read:
+                warned = {w['code'] for w in self.warnings}
+                reasons.append(next((c for c in ('visual_inspection_timeout', 'visual_inspection_failed',
+                                                 'related_frames_unavailable', 'visual_inspection_unavailable')
+                                     if c in warned), 'visual_inspection_empty' if self.inspections else 'visual_not_inspected'))
+            elif not read & {c['evidence_id'] for c in citations}:
+                reasons.append('citations_not_visually_verified')
+            if reasons and reasons[-1] not in {'answer_validation_failed', 'model_reported_insufficient_evidence',
+                                               'no_citations', 'insufficient_after_escalation'}:
+                self.warn('visual_evidence_unverified')
+        return reasons
+
     async def answer(self, question, result=None, mode=None):
         """Grounded answer over the prepared evidence, by route (vam.retrieval.routing): ``deep`` inspects the
         evidence frames first, ``cheap`` never calls the VLM, ``auto`` decides by explicit rules."""
@@ -396,17 +429,25 @@ class SearchContext:
                 route['path'] = 'cheap'
                 answer, citations, codes, ok = await self._grounded(question, evidence)
                 # Answer feedback: the model found the evidence insufficient -> one deeper round, if frames exist.
+                uncertain = not ok or 'insufficient_evidence' in codes
                 has_frames = any(e['related_frame_ids'] for e in evidence)
-                escalate = mode == 'auto' and (not ok or 'insufficient_evidence' in codes) and has_frames
-                route['cheap_answer_uncertain'] = escalate
+                escalate = mode == 'auto' and uncertain and has_frames
+                # Two separate facts: what the model said, and what the router decided (and why).
+                route['cheap_answer_uncertain'] = uncertain
+                route['escalation_reason'] = ('cheap_answer_uncertain' if escalate else
+                                              None if not uncertain else
+                                              'not_allowed_in_cheap_mode' if mode == 'cheap' else 'no_related_frames')
             elif mode == 'cheap' or not (first.strong or first.needs_visual):
                 # Nothing strong (or no escalation allowed): refuse without a model call; sources still returned.
                 self.warn('insufficient_evidence')
                 route['path'] = 'refused'
                 answer = '证据不足，无法给出可核对的回答。请查看列出的原始片段。'
                 escalate = False
+                route['escalation_reason'] = ('not_allowed_in_cheap_mode' if mode == 'cheap' and (first.strong or first.needs_visual)
+                                              else None)
             else:
                 escalate = True
+                route['escalation_reason'] = 'visual_question' if first.needs_visual else 'strong_but_insufficient'
             if escalate:
                 route.update(path='deep', escalated=True, rounds=1)
                 self.warnings = [w for w in self.warnings if w['code'] not in {'insufficient_evidence', 'answer_validation_failed'}]
@@ -415,15 +456,15 @@ class SearchContext:
                                            self.settings.route_escalation_timeout_s)
                 except (TimeoutError, asyncio.TimeoutError):
                     self.warn('visual_inspection_timeout')
-                second = assess(question, evidence, self.rankings, self.settings, inspected=bool(self.inspections))
+                second = assess(question, evidence, self.rankings, self.settings, inspected_ids=self._read_evidence_ids())
                 route['after_escalation'] = second.as_dict()
                 answer, citations, codes, ok = await self._grounded(question, evidence)
         if route['path'] == 'refused':
-            status = 'refused'
-        elif not ok or 'insufficient_evidence' in codes or not citations:
-            status = 'uncertain'
+            status, reasons = 'refused', ['no_evidence' if not evidence else 'insufficient_evidence']
         else:
-            status = 'answered'
+            reasons = self._status_reasons(question, route, citations, codes, ok)
+            status = 'uncertain' if reasons else 'answered'
+        route['status_reasons'] = reasons
         return result | {'answer': answer, 'status': status, 'route': route, 'found': bool(evidence),
                          'best': evidence[0] if evidence else None, 'evidence': evidence, 'citations': citations,
                          'warnings': self.warnings, 'execution': {'versions': self.versions, 'searches': self.executions,

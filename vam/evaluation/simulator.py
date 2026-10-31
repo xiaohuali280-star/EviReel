@@ -6,6 +6,7 @@ accounting end to end, so the evaluation tool itself is verified before paid run
   characters; a frame's image carries its caption in a PNG text chunk, which is what gets "embedded".
 * ``SimReranker``   -- cosine of the same lexical vectors.
 * ``SimInspector``  -- a "VLM" that reads the frames' captions back.
+* ``SimPlanner``    -- a two-turn agent planner (search + inspect, then answer).
 * ``SimAnswerClient`` -- an "LLM" that cites the evidence sharing the most tokens with the question and flags
   insufficient evidence below an overlap threshold.
 
@@ -183,3 +184,29 @@ class SimAnswerClient:
         words = sorted({w for s in best for w in s[2]})
         text = '相关内容：' + '、'.join(words[:10])
         return {'claims': [{'text': text, 'evidence_ids': [s[1] for s in best]}], 'warnings': []}
+
+
+class SimPlanner:
+    """A "planner" for the multi-turn agent loop (vam.retrieval.agent_search): turn 1 searches the question and
+    inspects the top results, turn 2 answers (the product then replaces the draft with the grounded answer).
+    One instance per question; calls go through ModelGateway like the real planner's."""
+    model = 'sim-planner'
+
+    def __init__(self, goal, latency_s=0.3, inspect_k=2):
+        self.goal, self.latency_s, self.inspect_k, self.turn = goal, latency_s, inspect_k, 0
+
+    async def chat(self, messages, temperature=0, max_tokens=500):
+        from vam.gateway import get_gateway
+        self.turn += 1
+        plan = ({'action': 'search', 'thought': 'sim: search the question',
+                 'queries': [{'q': self.goal, 'top_k': 5, 'inspect_k': self.inspect_k}]} if self.turn == 1 else
+                {'action': 'answer', 'thought': 'sim: answer from what was found', 'response': 'draft'})
+        prompt = ''.join(m['content'] for m in messages)
+
+        async def attempt():
+            await asyncio.sleep(self.latency_s)
+            text = json.dumps(plan, ensure_ascii=False)
+            return text, {'input_tokens': _estimate(prompt), 'output_tokens': _estimate(text)}
+        text = await get_gateway().run(operation='chat', model=self.model, provider=PROVIDER, attempt_fn=attempt,
+                                       est_input_tokens=_estimate(prompt), est_output_tokens=120)
+        return text, None

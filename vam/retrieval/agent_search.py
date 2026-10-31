@@ -812,7 +812,7 @@ async def _legacy_search_generator(
 
     store = store_instance or default_store
     cfg = get_settings()
-    planner = OpenRouterClient(model_id=cfg.model_id)
+    planner = getattr(active_search.get(), "planner_client", None) or OpenRouterClient(model_id=cfg.model_id)
 
     t0 = time.time()
     goal = semantic
@@ -822,7 +822,7 @@ async def _legacy_search_generator(
     except Exception:
         max_turns = 20
     if active_search.get() is not None:
-        max_turns = min(max_turns, cfg.retrieval_max_turns)
+        max_turns = min(max_turns, active_search.get().settings.retrieval_max_turns)
     final_response = ""
     prev_unique_hits = 0
     stagnant_turns = 0

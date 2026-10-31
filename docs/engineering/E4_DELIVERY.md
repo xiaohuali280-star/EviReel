@@ -1,6 +1,21 @@
 # E4 交付：评测驱动的检索优化与面试交付
 
-状态：**待验收**。代码提交与 CI 见 `STATUS.md`；评测方法和结果见 `EVALUATION.md`；演示见 `DEMO.md`；面试材料见 `INTERVIEW.md`。
+状态：**整改完成，待复验**（首轮验收 `E4_ACCEPTANCE_REVIEW_20261031.md`：部分完成、暂不通过，P1×1、P2×2，另有两项建议和一处文档表述）。代码提交与 CI 见 `STATUS.md`；评测方法和结果见 `EVALUATION.md`；演示见 `DEMO.md`；面试材料见 `INTERVIEW.md`。
+
+## 0. 首轮验收整改
+
+| 问题 | 整改 | 验证 |
+| --- | --- | --- |
+| **P1** real 评测用新建的进程内限流 + 不持久的评测账本 + 本地租约，没有工作区归属和对象恢复；传入的模型配置与供应商实际读取的全局配置可能不同 | 把 API 启动时的平台装配抽成 `vam/server/assembly.py`，API 和评测共用：PostgreSQL 读租约、Redis 共享限流、PostgreSQL 用量账本（含工作区每日预算和未知结果对账）、查询向量缓存、视频所属工作区、对象存储恢复。评测账本改为**叠加**在平台账本上：先查本轮调用 / token 上限，再由平台账本预占，结算、失败、未知结果都先写平台账本，再记逐题归属。模型调用的工作区取视频所属工作区。没有 `DATABASE_URL` 时拒绝运行，除非显式 `--standalone`（只在没有其他进程使用该 DATA_ROOT 时）。real 模式把同一个 Settings 装为进程设置，供应商、网关、读取器和元数据用同一份配置；元数据记录配置的模型身份、网关实际看到的（操作, 供应商, 模型）及各自计价依据，以及两者是否一致 | `test_e3_platform.py::test_a_real_evaluation_run_uses_the_platform_leases_ledger_workspace_and_object_restore`（真实 PostgreSQL + MinIO：空 DATA_ROOT 从对象存储恢复、读取时 PG 中有租约、调用写入 `model_usage` 且归属视频工作区、本轮上限在平台预占前拒绝、工作区预算仍然生效）；`test_e3_redis.py::test_an_evaluation_run_shares_the_api_rate_window`（真实 Redis，CI）；`test_e4_eval.py` 中账本叠加、零 token、单一设置的单元测试 |
+| **P2** 多轮 Agent 对照没有实现，real 模式也直接跳过 | 新增 `agent` 配置：在同一检索上下文（固定版本、同一账本）里运行产品现有的多轮工具调用循环（`vam/retrieval/agent_search.py`，规划 → 检索 → 看帧 → 有依据的回答）。轮次受 `RETRIEVAL_MAX_TURNS`、候选受每通道候选数和 `RETRIEVAL_MAX_EVIDENCE`、看帧受 `RETRIEVAL_INSPECT_FRAMES`、每题受 `CONVERSATION_REQUEST_TIMEOUT_S`、调用受账本上限约束。规划模型可替换（`SearchContext.planner_client`；模拟器为两轮的 `SimPlanner`）。超时、预算耗尽、规划异常、没有最终结果都记为该题的错误而不是回答；有错误的配置在元数据和对比表中标为**不完整**。不再有“跳过但算完成”的配置 | `test_agent_config_runs_the_tool_loop…`、`test_agent_turns_and_candidates_are_bounded`、`test_agent_timeout_budget_exhaustion_and_planner_failure_are_errors_not_answers`、`test_a_run_with_failed_agent_questions_is_marked_incomplete` |
+| **P2** 视觉检查失败后仍可能标为 answered | 最终状态由规则决定，不只看模型自报：`answered` 需要回答通过校验、有引用、模型没报证据不足、升级后的评估为足够；需看画面的问题还要求本次请求真的读到了画面（检查返回非空），且至少一条引用指向读到的证据。检查失败、超时、没有可用帧、结果为空、引用的不是读过的证据，都标为 `uncertain`，原因写在 `route.status_reasons`，并加 `visual_evidence_unverified` 警告 | `test_a_visual_question_is_not_answered_when_the_frames_were_not_actually_read`（auto / deep × 失败、超时、空结果、无可用帧，回答替身都给合法引用）、`test_a_visual_answer_must_cite_evidence_whose_frames_were_read` |
+| 建议：零 token 被估算替换 | 抽出 `billed_tokens`：只有供应商没报用量（None）时才用估算，预算和报告用同一逻辑 | `test_eval_ledger_counts_a_reported_zero_as_zero_not_as_the_estimate` |
+| 建议：`cheap_answer_uncertain` 实际记录的是是否升级 | 分开记录：`cheap_answer_uncertain` 是模型是否报不确定；`escalated` 和 `escalation_reason`（`cheap_answer_uncertain`、`visual_question`、`strong_but_insufficient`、`not_allowed_in_cheap_mode`、`no_related_frames`）是路由决定 | `test_route_records_model_uncertainty_separately_from_the_escalation_decision` |
+| 文档：`INTERVIEW.md` 写“每个阶段都经过独立验收”；简历数字缺少“模型模拟器”限定 | 改为“E1–E3 已验收、E4 整改后待复验”；E3 性能数字在介绍和简历条目里都注明“模型调用为模拟器，非真实供应商性能” | — |
+
+整改过程中顺带发现并修正：多轮循环的轮次上限读的是进程全局设置，而不是本次检索上下文的设置（与 P1 的配置不一致是同一类问题），现改为读上下文的设置。
+
+整改**没有**改变的事实：真实视频、人工标注、真实模型的质量 / 延迟 / 成本、人工引用复核仍然没有做。工具修好不等于真实效果已经验证。
 
 ## 1. 一句话结论
 
@@ -31,14 +46,16 @@ E4 建成了可重跑的评测工具，并加了关键词通道和“低成本 /
   - 另写 `summary.json` 与 `comparison*.md`（全量 / 调参集 / 保留集）；
   - 每个配置先跑一次不计时的预热查询；
   - 可用 `--repeat` 重复测量，用 `--set` 覆盖设置（扫描阈值时用）。
-- **用量记账**：运行期间把评测专用账本（`EvalLedger`）装进 ModelGateway 的账本位置，每次模型尝试都记一行，按（配置, 重复轮次, 题目）归属。
-  - 真实运行时，同一账本在预占阶段执行调用次数和 token 上限，超限就不发送；
+- **用量记账**：运行期间评测账本（`EvalLedger`）占用 ModelGateway 的账本位置，每次模型尝试记一行，按（配置, 重复轮次, 题目）归属。
+  - 真实运行时它包着平台的 PostgreSQL 账本：先查本轮调用次数和 token 上限（超限就不发送，也不预占），再由平台账本按工作区预算预占；结算、失败、未知结果先写平台账本。见第 0 节；
+  - token 统计只在供应商没报用量时用估算（报 0 就是 0）；
   - 费用只在配置了 `MODEL_PRICES` 时计算，否则报 token 并说明原因；
-  - 复用 E3 的网关和计费口径，没有另建计费系统。
+  - 复用 E3 的网关、账本和计费口径，没有另建计费系统。
 - **模拟器**（`simulator.py`）：
   - 组成：词袋哈希“向量”、重叠度“重排”、读取帧标题的“VLM”、按重叠度引用证据的“LLM”；
   - 所有调用都经过 ModelGateway，与真实供应商的调用点相同，带固定的模拟延迟；
-  - 模拟器运行关闭限流（它没有需要保护的供应商配额）；真实运行保留限流，并在汇总中报告通道失败次数。
+  - 模拟器运行关闭限流（它没有需要保护的供应商配额），用临时 DATA_ROOT、进程内限流和内存账本，与中间件隔离；真实运行使用平台装配，保留共享限流，并在汇总中报告通道失败次数；
+  - 另有两轮的 `SimPlanner`，驱动多轮 Agent 循环。
 - **合成语料**（`fixture.py`、`eval/synthetic/fixture.json`）：两门为评测编写的合成课程文本（中文算法课、Python 代码课），按索引器的表结构写入真实的帧库和字幕库；帧图片的 PNG 文本块里存着标题。
 
 ### 3.2 关键词通道 `vam/retrieval/keywords.py`
@@ -59,7 +76,8 @@ E4 建成了可重跑的评测工具，并加了关键词通道和“低成本 /
 - **强证据**：语义相似度 ≥ `ROUTE_MIN_SIMILARITY`，或关键词覆盖率 ≥ `ROUTE_MIN_KEYWORD_COVERAGE`。
 - **涉及画面的问题**：必须看过帧才算足够。这一条是评测后改的：第一版允许“事件摘要或帧相似度高”就算足够，结果在 `sim-all-v1` 中，这类题在低成本路径上全部弃答。
 - **有界**：最多升级一轮；看帧数受 `RETRIEVAL_INSPECT_FRAMES` 限制；升级有超时（`ROUTE_ESCALATION_TIMEOUT_S`）；每次模型调用仍受 ModelGateway 的总截止时间、限流和预算约束。
-- **结果字段**：每个回答带 `status`（answered / uncertain / refused）和 `route`（路径、是否升级、两次评估的理由）。拒答时仍返回检索到的原始证据，可以核对和跳转。
+- **最终状态**：`answered` 需要回答通过校验、有引用、模型没报证据不足、升级后的评估为足够；需看画面的问题还要求画面真的被读到，且至少一条引用指向读到的证据。否则为 `uncertain`，原因在 `route.status_reasons`（见第 0 节）。
+- **结果字段**：每个回答带 `status`（answered / uncertain / refused）和 `route`（路径、`cheap_answer_uncertain`、`escalated` 与 `escalation_reason`、两次评估、`status_reasons`）。拒答时仍返回检索到的原始证据，可以核对和跳转。
 - **API**：`/search` 请求体新增 `answer_mode`、`keyword`，默认值保持 E4 前的行为。前端没有改动。
 
 ## 4. 不变的部分（复用 E3）
@@ -117,5 +135,5 @@ E4 建成了可重跑的评测工具，并加了关键词通道和“低成本 /
   4. 在调参集上重新选路由阈值（真实模型的相似度尺度和模拟器不同），在保留集上报告；
   5. 人工复核引用支持率（另列一栏），再决定是否默认开启关键词通道和 `auto`。
 - **重排序**：key 为空，真实重排序没有测过。
-- **多轮 Agent**：配置位 `agent` 需要真实的工具调用模型，评测入口没有实现，列为未做。
+- **多轮 Agent**：评测入口已实现（第 0 节），只在模拟器和可控替身上跑过；真实规划模型上的效果、轮次和成本没有测过。
 - **合成题集的局限**：题目由我按合成语料编写，覆盖面窄；模拟器按词重叠打分，天然偏向关键词通道。它的数字只说明工具和规则在工作。

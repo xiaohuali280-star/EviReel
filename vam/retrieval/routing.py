@@ -12,12 +12,15 @@
 "Strong" evidence (the rules are deliberately simple and their thresholds are evaluated, not assumed):
 * a semantic channel scored it at least ROUTE_MIN_SIMILARITY, or
 * the keyword channel found at least ROUTE_MIN_KEYWORD_COVERAGE of the question's distinct tokens in it.
-"Sufficient" = at least one strong item, and for a visual question the frames have been inspected.
+"Sufficient" = at least one strong item, and for a visual question a visual check actually read the frames of
+at least one evidence item (a failed, timed-out or empty check does not count; read items count as strong).
 A cheap answer the model marks uncertain is escalated once (inspection + a second answer) when frames exist.
 
-Every answer carries ``status``: ``answered``, ``uncertain`` (the model or the rules flagged insufficient
-evidence) or ``refused`` (no answer given); and ``route`` records the decisions, so the evaluation can
-attribute calls, latency and cost to each path.
+Every answer carries ``status``: ``answered``, ``uncertain`` or ``refused`` (no answer given). ``answered``
+needs a validated answer with citations, no insufficiency flag from the model, the post-escalation assessment
+sufficient, and -- for a visual question -- at least one citation whose frames were actually read; anything
+else is ``uncertain`` with ``route.status_reasons``. Valid citation ids alone do not prove the screen content
+was checked. ``route`` records every decision, so the evaluation can attribute calls, latency and cost.
 """
 from __future__ import annotations
 
@@ -62,14 +65,17 @@ def signals(rankings) -> dict:
     return out
 
 
-def assess(question, evidence, rankings, settings, *, inspected=False) -> Assessment:
+def assess(question, evidence, rankings, settings, *, inspected_ids=()) -> Assessment:
+    """``inspected_ids``: evidence ids whose frames a visual check actually read (non-empty result)."""
     visual = needs_visual(question)
     info = signals(rankings)
+    read = set(inspected_ids) & {e['evidence_id'] for e in evidence}
     strong, reasons = [], []
     for e in evidence:
         s = info.get(e['evidence_id'], {})
         if (s.get('similarity') is not None and s['similarity'] >= settings.route_min_similarity) or \
-                (s.get('coverage') is not None and s['coverage'] >= settings.route_min_keyword_coverage):
+                (s.get('coverage') is not None and s['coverage'] >= settings.route_min_keyword_coverage) or \
+                (visual and e['evidence_id'] in read):
             strong.append(e['evidence_id'])
     if not evidence:
         reasons.append('no_evidence')
@@ -78,7 +84,7 @@ def assess(question, evidence, rankings, settings, *, inspected=False) -> Assess
     # A question about what is on screen is answered only after the frames were looked at: event summaries and
     # frame similarity locate the moment but do not read the slide (E4 evaluation: answering visual questions
     # on the cheap path abstained on every one of them, run e4-eval/sim-all-v1).
-    visual_ok = (not visual) or inspected
+    visual_ok = (not visual) or bool(read)
     if visual and not visual_ok:
         reasons.append('visual_question_needs_inspection')
     return Assessment(sufficient=bool(strong) and visual_ok, strong=strong, needs_visual=visual, reasons=reasons)

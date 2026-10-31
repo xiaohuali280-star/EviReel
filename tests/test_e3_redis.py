@@ -256,3 +256,26 @@ def test_small_and_zero_limits_hold_across_instances(redis):
     redis.flushdb()
     a, b = limiter_pair(settings(model_inflight_provider=0))
     assert not any(isinstance(take(x), Permit) for x in (a, b))
+
+
+def test_an_evaluation_run_shares_the_api_rate_window(tmp_path, redis):
+    """E4 review P1: a real-mode evaluation gateway is built by the API's wiring, so its calls and an API
+    instance's calls count against one Redis window (no provider is called: local attempt functions)."""
+    from vam.evaluation.runner import _environment
+    from vam.gateway import get_gateway
+    from vam.video_registry import DomainError
+    values = dict(_env_file=None, redis_url=REDIS_URL, enable_retrieval=False, database_url='', model_rpm_global=2,
+                  model_rpm_provider=-1, model_tpm_provider=-1, model_rpm_workspace=-1, model_inflight_provider=-1,
+                  model_inflight_workspace=-1, model_inflight_offline=-1, model_queue_wait_s=0)
+    api = limiter_pair(settings(**{k: v for k, v in values.items() if k != '_env_file'}))[0]
+    with _environment('real', tmp_path / 'data', fixture=None, max_calls=None, max_tokens=None, overrides=values,
+                      standalone=True) as (_, service, ledger, _, _):
+        assert service.runtime.describe(service)['limiter'] == 'RedisLimiter'
+        from vam.gateway.limiter import Permit
+        assert isinstance(take(api), Permit)                          # the API instance takes one of two
+        ledger.current = ('cfg', 0, 'q1')
+        assert get_gateway().run_sync(operation='chat', model='sim', attempt_fn=lambda timeout: (
+            'ok', {'input_tokens': 1, 'output_tokens': 0}), est_input_tokens=1) == 'ok'
+        with pytest.raises(DomainError) as exc:                         # the window is shared: none left
+            get_gateway().run_sync(operation='chat', model='sim', attempt_fn=lambda timeout: ('ok', None), est_input_tokens=1)
+        assert exc.value.code == 'model_rate_limited'
