@@ -1,23 +1,24 @@
 # 工程状态
 
-更新：2026-10-31　阶段：**E4 待验收**（实现与自测完成；CI 和自测通过不等于验收通过）。E1、E2、E3 已验收（E3：`53bbe0c`）。
+更新：2026-10-31　阶段：**E4 整改完成，待复验**（首轮验收：部分完成、暂不通过，P1×1、P2×2；CI 和自测通过不等于验收通过）。E1、E2、E3 已验收（E3：`53bbe0c`）。
 
 ## E4（当前）
 
-- **代码**：`2943661`（暂停时的检查点）→ `0ed66d9`（评测工具修正、路由规则修订、补充测试）。设计、取舍、限制见 `E4_DELIVERY.md`；评测方法与结果见 `EVALUATION.md`；演示 `DEMO.md`；面试材料 `INTERVIEW.md`。
+- **代码**：`2943661`（暂停时的检查点）→ `0ed66d9`（评测工具修正、路由规则修订、补充测试）→ **`84a85c6`（首轮验收整改：real 评测复用平台装配、多轮 Agent 对照、视觉问题最终状态、零 token、路由字段）**。整改明细见 `E4_DELIVERY.md` 第 0 节。设计、取舍、限制见 `E4_DELIVERY.md`；评测方法与结果见 `EVALUATION.md`；演示 `DEMO.md`；面试材料 `INTERVIEW.md`。
 - **真实评测未做**：
   - 没有有授权的视频（本机唯一的视频来源不明，未使用）；
   - 没有人工标注；
   - 没有模型预算授权，重排序 key 为空；
   - 没有调用任何付费模型。补齐步骤见 `EVALUATION.md` 第 6 节。
-- **下一步**：等待 E4 验收。
+  - 工具修好不等于真实效果已验证。
+- **下一步**：等待 E4 复验。
 
 | 类别 | 检查 | 结果 |
 | --- | --- | --- |
-| 模拟器评测（合成题集 32 题） | `docs/engineering/e4-eval/sim-all-v2/`，`0ed66d9`，`dirty=false`，全部配置 × 2 遍 | 通道失败 0，运行错误 0。结果只说明工具和路由规则在工作，不代表真实效果（`EVALUATION.md` 第 4、5 节） |
-| 本机，无中间件 | 全量 `pytest tests` | **257 passed, 83 skipped**（跳过的需要 PG/S3/Redis/RabbitMQ） |
-| 本机，真实 PG 16 + MinIO | E3 单元与平台、E1/E2 平台与流水线测试 | **89 passed** |
-| 本机，真实 PG 读模型 | P1、P3、P4、P5、聊天测试在 `REGISTRY_BACKEND=postgres` 下 | **145 passed** |
+| 模拟器评测（合成题集 32 题，整改后） | `docs/engineering/e4-eval/sim-all-v3/`，`84a85c6`，`dirty=false`，全部配置（含 `agent`）× 2 遍 | 通道失败 0，运行错误 0，没有不完整的配置，模型身份一致。结果只说明工具和路由规则在工作，不代表真实效果（`EVALUATION.md` 第 4、5 节） |
+| 本机整改后，真实 PG 16 + MinIO 与无中间件测试一起 | 全量 `pytest tests`（E1 本地测试环境） | **335 passed, 24 skipped, 0 failed**（跳过的需要 Linux + RabbitMQ 或 Redis，由 CI 覆盖；另 1 个是 deep 模式没有单独升级时限的参数组合） |
+| CI `84a85c6`（整改后） | E1、CPU、E2、E3 | 四项**全部通过**：[E3](https://github.com/xiaohuali280-star/EviReel/actions/runs/41193905838) 测试 49 passed（含两个新的评测装配测试：真实 PG + MinIO、真实 Redis），PG 读模型回归 98，E1/E2 回归 50；[E2](https://github.com/xiaohuali280-star/EviReel/actions/runs/41193906022)；[CPU](https://github.com/xiaohuali280-star/EviReel/actions/runs/41193905787) 273 passed、vitest 42、浏览器 21；[E1](https://github.com/xiaohuali280-star/EviReel/actions/runs/41193906067) |
+| 首轮交付时（`0ed66d9`） | 模拟器 `sim-all-v2`；本机 257 passed / 83 skipped，真实 PG + MinIO 89，PG 读模型 145 | 保留作对照 |
 | CI `0ed66d9` | E1、CPU、E2、E3 | 四项**全部通过**：E3（运行 41180288099）测试 47 passed、0 skipped，PG 读模型回归 98，E1/E2 回归 50，容器冒烟停掉一个 API 后 20/20 成功；E2（41180288091）26 + 14 + 24；CPU（41180288083）257 passed、vitest 42、浏览器 21；E1（41180288084）通过 |
 | 前端 | 无改动（`/search` 的新字段可选，默认保持原行为） | 前端测试与浏览器回归见 CI 的 CPU tests |
 

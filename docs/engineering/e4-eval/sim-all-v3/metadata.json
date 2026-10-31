@@ -1,0 +1,196 @@
+{
+ "started_at": "2026-10-31T06:43:40-0400",
+ "git": {
+  "commit": "84a85c6a0e502dc6379f7c511d08f5aff5a97111",
+  "dirty": false
+ },
+ "environment": {
+  "python": "3.11.16",
+  "os": "Windows-10-10.0.26200-SP0",
+  "cpu_count": 32
+ },
+ "dataset": {
+  "path": "eval/synthetic/questions.jsonl",
+  "sha256": "d85dd257f3467fffd38e97b293dd315ce04baa426d79288b81deab137a9f93b2",
+  "split": "all",
+  "questions": 32,
+  "by_split": {
+   "tune": 17,
+   "holdout": 15
+  },
+  "by_category": {
+   "transcript": 11,
+   "visual": 8,
+   "cross_segment": 4,
+   "no_answer": 5,
+   "follow_up": 4
+  },
+  "by_label_source": {
+   "synthetic": 32
+  },
+  "by_tag": {
+   "zh_term": 5,
+   "code_symbol": 10
+  }
+ },
+ "fixture": {
+  "path": "eval/synthetic/fixture.json",
+  "sha256": "8964ef7d79ef717daed9ef19050d81ac54d2fad1d580a9adb7ea8f9cfd9e5e33"
+ },
+ "models": "simulator",
+ "configs": {
+  "transcript": {
+   "sources": [
+    "transcript"
+   ],
+   "keyword": false,
+   "rerank": false,
+   "mode": "cheap"
+  },
+  "fusion": {
+   "sources": null,
+   "keyword": false,
+   "rerank": false,
+   "mode": "cheap"
+  },
+  "fusion_keyword": {
+   "sources": null,
+   "keyword": true,
+   "rerank": false,
+   "mode": "cheap"
+  },
+  "fusion_rerank": {
+   "sources": null,
+   "keyword": false,
+   "rerank": true,
+   "mode": "cheap"
+  },
+  "deep": {
+   "sources": null,
+   "keyword": false,
+   "rerank": false,
+   "mode": "deep"
+  },
+  "auto": {
+   "sources": null,
+   "keyword": false,
+   "rerank": false,
+   "mode": "auto"
+  },
+  "auto_keyword": {
+   "sources": null,
+   "keyword": true,
+   "rerank": false,
+   "mode": "auto"
+  },
+  "agent": {
+   "sources": null,
+   "keyword": false,
+   "rerank": false,
+   "mode": "deep",
+   "agent": true
+  }
+ },
+ "top_k": 5,
+ "followup": "history",
+ "repeat": 2,
+ "metric_tolerance_s": 2.0,
+ "caps": {
+  "max_calls": null,
+  "max_tokens": null
+ },
+ "warm_up": "one untimed query per config and video before measuring (not in results or usage)",
+ "platform": {
+  "isolated": "simulator: temporary DATA_ROOT, in-process limiter, in-memory ledger (no middleware)"
+ },
+ "videos": {
+  "algo": {
+   "video_id": "v_f1696aa9571248c7b729b5c9630ad155",
+   "generation": "61893709dba24e18a8e737e3d4e7fc63",
+   "transcript_version": "a411077f29204c2c9f485fc1e584c69b"
+  },
+  "py": {
+   "video_id": "v_6931645b333842829370ac190bcde044",
+   "generation": "e8e3346a268043948e16e8d6df89eb75",
+   "transcript_version": "095b461b4a6945f8a0a7007cad2519e5"
+  }
+ },
+ "settings": {
+  "retrieval_candidates_per_source": 20,
+  "retrieval_min_similarity": 0.05,
+  "retrieval_max_evidence": 24,
+  "retrieval_rrf_k": 60,
+  "retrieval_inspect_frames": 6,
+  "route_min_similarity": 0.2,
+  "route_min_keyword_coverage": 0.6,
+  "route_escalation_timeout_s": 60.0,
+  "retrieval_max_turns": 4,
+  "conversation_request_timeout_s": 180.0,
+  "model_id": "Qwen/Qwen3-VL-8B-Instruct",
+  "rerank_model": "rerank-v4.0-pro"
+ },
+ "model_identities": {
+  "configured": {
+   "embedding": {
+    "backend": "e4-lexical-simulator",
+    "dim": 512,
+    "encoding_version": 1
+   },
+   "rerank": "sim-rerank",
+   "vlm": "sim-vlm",
+   "llm": "sim-llm",
+   "planner": "sim-planner",
+   "note": "deterministic simulator: scores verify the tool, not answer quality"
+  },
+  "observed": [
+   {
+    "operation": "chat",
+    "provider": "simulator",
+    "model": "sim-llm",
+    "price_basis": {
+     "source": "unconfigured",
+     "model": "sim-llm"
+    }
+   },
+   {
+    "operation": "chat",
+    "provider": "simulator",
+    "model": "sim-planner",
+    "price_basis": {
+     "source": "unconfigured",
+     "model": "sim-planner"
+    }
+   },
+   {
+    "operation": "chat",
+    "provider": "simulator",
+    "model": "sim-vlm",
+    "price_basis": {
+     "source": "unconfigured",
+     "model": "sim-vlm"
+    }
+   },
+   {
+    "operation": "embedding",
+    "provider": "simulator",
+    "model": "sim-embedding",
+    "price_basis": {
+     "source": "unconfigured",
+     "model": "sim-embedding"
+    }
+   },
+   {
+    "operation": "rerank",
+    "provider": "simulator",
+    "model": "sim-rerank",
+    "price_basis": {
+     "source": "unconfigured",
+     "model": "sim-rerank"
+    }
+   }
+  ],
+  "consistent": true
+ },
+ "incomplete": {},
+ "finished_at": "2026-10-31T06:54:30-0400"
+}

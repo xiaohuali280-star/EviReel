@@ -11,7 +11,7 @@
 | 划分 | 调参集 17 题 / 保留集 15 题；只在调参集上选阈值，保留集单独报告 |
 | 类别 | 字幕可答 11、需看画面 8、跨片段 4、无答案 5、连续追问 4；标记：中文术语 5、代码符号 10 |
 | 语料 | `eval/synthetic/fixture.json`（sha256 前缀 `8964ef7d79ef`），两门为评测编写的合成课程（中文算法课 480 s、Python 代码课 360 s），按索引器的表结构写入真实的帧库和字幕库。部分事实只出现在画面标题里，用来考察“需看画面”的题 |
-| 模型 | 模拟器（`vam/evaluation/simulator.py`）：词袋哈希“向量”、重叠度“重排”、读取帧标题的“VLM”、按词重叠引用证据的“LLM”。所有调用都经过 ModelGateway，带固定的模拟延迟（Embedding 40 ms、重排 150 ms、VLM 800 ms、LLM 400 ms） |
+| 模型 | 模拟器（`vam/evaluation/simulator.py`）：词袋哈希“向量”、重叠度“重排”、读取帧标题的“VLM”、按词重叠引用证据的“LLM”、两轮的 Agent “规划器”（先检索并看帧，再回答）。所有调用都经过 ModelGateway，带固定的模拟延迟（Embedding 40 ms、重排 150 ms、VLM 800 ms、LLM 400 ms） |
 
 模拟器按词重叠打分，天然偏向关键词通道，也不会理解语义。所以“哪个配置更好”在模拟器上只说明规则在按设计工作，真实模型上可能完全不同。
 
@@ -41,7 +41,8 @@
 | v1 调参扫描 | `e4-eval/sim-tune-v1-route{0.2…0.5}/` | `2943661` + 未提交修复（metadata 中 `dirty=true`） | 调参集，`auto` / `auto_keyword`，第一版路由规则 |
 | v1 全量 | `e4-eval/sim-all-v1/` | 同上 | 全部配置 × 2 遍，阈值 0.2 |
 | v2 调参扫描 | `e4-eval/sim-tune-v2-route{0.2…0.5}/` | 修订后的规则（随后提交为 `0ed66d9`） | 同 v1 扫描 |
-| **v2 全量（最终）** | `e4-eval/sim-all-v2/` | **`0ed66d9`，`dirty=false`** | 全部配置 × 2 遍，阈值 0.2；每个配置先跑一次不计时的预热查询 |
+| v2 全量（首轮交付） | `e4-eval/sim-all-v2/` | `0ed66d9`，`dirty=false` | 全部配置 × 2 遍，阈值 0.2；每个配置先跑一次不计时的预热查询 |
+| **v3 全量（整改后，最终）** | `e4-eval/sim-all-v3/` | **`84a85c6`，`dirty=false`** | 同 v2，另加 `agent` 配置；视觉问题的最终状态规则已修正；元数据记录配置的与实际调用的模型身份（一致）及平台装配 |
 
 每个目录都有：每题一行的原始结果（`*.results.jsonl`）、`metadata.json`（代码版本、环境、题集与语料哈希、配置、模型身份、阈值）、`summary.json`（总体、按划分、按类别、按标记）、`comparison*.md`。模拟器是确定性的，两遍之间只有延迟不同。
 
@@ -58,9 +59,9 @@ python -m vam.evaluation run --dataset eval/synthetic/questions.jsonl --fixture 
 - 第一条查询冷启动拉高了 P95。已加预热查询。
 - 默认限流（每空间每分钟 120 次）让模拟器的部分通道被限流，导致结果依赖时机，例如阈值不同时召回也不同。模拟器运行改为关闭限流；真实运行保留限流，并在汇总里报告通道失败次数。
 
-## 4. 结果（模拟器，v2 全量，`0ed66d9`）
+## 4. 结果（模拟器，v3 全量，`84a85c6`）
 
-全量 32 题，每个配置 2 遍。通道失败和运行错误都是 0。
+全量 32 题，每个配置 2 遍。通道失败和运行错误都是 0，没有不完整的配置。除新增的 `agent` 外，各配置的数字与 v2 完全相同：模拟器的“VLM”总能读到帧、“LLM”只引用读到的内容，所以视觉状态规则的修正在这套合成数据上没有触发；它由第 7 节列出的替身测试验证。
 
 | 配置 | Recall@1 | Recall@5 | MRR | 引用支持（自动） | 无答案拒答 | 误弃答 | 延迟 P50 / P95 (s) | 调用 / 题 | token / 题 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -71,8 +72,11 @@ python -m vam.evaluation run --dataset eval/synthetic/questions.jsonl --fixture 
 | deep（总是看画面） | 19% | 85% | 0.410 | 45% | 100% | 19% | 1.61 / 1.66 | 7.8 | 3387 |
 | **auto**（规则路由） | 19% | 85% | 0.410 | 50% | 100% | **19%** | 0.81 / 2.03 | 7.3 | **2269** |
 | auto_keyword | 63% | 81% | 0.735 | 50% | 100% | 22% | 0.88 / 2.11 | 7.3 | 2694 |
+| agent（多轮工具调用，深度回答） | 19% | 85% | 0.417 | 45% | 100% | 15% | 3.16 / 3.19 | 10.8 | 22726 |
 
-保留集（15 题，阈值在调参集上选定）见 `sim-all-v2/comparison-holdout.md`：`auto` 的误弃答率 15%，与 `deep` 相同；token 2022 比 3323，P50 0.80 比 1.61 s。
+保留集（15 题，阈值在调参集上选定）见 `sim-all-v3/comparison-holdout.md`：`auto` 的误弃答率 15%，与 `deep`、`agent` 相同；token 2022 比 3323（deep）比 22657（agent），P50 0.80 比 1.61 比 3.14 s。
+
+`agent` 的 token 很高，主要因为规划器的提示词带着全部帧列表和上下文，而模拟器按字符估算 token。它说明多轮循环的调用和用量被正确记账，不说明真实规划模型的成本。真实规划模型的轮次、成本和效果都没测。
 
 按类别（全量）：
 
@@ -106,6 +110,7 @@ python -m vam.evaluation run --dataset eval/synthetic/questions.jsonl --fixture 
    - 默认继续关闭，等真实评测决定。
 4. **多通道融合时首位常是画面或事件证据**，字幕可答题的 Recall@1 低于只用字幕（19% 比 56%），Recall@5 更高（85% 比 70%）。是否要按问题类型调整通道优先级，需要真实数据。
 5. **追问**：用“历史问题 + 当前问题”拼接代替产品里的 LLM 改写（标为模拟），低成本路径误弃答 50%，看画面后为 0%。真实效果取决于产品的改写模型。
+6. **多轮 Agent**：模拟规划器固定两轮，召回与 `deep` 相同，误弃答略低（全量 15% 比 19%），调用和 token 明显更多。规划器是写死的两步，这个对比只说明入口、上限和记账在工作。
 
 不能说的：任何“准确率提升 X%”“成本降低 X 元”。
 
@@ -120,9 +125,19 @@ python -m vam.evaluation run --dataset eval/synthetic/questions.jsonl --fixture 
    python -m vam.evaluation run --models real --data-root <DATA_ROOT> --dataset <题集> \
        --allow-paid --max-calls <上限> --max-tokens <上限> --configs all --repeat 2 --out <目录>
    ```
-   配置 `MODEL_PRICES` 才会计算费用。
+   使用与 API 相同的环境（`DATABASE_URL`、`REDIS_URL`、对象存储）：评测与 API 共用读租约、Redis 限流、PostgreSQL 用量账本和工作区预算，评测的调用次数和 token 上限叠加在其上；没有 `DATABASE_URL` 时会拒绝运行，除非确认没有其他进程使用该 DATA_ROOT 并显式加 `--standalone`。配置 `MODEL_PRICES` 才会计算费用。元数据中的 `model_identities.consistent` 为 false 时，说明有调用用了未配置的模型，该次结果不可用。
 4. 在调参集上重选 `route_min_similarity` 和 `route_min_keyword_coverage`，在保留集上报告。
 5. 人工复核引用是否支持结论（单列一栏，不与自动指标混合）。
 6. 据此决定是否默认开启关键词通道和 `auto`。没有改善的配置如实记录、保持关闭。
 
-多轮 Agent 的评测入口未实现（需要真实的工具调用模型），列为未做。
+多轮 Agent 的评测入口已实现（`agent` 配置），只在模拟器和可控替身上验证过；真实规划模型上未运行。
+
+## 7. 工具本身的验证（首轮验收后补充）
+
+| 内容 | 测试 |
+| --- | --- |
+| 视觉问题：检查失败、超时、结果为空、没有可用帧时，即使回答引用合法也为 `uncertain` 并给出原因；引用的不是读过的证据也为 `uncertain` | `test_e4_eval.py::test_a_visual_question_is_not_answered_when_the_frames_were_not_actually_read`、`test_a_visual_answer_must_cite_evidence_whose_frames_were_read` |
+| 路由字段：模型是否不确定与是否升级分开记录 | `test_route_records_model_uncertainty_separately_from_the_escalation_decision` |
+| 用量：供应商报 0 就按 0 计；评测账本叠加在平台账本上，平台预算拒绝时不写评测行，本轮上限在平台预占前拒绝 | `test_eval_ledger_counts_a_reported_zero_as_zero_not_as_the_estimate`、`test_eval_ledger_layers_caps_and_attribution_on_the_platform_ledger` |
+| real 装配：真实 PostgreSQL + MinIO 上的租约、对象恢复、工作区归属、持久账本、预算；真实 Redis 上与 API 共用限流 | `test_e3_platform.py::test_a_real_evaluation_run_uses_the_platform_leases_ledger_workspace_and_object_restore`、`test_e3_redis.py::test_an_evaluation_run_shares_the_api_rate_window`（均不调用供应商） |
+| 多轮 Agent：轮次与候选有上限；超时、预算耗尽、规划异常记为错误；有错误的配置标为不完整 | `test_agent_*`、`test_a_run_with_failed_agent_questions_is_marked_incomplete` |

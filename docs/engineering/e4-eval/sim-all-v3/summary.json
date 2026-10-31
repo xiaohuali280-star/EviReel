@@ -1,0 +1,4279 @@
+{
+ "transcript": {
+  "overall": {
+   "questions": 64,
+   "answerable": 54,
+   "unanswerable": 10,
+   "evidence_recall@1": 0.5555555555555556,
+   "evidence_hit@1": 0.5925925925925926,
+   "evidence_recall@3": 0.7037037037037037,
+   "evidence_hit@3": 0.7037037037037037,
+   "evidence_recall@5": 0.7037037037037037,
+   "evidence_hit@5": 0.7037037037037037,
+   "mrr": 0.6695156695156693,
+   "denominator_retrieval": "54 answerable questions",
+   "citation_support_auto": 0.6666666666666666,
+   "denominator_citations": "48 citations on answerable questions",
+   "citation_support_human": null,
+   "citation_support_human_reason": "not reviewed by a person in this run",
+   "time_error_s_median": 0.0,
+   "time_error_s_mean": 34.81481481481482,
+   "abstention_on_unanswerable": 1.0,
+   "denominator_abstention": "10 no-answer questions",
+   "false_abstention_on_answerable": 0.48148148148148145,
+   "keyword_proxy": 0.4166666666666667,
+   "keyword_proxy_note": "automatic: all answer_keywords appear in answered answers; not a quality judgment",
+   "statuses": {
+    "answered": 28,
+    "uncertain": 12,
+    "refused": 24
+   },
+   "routes": {
+    "cheap": 40,
+    "refused": 24
+   },
+   "channel_failures": {},
+   "errors": 0,
+   "latency_total_s": {
+    "p50": 0.5940000000000509,
+    "p95": 0.625,
+    "mean": 0.4577812499999965
+   },
+   "latency_retrieval_s": {
+    "p50": 0.20299999999997453,
+    "p95": 0.2039999999999509
+   },
+   "calls_per_question": {
+    "chat": 0.625,
+    "embedding": 1.0
+   },
+   "tokens_per_question": {
+    "input": 888.28125,
+    "output": 53.625
+   },
+   "cost_per_question": null,
+   "cost_reason": "no price basis configured for these models (MODEL_PRICES); tokens are reported instead"
+  },
+  "by_split": {
+   "holdout": {
+    "questions": 30,
+    "answerable": 26,
+    "unanswerable": 4,
+    "evidence_recall@1": 0.6923076923076923,
+    "evidence_hit@1": 0.6923076923076923,
+    "evidence_recall@3": 0.6923076923076923,
+    "evidence_hit@3": 0.6923076923076923,
+    "evidence_recall@5": 0.6923076923076923,
+    "evidence_hit@5": 0.6923076923076923,
+    "mrr": 0.7206607495069034,
+    "denominator_retrieval": "26 answerable questions",
+    "citation_support_auto": 0.6666666666666666,
+    "denominator_citations": "24 citations on answerable questions",
+    "citation_support_human": null,
+    "citation_support_human_reason": "not reviewed by a person in this run",
+    "time_error_s_median": 0.0,
+    "time_error_s_mean": 24.23076923076923,
+    "abstention_on_unanswerable": 1.0,
+    "denominator_abstention": "4 no-answer questions",
+    "false_abstention_on_answerable": 0.46153846153846156,
+    "keyword_proxy": 0.5,
+    "keyword_proxy_note": "automatic: all answer_keywords appear in answered answers; not a quality judgment",
+    "statuses": {
+     "answered": 14,
+     "refused": 12,
+     "uncertain": 4
+    },
+    "routes": {
+     "cheap": 18,
+     "refused": 12
+    },
+    "channel_failures": {},
+    "errors": 0,
+    "latency_total_s": {
+     "p50": 0.5940000000000509,
+     "p95": 0.625,
+     "mean": 0.4488333333333609
+    },
+    "latency_retrieval_s": {
+     "p50": 0.20299999999997453,
+     "p95": 0.21800000000007458
+    },
+    "calls_per_question": {
+     "chat": 0.6,
+     "embedding": 1.0
+    },
+    "tokens_per_question": {
+     "input": 833.4666666666667,
+     "output": 50.46666666666667
+    },
+    "cost_per_question": null,
+    "cost_reason": "no price basis configured for these models (MODEL_PRICES); tokens are reported instead"
+   },
+   "tune": {
+    "questions": 34,
+    "answerable": 28,
+    "unanswerable": 6,
+    "evidence_recall@1": 0.42857142857142855,
+    "evidence_hit@1": 0.5,
+    "evidence_recall@3": 0.7142857142857143,
+    "evidence_hit@3": 0.7142857142857143,
+    "evidence_recall@5": 0.7142857142857143,
+    "evidence_hit@5": 0.7142857142857143,
+    "mrr": 0.6220238095238095,
+    "denominator_retrieval": "28 answerable questions",
+    "citation_support_auto": 0.6666666666666666,
+    "denominator_citations": "24 citations on answerable questions",
+    "citation_support_human": null,
+    "citation_support_human_reason": "not reviewed by a person in this run",
+    "time_error_s_median": 7.5,
+    "time_error_s_mean": 44.642857142857146,
+    "abstention_on_unanswerable": 1.0,
+    "denominator_abstention": "6 no-answer questions",
+    "false_abstention_on_answerable": 0.5,
+    "keyword_proxy": 0.3333333333333333,
+    "keyword_proxy_note": "automatic: all answer_keywords appear in answered answers; not a quality judgment",
+    "statuses": {
+     "answered": 14,
+     "uncertain": 8,
+     "refused": 12
+    },
+    "routes": {
+     "cheap": 22,
+     "refused": 12
+    },
+    "channel_failures": {},
+    "errors": 0,
+    "latency_total_s": {
+     "p50": 0.5940000000000509,
+     "p95": 0.625,
+     "mean": 0.4656764705882043
+    },
+    "latency_retrieval_s": {
+     "p50": 0.20299999999997453,
+     "p95": 0.2039999999999509
+    },
+    "calls_per_question": {
+     "chat": 0.6470588235294118,
+     "embedding": 1.0
+    },
+    "tokens_per_question": {
+     "input": 936.6470588235294,
+     "output": 56.411764705882355
+    },
+    "cost_per_question": null,
+    "cost_reason": "no price basis configured for these models (MODEL_PRICES); tokens are reported instead"
+   }
+  },
+  "by_category": {
+   "cross_segment": {
+    "questions": 8,
+    "answerable": 8,
+    "unanswerable": 0,
+    "evidence_recall@1": 0.75,
+    "evidence_hit@1": 1.0,
+    "evidence_recall@3": 1.0,
+    "evidence_hit@3": 1.0,
+    "evidence_recall@5": 1.0,
+    "evidence_hit@5": 1.0,
+    "mrr": 1.0,
+    "denominator_retrieval": "8 answerable questions",
+    "citation_support_auto": 0.6666666666666666,
+    "denominator_citations": "12 citations on answerable questions",
+    "citation_support_human": null,
+    "citation_support_human_reason": "not reviewed by a person in this run",
+    "time_error_s_median": 7.5,
+    "time_error_s_mean": 41.25,
+    "abstention_on_unanswerable": null,
+    "denominator_abstention": "0 no-answer questions",
+    "false_abstention_on_answerable": 0.25,
+    "keyword_proxy": 0.3333333333333333,
+    "keyword_proxy_note": "automatic: all answer_keywords appear in answered answers; not a quality judgment",
+    "statuses": {
+     "answered": 6,
+     "uncertain": 2
+    },
+    "routes": {
+     "cheap": 8
+    },
+    "channel_failures": {},
+    "errors": 0,
+    "latency_total_s": {
+     "p50": 0.609000000000151,
+     "p95": 0.625,
+     "mean": 0.609375
+    },
+    "latency_retrieval_s": {
+     "p50": 0.20299999999997453,
+     "p95": 0.21800000000007458
+    },
+    "calls_per_question": {
+     "chat": 1.0,
+     "embedding": 1.0
+    },
+    "tokens_per_question": {
+     "input": 1416.0,
+     "output": 88.75
+    },
+    "cost_per_question": null,
+    "cost_reason": "no price basis configured for these models (MODEL_PRICES); tokens are reported instead"
+   },
+   "follow_up": {
+    "questions": 8,
+    "answerable": 8,
+    "unanswerable": 0,
+    "evidence_recall@1": 0.75,
+    "evidence_hit@1": 0.75,
+    "evidence_recall@3": 1.0,
+    "evidence_hit@3": 1.0,
+    "evidence_recall@5": 1.0,
+    "evidence_hit@5": 1.0,
+    "mrr": 0.875,
+    "denominator_retrieval": "8 answerable questions",
+    "citation_support_auto": 0.6,
+    "denominator_citations": "10 citations on answerable questions",
+    "citation_support_human": null,
+    "citation_support_human_reason": "not reviewed by a person in this run",
+    "time_error_s_median": 7.5,
+    "time_error_s_mean": 11.25,
+    "abstention_on_unanswerable": null,
+    "denominator_abstention": "0 no-answer questions",
+    "false_abstention_on_answerable": 0.5,
+    "keyword_proxy": null,
+    "keyword_proxy_note": "automatic: all answer_keywords appear in answered answers; not a quality judgment",
+    "statuses": {
+     "uncertain": 4,
+     "answered": 4
+    },
+    "routes": {
+     "cheap": 8
+    },
+    "channel_failures": {},
+    "errors": 0,
+    "latency_total_s": {
+     "p50": 0.6089999999999236,
+     "p95": 0.625,
+     "mean": 0.6093749999999716
+    },
+    "latency_retrieval_s": {
+     "p50": 0.1879999999998745,
+     "p95": 0.20299999999997453
+    },
+    "calls_per_question": {
+     "chat": 1.0,
+     "embedding": 1.0
+    },
+    "tokens_per_question": {
+     "input": 1387.25,
+     "output": 84.25
+    },
+    "cost_per_question": null,
+    "cost_reason": "no price basis configured for these models (MODEL_PRICES); tokens are reported instead"
+   },
+   "no_answer": {
+    "questions": 10,
+    "answerable": 0,
+    "unanswerable": 10,
+    "evidence_recall@1": null,
+    "evidence_hit@1": null,
+    "evidence_recall@3": null,
+    "evidence_hit@3": null,
+    "evidence_recall@5": null,
+    "evidence_hit@5": null,
+    "mrr": null,
+    "denominator_retrieval": "0 answerable questions",
+    "citation_support_auto": null,
+    "denominator_citations": "0 citations on answerable questions",
+    "citation_support_human": null,
+    "citation_support_human_reason": "not reviewed by a person in this run",
+    "time_error_s_median": null,
+    "time_error_s_mean": null,
+    "abstention_on_unanswerable": 1.0,
+    "denominator_abstention": "10 no-answer questions",
+    "false_abstention_on_answerable": null,
+    "keyword_proxy": null,
+    "keyword_proxy_note": "automatic: all answer_keywords appear in answered answers; not a quality judgment",
+    "statuses": {
+     "uncertain": 4,
+     "refused": 6
+    },
+    "routes": {
+     "cheap": 4,
+     "refused": 6
+    },
+    "channel_failures": {},
+    "errors": 0,
+    "latency_total_s": {
+     "p50": 0.2039999999999509,
+     "p95": 0.625,
+     "mean": 0.37039999999999507
+    },
+    "latency_retrieval_s": {
+     "p50": 0.20299999999997453,
+     "p95": 0.2039999999999509
+    },
+    "calls_per_question": {
+     "chat": 0.4,
+     "embedding": 1.0
+    },
+    "tokens_per_question": {
+     "input": 569.6,
+     "output": 33.2
+    },
+    "cost_per_question": null,
+    "cost_reason": "no price basis configured for these models (MODEL_PRICES); tokens are reported instead"
+   },
+   "transcript": {
+    "questions": 22,
+    "answerable": 22,
+    "unanswerable": 0,
+    "evidence_recall@1": 0.8181818181818182,
+    "evidence_hit@1": 0.8181818181818182,
+    "evidence_recall@3": 1.0,
+    "evidence_hit@3": 1.0,
+    "evidence_recall@5": 1.0,
+    "evidence_hit@5": 1.0,
+    "mrr": 0.9090909090909091,
+    "denominator_retrieval": "22 answerable questions",
+    "citation_support_auto": 0.6923076923076923,
+    "denominator_citations": "26 citations on answerable questions",
+    "citation_support_human": null,
+    "citation_support_human_reason": "not reviewed by a person in this run",
+    "time_error_s_median": 0.0,
+    "time_error_s_mean": 2.727272727272727,
+    "abstention_on_unanswerable": null,
+    "denominator_abstention": "0 no-answer questions",
+    "false_abstention_on_answerable": 0.18181818181818182,
+    "keyword_proxy": 0.4444444444444444,
+    "keyword_proxy_note": "automatic: all answer_keywords appear in answered answers; not a quality judgment",
+    "statuses": {
+     "answered": 18,
+     "uncertain": 2,
+     "refused": 2
+    },
+    "routes": {
+     "cheap": 20,
+     "refused": 2
+    },
+    "channel_failures": {},
+    "errors": 0,
+    "latency_total_s": {
+     "p50": 0.6099999999999,
+     "p95": 0.625,
+     "mean": 0.574636363636366
+    },
+    "latency_retrieval_s": {
+     "p50": 0.20299999999997453,
+     "p95": 0.2039999999999509
+    },
+    "calls_per_question": {
+     "chat": 0.9090909090909091,
+     "embedding": 1.0
+    },
+    "tokens_per_question": {
+     "input": 1287.090909090909,
+     "output": 78.0
+    },
+    "cost_per_question": null,
+    "cost_reason": "no price basis configured for these models (MODEL_PRICES); tokens are reported instead"
+   },
+   "visual": {
+    "questions": 16,
+    "answerable": 16,
+    "unanswerable": 0,
+    "evidence_recall@1": 0.0,
+    "evidence_hit@1": 0.0,
+    "evidence_recall@3": 0.0,
+    "evidence_hit@3": 0.0,
+    "evidence_recall@5": 0.0,
+    "evidence_hit@5": 0.0,
+    "mrr": 0.07211538461538462,
+    "denominator_retrieval": "16 answerable questions",
+    "citation_support_auto": null,
+    "denominator_citations": "0 citations on answerable questions",
+    "citation_support_human": null,
+    "citation_support_human_reason": "not reviewed by a person in this run",
+    "time_error_s_median": 30.0,
+    "time_error_s_mean": 87.5,
+    "abstention_on_unanswerable": null,
+    "denominator_abstention": "0 no-answer questions",
+    "false_abstention_on_answerable": 1.0,
+    "keyword_proxy": null,
+    "keyword_proxy_note": "automatic: all answer_keywords appear in answered answers; not a quality judgment",
+    "statuses": {
+     "refused": 16
+    },
+    "routes": {
+     "refused": 16
+    },
+    "channel_failures": {},
+    "errors": 0,
+    "latency_total_s": {
+     "p50": 0.20299999999997453,
+     "p95": 0.2039999999999509,
+     "mean": 0.2001249999999999
+    },
+    "latency_retrieval_s": {
+     "p50": 0.20299999999997453,
+     "p95": 0.2039999999999509
+    },
+    "calls_per_question": {
+     "embedding": 1.0
+    },
+    "tokens_per_question": {
+     "input": 25.75,
+     "output": 0.0
+    },
+    "cost_per_question": null,
+    "cost_reason": "no price basis configured for these models (MODEL_PRICES); tokens are reported instead"
+   }
+  },
+  "by_tag": {
+   "code_symbol": {
+    "questions": 20,
+    "answerable": 20,
+    "unanswerable": 0,
+    "evidence_recall@1": 0.4,
+    "evidence_hit@1": 0.4,
+    "evidence_recall@3": 0.6,
+    "evidence_hit@3": 0.6,
+    "evidence_recall@5": 0.6,
+    "evidence_hit@5": 0.6,
+    "mrr": 0.5326923076923077,
+    "denominator_retrieval": "20 answerable questions",
+    "citation_support_auto": 0.5714285714285714,
+    "denominator_citations": "14 citations on answerable questions",
+    "citation_support_human": null,
+    "citation_support_human_reason": "not reviewed by a person in this run",
+    "time_error_s_median": 5.0,
+    "time_error_s_mean": 31.5,
+    "abstention_on_unanswerable": null,
+    "denominator_abstention": "0 no-answer questions",
+    "false_abstention_on_answerable": 0.6,
+    "keyword_proxy": 0.25,
+    "keyword_proxy_note": "automatic: all answer_keywords appear in answered answers; not a quality judgment",
+    "statuses": {
+     "answered": 8,
+     "uncertain": 2,
+     "refused": 10
+    },
+    "routes": {
+     "cheap": 10,
+     "refused": 10
+    },
+    "channel_failures": {},
+    "errors": 0,
+    "latency_total_s": {
+     "p50": 0.20299999999997453,
+     "p95": 0.625,
+     "mean": 0.4038999999999874
+    },
+    "latency_retrieval_s": {
+     "p50": 0.20299999999997453,
+     "p95": 0.2039999999999509
+    },
+    "calls_per_question": {
+     "chat": 0.5,
+     "embedding": 1.0
+    },
+    "tokens_per_question": {
+     "input": 724.2,
+     "output": 45.2
+    },
+    "cost_per_question": null,
+    "cost_reason": "no price basis configured for these models (MODEL_PRICES); tokens are reported instead"
+   },
+   "zh_term": {
+    "questions": 10,
+    "answerable": 10,
+    "unanswerable": 0,
+    "evidence_recall@1": 0.9,
+    "evidence_hit@1": 1.0,
+    "evidence_recall@3": 1.0,
+    "evidence_hit@3": 1.0,
+    "evidence_recall@5": 1.0,
+    "evidence_hit@5": 1.0,
+    "mrr": 1.0,
+    "denominator_retrieval": "10 answerable questions",
+    "citation_support_auto": 0.6666666666666666,
+    "denominator_citations": "12 citations on answerable questions",
+    "citation_support_human": null,
+    "citation_support_human_reason": "not reviewed by a person in this run",
+    "time_error_s_median": 0.0,
+    "time_error_s_mean": 33.0,
+    "abstention_on_unanswerable": null,
+    "denominator_abstention": "0 no-answer questions",
+    "false_abstention_on_answerable": 0.0,
+    "keyword_proxy": 0.2,
+    "keyword_proxy_note": "automatic: all answer_keywords appear in answered answers; not a quality judgment",
+    "statuses": {
+     "answered": 10
+    },
+    "routes": {
+     "cheap": 10
+    },
+    "channel_failures": {},
+    "errors": 0,
+    "latency_total_s": {
+     "p50": 0.6099999999999,
+     "p95": 0.625,
+     "mean": 0.6141999999999825
+    },
+    "latency_retrieval_s": {
+     "p50": 0.20299999999997453,
+     "p95": 0.21900000000005093
+    },
+    "calls_per_question": {
+     "chat": 1.0,
+     "embedding": 1.0
+    },
+    "tokens_per_question": {
+     "input": 1433.4,
+     "output": 80.4
+    },
+    "cost_per_question": null,
+    "cost_reason": "no price basis configured for these models (MODEL_PRICES); tokens are reported instead"
+   }
+  }
+ },
+ "fusion": {
+  "overall": {
+   "questions": 64,
+   "answerable": 54,
+   "unanswerable": 10,
+   "evidence_recall@1": 0.18518518518518517,
+   "evidence_hit@1": 0.18518518518518517,
+   "evidence_recall@3": 0.7037037037037037,
+   "evidence_hit@3": 0.7407407407407407,
+   "evidence_recall@5": 0.8518518518518519,
+   "evidence_hit@5": 0.8888888888888888,
+   "mrr": 0.4098765432098763,
+   "denominator_retrieval": "54 answerable questions",
+   "citation_support_auto": 0.6086956521739131,
+   "denominator_citations": "46 citations on answerable questions",
+   "citation_support_human": null,
+   "citation_support_human_reason": "not reviewed by a person in this run",
+   "time_error_s_median": 0.0,
+   "time_error_s_mean": 18.333333333333332,
+   "abstention_on_unanswerable": 1.0,
+   "denominator_abstention": "10 no-answer questions",
+   "false_abstention_on_answerable": 0.4444444444444444,
+   "keyword_proxy": 0.38461538461538464,
+   "keyword_proxy_note": "automatic: all answer_keywords appear in answered answers; not a quality judgment",
+   "statuses": {
+    "answered": 30,
+    "uncertain": 12,
+    "refused": 22
+   },
+   "routes": {
+    "cheap": 42,
+    "refused": 22
+   },
+   "channel_failures": {},
+   "errors": 0,
+   "latency_total_s": {
+    "p50": 0.7809999999999491,
+    "p95": 0.8119999999998981,
+    "mean": 0.6447812499999976
+   },
+   "latency_retrieval_s": {
+    "p50": 0.375,
+    "p95": 0.42200000000002547
+   },
+   "calls_per_question": {
+    "chat": 0.65625,
+    "embedding": 5.8125
+   },
+   "tokens_per_question": {
+    "input": 772.0625,
+    "output": 54.6875
+   },
+   "cost_per_question": null,
+   "cost_reason": "no price basis configured for these models (MODEL_PRICES); tokens are reported instead"
+  },
+  "by_split": {
+   "holdout": {
+    "questions": 30,
+    "answerable": 26,
+    "unanswerable": 4,
+    "evidence_recall@1": 0.07692307692307693,
+    "evidence_hit@1": 0.07692307692307693,
+    "evidence_recall@3": 0.6923076923076923,
+    "evidence_hit@3": 0.6923076923076923,
+    "evidence_recall@5": 0.8461538461538461,
+    "evidence_hit@5": 0.8461538461538461,
+    "mrr": 0.3333333333333333,
+    "denominator_retrieval": "26 answerable questions",
+    "citation_support_auto": 0.6363636363636364,
+    "denominator_citations": "22 citations on answerable questions",
+    "citation_support_human": null,
+    "citation_support_human_reason": "not reviewed by a person in this run",
+    "time_error_s_median": 15.0,
+    "time_error_s_mean": 31.153846153846153,
+    "abstention_on_unanswerable": 1.0,
+    "denominator_abstention": "4 no-answer questions",
+    "false_abstention_on_answerable": 0.46153846153846156,
+    "keyword_proxy": 0.5,
+    "keyword_proxy_note": "automatic: all answer_keywords appear in answered answers; not a quality judgment",
+    "statuses": {
+     "answered": 14,
+     "refused": 12,
+     "uncertain": 4
+    },
+    "routes": {
+     "cheap": 18,
+     "refused": 12
+    },
+    "channel_failures": {},
+    "errors": 0,
+    "latency_total_s": {
+     "p50": 0.7809999999999491,
+     "p95": 0.7970000000000255,
+     "mean": 0.6083999999999984
+    },
+    "latency_retrieval_s": {
+     "p50": 0.375,
+     "p95": 0.42200000000002547
+    },
+    "calls_per_question": {
+     "chat": 0.6,
+     "embedding": 5.6
+    },
+    "tokens_per_question": {
+     "input": 677.9333333333333,
+     "output": 48.8
+    },
+    "cost_per_question": null,
+    "cost_reason": "no price basis configured for these models (MODEL_PRICES); tokens are reported instead"
+   },
+   "tune": {
+    "questions": 34,
+    "answerable": 28,
+    "unanswerable": 6,
+    "evidence_recall@1": 0.2857142857142857,
+    "evidence_hit@1": 0.2857142857142857,
+    "evidence_recall@3": 0.7142857142857143,
+    "evidence_hit@3": 0.7857142857142857,
+    "evidence_recall@5": 0.8571428571428571,
+    "evidence_hit@5": 0.9285714285714286,
+    "mrr": 0.48095238095238096,
+    "denominator_retrieval": "28 answerable questions",
+    "citation_support_auto": 0.5833333333333334,
+    "denominator_citations": "24 citations on answerable questions",
+    "citation_support_human": null,
+    "citation_support_human_reason": "not reviewed by a person in this run",
+    "time_error_s_median": 0.0,
+    "time_error_s_mean": 6.428571428571429,
+    "abstention_on_unanswerable": 1.0,
+    "denominator_abstention": "6 no-answer questions",
+    "false_abstention_on_answerable": 0.42857142857142855,
+    "keyword_proxy": 0.2857142857142857,
+    "keyword_proxy_note": "automatic: all answer_keywords appear in answered answers; not a quality judgment",
+    "statuses": {
+     "answered": 16,
+     "uncertain": 8,
+     "refused": 10
+    },
+    "routes": {
+     "cheap": 24,
+     "refused": 10
+    },
+    "channel_failures": {},
+    "errors": 0,
+    "latency_total_s": {
+     "p50": 0.7809999999999491,
+     "p95": 0.8439999999998236,
+     "mean": 0.6768823529411734
+    },
+    "latency_retrieval_s": {
+     "p50": 0.375,
+     "p95": 0.42200000000002547
+    },
+    "calls_per_question": {
+     "chat": 0.7058823529411765,
+     "embedding": 6.0
+    },
+    "tokens_per_question": {
+     "input": 855.1176470588235,
+     "output": 59.88235294117647
+    },
+    "cost_per_question": null,
+    "cost_reason": "no price basis configured for these models (MODEL_PRICES); tokens are reported instead"
+   }
+  },
+  "by_category": {
+   "cross_segment": {
+    "questions": 8,
+    "answerable": 8,
+    "unanswerable": 0,
+    "evidence_recall@1": 0.0,
+    "evidence_hit@1": 0.0,
+    "evidence_recall@3": 0.75,
+    "evidence_hit@3": 1.0,
+    "evidence_recall@5": 0.75,
+    "evidence_hit@5": 1.0,
+    "mrr": 0.3333333333333333,
+    "denominator_retrieval": "8 answerable questions",
+    "citation_support_auto": 0.5,
+    "denominator_citations": "8 citations on answerable questions",
+    "citation_support_human": null,
+    "citation_support_human_reason": "not reviewed by a person in this run",
+    "time_error_s_median": 0.0,
+    "time_error_s_mean": 3.75,
+    "abstention_on_unanswerable": null,
+    "denominator_abstention": "0 no-answer questions",
+    "false_abstention_on_answerable": 0.25,
+    "keyword_proxy": 0.0,
+    "keyword_proxy_note": "automatic: all answer_keywords appear in answered answers; not a quality judgment",
+    "statuses": {
+     "answered": 6,
+     "uncertain": 2
+    },
+    "routes": {
+     "cheap": 8
+    },
+    "channel_failures": {},
+    "errors": 0,
+    "latency_total_s": {
+     "p50": 0.7809999999999491,
+     "p95": 0.7970000000000255,
+     "mean": 0.7851249999999936
+    },
+    "latency_retrieval_s": {
+     "p50": 0.375,
+     "p95": 0.3910000000000764
+    },
+    "calls_per_question": {
+     "chat": 1.0,
+     "embedding": 6.0
+    },
+    "tokens_per_question": {
+     "input": 1068.0,
+     "output": 77.5
+    },
+    "cost_per_question": null,
+    "cost_reason": "no price basis configured for these models (MODEL_PRICES); tokens are reported instead"
+   },
+   "follow_up": {
+    "questions": 8,
+    "answerable": 8,
+    "unanswerable": 0,
+    "evidence_recall@1": 0.0,
+    "evidence_hit@1": 0.0,
+    "evidence_recall@3": 0.75,
+    "evidence_hit@3": 0.75,
+    "evidence_recall@5": 1.0,
+    "evidence_hit@5": 1.0,
+    "mrr": 0.3,
+    "denominator_retrieval": "8 answerable questions",
+    "citation_support_auto": 0.6,
+    "denominator_citations": "10 citations on answerable questions",
+    "citation_support_human": null,
+    "citation_support_human_reason": "not reviewed by a person in this run",
+    "time_error_s_median": 7.5,
+    "time_error_s_mean": 11.25,
+    "abstention_on_unanswerable": null,
+    "denominator_abstention": "0 no-answer questions",
+    "false_abstention_on_answerable": 0.5,
+    "keyword_proxy": null,
+    "keyword_proxy_note": "automatic: all answer_keywords appear in answered answers; not a quality judgment",
+    "statuses": {
+     "uncertain": 4,
+     "answered": 4
+    },
+    "routes": {
+     "cheap": 8
+    },
+    "channel_failures": {},
+    "errors": 0,
+    "latency_total_s": {
+     "p50": 0.7819999999999254,
+     "p95": 0.8120000000001255,
+     "mean": 0.7909999999999968
+    },
+    "latency_retrieval_s": {
+     "p50": 0.375,
+     "p95": 0.39000000000010004
+    },
+    "calls_per_question": {
+     "chat": 1.0,
+     "embedding": 6.0
+    },
+    "tokens_per_question": {
+     "input": 1086.0,
+     "output": 84.25
+    },
+    "cost_per_question": null,
+    "cost_reason": "no price basis configured for these models (MODEL_PRICES); tokens are reported instead"
+   },
+   "no_answer": {
+    "questions": 10,
+    "answerable": 0,
+    "unanswerable": 10,
+    "evidence_recall@1": null,
+    "evidence_hit@1": null,
+    "evidence_recall@3": null,
+    "evidence_hit@3": null,
+    "evidence_recall@5": null,
+    "evidence_hit@5": null,
+    "mrr": null,
+    "denominator_retrieval": "0 answerable questions",
+    "citation_support_auto": null,
+    "denominator_citations": "0 citations on answerable questions",
+    "citation_support_human": null,
+    "citation_support_human_reason": "not reviewed by a person in this run",
+    "time_error_s_median": null,
+    "time_error_s_mean": null,
+    "abstention_on_unanswerable": 1.0,
+    "denominator_abstention": "10 no-answer questions",
+    "false_abstention_on_answerable": null,
+    "keyword_proxy": null,
+    "keyword_proxy_note": "automatic: all answer_keywords appear in answered answers; not a quality judgment",
+    "statuses": {
+     "uncertain": 4,
+     "refused": 6
+    },
+    "routes": {
+     "cheap": 4,
+     "refused": 6
+    },
+    "channel_failures": {},
+    "errors": 0,
+    "latency_total_s": {
+     "p50": 0.42200000000002547,
+     "p95": 0.8440000000000509,
+     "mean": 0.5656999999999925
+    },
+    "latency_retrieval_s": {
+     "p50": 0.40599999999994907,
+     "p95": 0.42200000000002547
+    },
+    "calls_per_question": {
+     "chat": 0.4,
+     "embedding": 6.0
+    },
+    "tokens_per_question": {
+     "input": 624.4,
+     "output": 33.2
+    },
+    "cost_per_question": null,
+    "cost_reason": "no price basis configured for these models (MODEL_PRICES); tokens are reported instead"
+   },
+   "transcript": {
+    "questions": 22,
+    "answerable": 22,
+    "unanswerable": 0,
+    "evidence_recall@1": 0.09090909090909091,
+    "evidence_hit@1": 0.09090909090909091,
+    "evidence_recall@3": 0.8181818181818182,
+    "evidence_hit@3": 0.8181818181818182,
+    "evidence_recall@5": 0.9090909090909091,
+    "evidence_hit@5": 0.9090909090909091,
+    "mrr": 0.35151515151515145,
+    "denominator_retrieval": "22 answerable questions",
+    "citation_support_auto": 0.6428571428571429,
+    "denominator_citations": "28 citations on answerable questions",
+    "citation_support_human": null,
+    "citation_support_human_reason": "not reviewed by a person in this run",
+    "time_error_s_median": 0.0,
+    "time_error_s_mean": 6.818181818181818,
+    "abstention_on_unanswerable": null,
+    "denominator_abstention": "0 no-answer questions",
+    "false_abstention_on_answerable": 0.09090909090909091,
+    "keyword_proxy": 0.5,
+    "keyword_proxy_note": "automatic: all answer_keywords appear in answered answers; not a quality judgment",
+    "statuses": {
+     "answered": 20,
+     "uncertain": 2
+    },
+    "routes": {
+     "cheap": 22
+    },
+    "channel_failures": {},
+    "errors": 0,
+    "latency_total_s": {
+     "p50": 0.7810000000001764,
+     "p95": 0.7970000000000255,
+     "mean": 0.7862272727272636
+    },
+    "latency_retrieval_s": {
+     "p50": 0.375,
+     "p95": 0.39000000000010004
+    },
+    "calls_per_question": {
+     "chat": 1.0,
+     "embedding": 6.0
+    },
+    "tokens_per_question": {
+     "input": 1082.0,
+     "output": 85.18181818181819
+    },
+    "cost_per_question": null,
+    "cost_reason": "no price basis configured for these models (MODEL_PRICES); tokens are reported instead"
+   },
+   "visual": {
+    "questions": 16,
+    "answerable": 16,
+    "unanswerable": 0,
+    "evidence_recall@1": 0.5,
+    "evidence_hit@1": 0.5,
+    "evidence_recall@3": 0.5,
+    "evidence_hit@3": 0.5,
+    "evidence_recall@5": 0.75,
+    "evidence_hit@5": 0.75,
+    "mrr": 0.5833333333333333,
+    "denominator_retrieval": "16 answerable questions",
+    "citation_support_auto": null,
+    "denominator_citations": "0 citations on answerable questions",
+    "citation_support_human": null,
+    "citation_support_human_reason": "not reviewed by a person in this run",
+    "time_error_s_median": 15.0,
+    "time_error_s_mean": 45.0,
+    "abstention_on_unanswerable": null,
+    "denominator_abstention": "0 no-answer questions",
+    "false_abstention_on_answerable": 1.0,
+    "keyword_proxy": null,
+    "keyword_proxy_note": "automatic: all answer_keywords appear in answered answers; not a quality judgment",
+    "statuses": {
+     "refused": 16
+    },
+    "routes": {
+     "refused": 16
+    },
+    "channel_failures": {},
+    "errors": 0,
+    "latency_total_s": {
+     "p50": 0.375,
+     "p95": 0.40600000000017644,
+     "mean": 0.3564375000000126
+    },
+    "latency_retrieval_s": {
+     "p50": 0.375,
+     "p95": 0.40600000000017644
+    },
+    "calls_per_question": {
+     "embedding": 5.25
+    },
+    "tokens_per_question": {
+     "input": 133.25,
+     "output": 0.0
+    },
+    "cost_per_question": null,
+    "cost_reason": "no price basis configured for these models (MODEL_PRICES); tokens are reported instead"
+   }
+  },
+  "by_tag": {
+   "code_symbol": {
+    "questions": 20,
+    "answerable": 20,
+    "unanswerable": 0,
+    "evidence_recall@1": 0.1,
+    "evidence_hit@1": 0.1,
+    "evidence_recall@3": 0.5,
+    "evidence_hit@3": 0.5,
+    "evidence_recall@5": 0.7,
+    "evidence_hit@5": 0.7,
+    "mrr": 0.295,
+    "denominator_retrieval": "20 answerable questions",
+    "citation_support_auto": 0.5,
+    "denominator_citations": "16 citations on answerable questions",
+    "citation_support_human": null,
+    "citation_support_human_reason": "not reviewed by a person in this run",
+    "time_error_s_median": 15.0,
+    "time_error_s_mean": 39.0,
+    "abstention_on_unanswerable": null,
+    "denominator_abstention": "0 no-answer questions",
+    "false_abstention_on_answerable": 0.5,
+    "keyword_proxy": 0.4,
+    "keyword_proxy_note": "automatic: all answer_keywords appear in answered answers; not a quality judgment",
+    "statuses": {
+     "answered": 10,
+     "uncertain": 2,
+     "refused": 8
+    },
+    "routes": {
+     "cheap": 12,
+     "refused": 8
+    },
+    "channel_failures": {},
+    "errors": 0,
+    "latency_total_s": {
+     "p50": 0.7809999999999491,
+     "p95": 0.7970000000000255,
+     "mean": 0.60234999999999
+    },
+    "latency_retrieval_s": {
+     "p50": 0.375,
+     "p95": 0.40599999999994907
+    },
+    "calls_per_question": {
+     "chat": 0.6,
+     "embedding": 5.4
+    },
+    "tokens_per_question": {
+     "input": 707.1,
+     "output": 53.3
+    },
+    "cost_per_question": null,
+    "cost_reason": "no price basis configured for these models (MODEL_PRICES); tokens are reported instead"
+   },
+   "zh_term": {
+    "questions": 10,
+    "answerable": 10,
+    "unanswerable": 0,
+    "evidence_recall@1": 0.0,
+    "evidence_hit@1": 0.0,
+    "evidence_recall@3": 0.9,
+    "evidence_hit@3": 1.0,
+    "evidence_recall@5": 0.9,
+    "evidence_hit@5": 1.0,
+    "mrr": 0.33333333333333337,
+    "denominator_retrieval": "10 answerable questions",
+    "citation_support_auto": 0.6666666666666666,
+    "denominator_citations": "12 citations on answerable questions",
+    "citation_support_human": null,
+    "citation_support_human_reason": "not reviewed by a person in this run",
+    "time_error_s_median": 0.0,
+    "time_error_s_mean": 6.0,
+    "abstention_on_unanswerable": null,
+    "denominator_abstention": "0 no-answer questions",
+    "false_abstention_on_answerable": 0.0,
+    "keyword_proxy": 0.2,
+    "keyword_proxy_note": "automatic: all answer_keywords appear in answered answers; not a quality judgment",
+    "statuses": {
+     "answered": 10
+    },
+    "routes": {
+     "cheap": 10
+    },
+    "channel_failures": {},
+    "errors": 0,
+    "latency_total_s": {
+     "p50": 0.7809999999999491,
+     "p95": 0.7970000000000255,
+     "mean": 0.7829000000000178
+    },
+    "latency_retrieval_s": {
+     "p50": 0.375,
+     "p95": 0.3910000000000764
+    },
+    "calls_per_question": {
+     "chat": 1.0,
+     "embedding": 6.0
+    },
+    "tokens_per_question": {
+     "input": 1086.4,
+     "output": 79.8
+    },
+    "cost_per_question": null,
+    "cost_reason": "no price basis configured for these models (MODEL_PRICES); tokens are reported instead"
+   }
+  }
+ },
+ "fusion_keyword": {
+  "overall": {
+   "questions": 64,
+   "answerable": 54,
+   "unanswerable": 10,
+   "evidence_recall@1": 0.6296296296296297,
+   "evidence_hit@1": 0.6666666666666666,
+   "evidence_recall@3": 0.7777777777777778,
+   "evidence_hit@3": 0.7777777777777778,
+   "evidence_recall@5": 0.8148148148148148,
+   "evidence_hit@5": 0.8148148148148148,
+   "mrr": 0.7345679012345679,
+   "denominator_retrieval": "54 answerable questions",
+   "citation_support_auto": 0.6666666666666666,
+   "denominator_citations": "54 citations on answerable questions",
+   "citation_support_human": null,
+   "citation_support_human_reason": "not reviewed by a person in this run",
+   "time_error_s_median": 0.0,
+   "time_error_s_mean": 30.555555555555557,
+   "abstention_on_unanswerable": 1.0,
+   "denominator_abstention": "10 no-answer questions",
+   "false_abstention_on_answerable": 0.4444444444444444,
+   "keyword_proxy": 0.46153846153846156,
+   "keyword_proxy_note": "automatic: all answer_keywords appear in answered answers; not a quality judgment",
+   "statuses": {
+    "answered": 30,
+    "uncertain": 12,
+    "refused": 22
+   },
+   "routes": {
+    "cheap": 42,
+    "refused": 22
+   },
+   "channel_failures": {},
+   "errors": 0,
+   "latency_total_s": {
+    "p50": 0.8440000000000509,
+    "p95": 0.875,
+    "mean": 0.7094375000000035
+   },
+   "latency_retrieval_s": {
+    "p50": 0.45299999999997453,
+    "p95": 0.46900000000005093
+   },
+   "calls_per_question": {
+    "chat": 0.65625,
+    "embedding": 5.8125
+   },
+   "tokens_per_question": {
+    "input": 1005.65625,
+    "output": 57.46875
+   },
+   "cost_per_question": null,
+   "cost_reason": "no price basis configured for these models (MODEL_PRICES); tokens are reported instead"
+  },
+  "by_split": {
+   "holdout": {
+    "questions": 30,
+    "answerable": 26,
+    "unanswerable": 4,
+    "evidence_recall@1": 0.6923076923076923,
+    "evidence_hit@1": 0.6923076923076923,
+    "evidence_recall@3": 0.6923076923076923,
+    "evidence_hit@3": 0.6923076923076923,
+    "evidence_recall@5": 0.6923076923076923,
+    "evidence_hit@5": 0.6923076923076923,
+    "mrr": 0.717948717948718,
+    "denominator_retrieval": "26 answerable questions",
+    "citation_support_auto": 0.6153846153846154,
+    "denominator_citations": "26 citations on answerable questions",
+    "citation_support_human": null,
+    "citation_support_human_reason": "not reviewed by a person in this run",
+    "time_error_s_median": 0.0,
+    "time_error_s_mean": 16.53846153846154,
+    "abstention_on_unanswerable": 1.0,
+    "denominator_abstention": "4 no-answer questions",
+    "false_abstention_on_answerable": 0.46153846153846156,
+    "keyword_proxy": 0.5,
+    "keyword_proxy_note": "automatic: all answer_keywords appear in answered answers; not a quality judgment",
+    "statuses": {
+     "answered": 14,
+     "refused": 12,
+     "uncertain": 4
+    },
+    "routes": {
+     "cheap": 18,
+     "refused": 12
+    },
+    "channel_failures": {},
+    "errors": 0,
+    "latency_total_s": {
+     "p50": 0.8439999999998236,
+     "p95": 0.875,
+     "mean": 0.6802333333333308
+    },
+    "latency_retrieval_s": {
+     "p50": 0.45299999999997453,
+     "p95": 0.46900000000005093
+    },
+    "calls_per_question": {
+     "chat": 0.6,
+     "embedding": 5.6
+    },
+    "tokens_per_question": {
+     "input": 928.9333333333333,
+     "output": 51.733333333333334
+    },
+    "cost_per_question": null,
+    "cost_reason": "no price basis configured for these models (MODEL_PRICES); tokens are reported instead"
+   },
+   "tune": {
+    "questions": 34,
+    "answerable": 28,
+    "unanswerable": 6,
+    "evidence_recall@1": 0.5714285714285714,
+    "evidence_hit@1": 0.6428571428571429,
+    "evidence_recall@3": 0.8571428571428571,
+    "evidence_hit@3": 0.8571428571428571,
+    "evidence_recall@5": 0.9285714285714286,
+    "evidence_hit@5": 0.9285714285714286,
+    "mrr": 0.75,
+    "denominator_retrieval": "28 answerable questions",
+    "citation_support_auto": 0.7142857142857143,
+    "denominator_citations": "28 citations on answerable questions",
+    "citation_support_human": null,
+    "citation_support_human_reason": "not reviewed by a person in this run",
+    "time_error_s_median": 0.0,
+    "time_error_s_mean": 43.57142857142857,
+    "abstention_on_unanswerable": 1.0,
+    "denominator_abstention": "6 no-answer questions",
+    "false_abstention_on_answerable": 0.42857142857142855,
+    "keyword_proxy": 0.42857142857142855,
+    "keyword_proxy_note": "automatic: all answer_keywords appear in answered answers; not a quality judgment",
+    "statuses": {
+     "answered": 16,
+     "uncertain": 8,
+     "refused": 10
+    },
+    "routes": {
+     "cheap": 24,
+     "refused": 10
+    },
+    "channel_failures": {},
+    "errors": 0,
+    "latency_total_s": {
+     "p50": 0.8440000000000509,
+     "p95": 0.8900000000001,
+     "mean": 0.7352058823529499
+    },
+    "latency_retrieval_s": {
+     "p50": 0.45299999999997453,
+     "p95": 0.4839999999999236
+    },
+    "calls_per_question": {
+     "chat": 0.7058823529411765,
+     "embedding": 6.0
+    },
+    "tokens_per_question": {
+     "input": 1073.3529411764705,
+     "output": 62.529411764705884
+    },
+    "cost_per_question": null,
+    "cost_reason": "no price basis configured for these models (MODEL_PRICES); tokens are reported instead"
+   }
+  },
+  "by_category": {
+   "cross_segment": {
+    "questions": 8,
+    "answerable": 8,
+    "unanswerable": 0,
+    "evidence_recall@1": 0.75,
+    "evidence_hit@1": 1.0,
+    "evidence_recall@3": 1.0,
+    "evidence_hit@3": 1.0,
+    "evidence_recall@5": 1.0,
+    "evidence_hit@5": 1.0,
+    "mrr": 1.0,
+    "denominator_retrieval": "8 answerable questions",
+    "citation_support_auto": 0.6666666666666666,
+    "denominator_citations": "12 citations on answerable questions",
+    "citation_support_human": null,
+    "citation_support_human_reason": "not reviewed by a person in this run",
+    "time_error_s_median": 7.5,
+    "time_error_s_mean": 41.25,
+    "abstention_on_unanswerable": null,
+    "denominator_abstention": "0 no-answer questions",
+    "false_abstention_on_answerable": 0.25,
+    "keyword_proxy": 0.3333333333333333,
+    "keyword_proxy_note": "automatic: all answer_keywords appear in answered answers; not a quality judgment",
+    "statuses": {
+     "answered": 6,
+     "uncertain": 2
+    },
+    "routes": {
+     "cheap": 8
+    },
+    "channel_failures": {},
+    "errors": 0,
+    "latency_total_s": {
+     "p50": 0.875,
+     "p95": 0.8900000000001,
+     "mean": 0.8710000000000377
+    },
+    "latency_retrieval_s": {
+     "p50": 0.45299999999997453,
+     "p95": 0.484000000000151
+    },
+    "calls_per_question": {
+     "chat": 1.0,
+     "embedding": 6.0
+    },
+    "tokens_per_question": {
+     "input": 1560.5,
+     "output": 88.75
+    },
+    "cost_per_question": null,
+    "cost_reason": "no price basis configured for these models (MODEL_PRICES); tokens are reported instead"
+   },
+   "follow_up": {
+    "questions": 8,
+    "answerable": 8,
+    "unanswerable": 0,
+    "evidence_recall@1": 0.75,
+    "evidence_hit@1": 0.75,
+    "evidence_recall@3": 1.0,
+    "evidence_hit@3": 1.0,
+    "evidence_recall@5": 1.0,
+    "evidence_hit@5": 1.0,
+    "mrr": 0.8333333333333333,
+    "denominator_retrieval": "8 answerable questions",
+    "citation_support_auto": 0.6,
+    "denominator_citations": "10 citations on answerable questions",
+    "citation_support_human": null,
+    "citation_support_human_reason": "not reviewed by a person in this run",
+    "time_error_s_median": 7.5,
+    "time_error_s_mean": 11.25,
+    "abstention_on_unanswerable": null,
+    "denominator_abstention": "0 no-answer questions",
+    "false_abstention_on_answerable": 0.5,
+    "keyword_proxy": null,
+    "keyword_proxy_note": "automatic: all answer_keywords appear in answered answers; not a quality judgment",
+    "statuses": {
+     "uncertain": 4,
+     "answered": 4
+    },
+    "routes": {
+     "cheap": 8
+    },
+    "channel_failures": {},
+    "errors": 0,
+    "latency_total_s": {
+     "p50": 0.875,
+     "p95": 0.8900000000001,
+     "mean": 0.8711250000000064
+    },
+    "latency_retrieval_s": {
+     "p50": 0.4539999999999509,
+     "p95": 0.46900000000005093
+    },
+    "calls_per_question": {
+     "chat": 1.0,
+     "embedding": 6.0
+    },
+    "tokens_per_question": {
+     "input": 1488.25,
+     "output": 84.25
+    },
+    "cost_per_question": null,
+    "cost_reason": "no price basis configured for these models (MODEL_PRICES); tokens are reported instead"
+   },
+   "no_answer": {
+    "questions": 10,
+    "answerable": 0,
+    "unanswerable": 10,
+    "evidence_recall@1": null,
+    "evidence_hit@1": null,
+    "evidence_recall@3": null,
+    "evidence_hit@3": null,
+    "evidence_recall@5": null,
+    "evidence_hit@5": null,
+    "mrr": null,
+    "denominator_retrieval": "0 answerable questions",
+    "citation_support_auto": null,
+    "denominator_citations": "0 citations on answerable questions",
+    "citation_support_human": null,
+    "citation_support_human_reason": "not reviewed by a person in this run",
+    "time_error_s_median": null,
+    "time_error_s_mean": null,
+    "abstention_on_unanswerable": 1.0,
+    "denominator_abstention": "10 no-answer questions",
+    "false_abstention_on_answerable": null,
+    "keyword_proxy": null,
+    "keyword_proxy_note": "automatic: all answer_keywords appear in answered answers; not a quality judgment",
+    "statuses": {
+     "uncertain": 4,
+     "refused": 6
+    },
+    "routes": {
+     "cheap": 4,
+     "refused": 6
+    },
+    "channel_failures": {},
+    "errors": 0,
+    "latency_total_s": {
+     "p50": 0.45299999999997453,
+     "p95": 0.875,
+     "mean": 0.6076999999999998
+    },
+    "latency_retrieval_s": {
+     "p50": 0.4379999999998745,
+     "p95": 0.46900000000005093
+    },
+    "calls_per_question": {
+     "chat": 0.4,
+     "embedding": 6.0
+    },
+    "tokens_per_question": {
+     "input": 714.6,
+     "output": 33.2
+    },
+    "cost_per_question": null,
+    "cost_reason": "no price basis configured for these models (MODEL_PRICES); tokens are reported instead"
+   },
+   "transcript": {
+    "questions": 22,
+    "answerable": 22,
+    "unanswerable": 0,
+    "evidence_recall@1": 0.9090909090909091,
+    "evidence_hit@1": 0.9090909090909091,
+    "evidence_recall@3": 1.0,
+    "evidence_hit@3": 1.0,
+    "evidence_recall@5": 1.0,
+    "evidence_hit@5": 1.0,
+    "mrr": 0.9545454545454546,
+    "denominator_retrieval": "22 answerable questions",
+    "citation_support_auto": 0.6875,
+    "denominator_citations": "32 citations on answerable questions",
+    "citation_support_human": null,
+    "citation_support_human_reason": "not reviewed by a person in this run",
+    "time_error_s_median": 0.0,
+    "time_error_s_mean": 2.727272727272727,
+    "abstention_on_unanswerable": null,
+    "denominator_abstention": "0 no-answer questions",
+    "false_abstention_on_answerable": 0.09090909090909091,
+    "keyword_proxy": 0.5,
+    "keyword_proxy_note": "automatic: all answer_keywords appear in answered answers; not a quality judgment",
+    "statuses": {
+     "answered": 20,
+     "uncertain": 2
+    },
+    "routes": {
+     "cheap": 22
+    },
+    "channel_failures": {},
+    "errors": 0,
+    "latency_total_s": {
+     "p50": 0.859000000000151,
+     "p95": 0.875,
+     "mean": 0.8543636363636282
+    },
+    "latency_retrieval_s": {
+     "p50": 0.45299999999997453,
+     "p95": 0.46900000000005093
+    },
+    "calls_per_question": {
+     "chat": 1.0,
+     "embedding": 6.0
+    },
+    "tokens_per_question": {
+     "input": 1395.1818181818182,
+     "output": 89.18181818181819
+    },
+    "cost_per_question": null,
+    "cost_reason": "no price basis configured for these models (MODEL_PRICES); tokens are reported instead"
+   },
+   "visual": {
+    "questions": 16,
+    "answerable": 16,
+    "unanswerable": 0,
+    "evidence_recall@1": 0.125,
+    "evidence_hit@1": 0.125,
+    "evidence_recall@3": 0.25,
+    "evidence_hit@3": 0.25,
+    "evidence_recall@5": 0.375,
+    "evidence_hit@5": 0.375,
+    "mrr": 0.25,
+    "denominator_retrieval": "16 answerable questions",
+    "citation_support_auto": null,
+    "denominator_citations": "0 citations on answerable questions",
+    "citation_support_human": null,
+    "citation_support_human_reason": "not reviewed by a person in this run",
+    "time_error_s_median": 30.0,
+    "time_error_s_mean": 73.125,
+    "abstention_on_unanswerable": null,
+    "denominator_abstention": "0 no-answer questions",
+    "false_abstention_on_answerable": 1.0,
+    "keyword_proxy": null,
+    "keyword_proxy_note": "automatic: all answer_keywords appear in answered answers; not a quality judgment",
+    "statuses": {
+     "refused": 16
+    },
+    "routes": {
+     "refused": 16
+    },
+    "channel_failures": {},
+    "errors": 0,
+    "latency_total_s": {
+     "p50": 0.42200000000002547,
+     "p95": 0.46900000000005093,
+     "mean": 0.4121250000000032
+    },
+    "latency_retrieval_s": {
+     "p50": 0.42200000000002547,
+     "p95": 0.46900000000005093
+    },
+    "calls_per_question": {
+     "embedding": 5.25
+    },
+    "tokens_per_question": {
+     "input": 133.25,
+     "output": 0.0
+    },
+    "cost_per_question": null,
+    "cost_reason": "no price basis configured for these models (MODEL_PRICES); tokens are reported instead"
+   }
+  },
+  "by_tag": {
+   "code_symbol": {
+    "questions": 20,
+    "answerable": 20,
+    "unanswerable": 0,
+    "evidence_recall@1": 0.5,
+    "evidence_hit@1": 0.5,
+    "evidence_recall@3": 0.6,
+    "evidence_hit@3": 0.6,
+    "evidence_recall@5": 0.6,
+    "evidence_hit@5": 0.6,
+    "mrr": 0.575,
+    "denominator_retrieval": "20 answerable questions",
+    "citation_support_auto": 0.6666666666666666,
+    "denominator_citations": "18 citations on answerable questions",
+    "citation_support_human": null,
+    "citation_support_human_reason": "not reviewed by a person in this run",
+    "time_error_s_median": 5.0,
+    "time_error_s_mean": 23.0,
+    "abstention_on_unanswerable": null,
+    "denominator_abstention": "0 no-answer questions",
+    "false_abstention_on_answerable": 0.5,
+    "keyword_proxy": 0.4,
+    "keyword_proxy_note": "automatic: all answer_keywords appear in answered answers; not a quality judgment",
+    "statuses": {
+     "answered": 10,
+     "uncertain": 2,
+     "refused": 8
+    },
+    "routes": {
+     "cheap": 12,
+     "refused": 8
+    },
+    "channel_failures": {},
+    "errors": 0,
+    "latency_total_s": {
+     "p50": 0.8279999999999745,
+     "p95": 0.875,
+     "mean": 0.6671999999999685
+    },
+    "latency_retrieval_s": {
+     "p50": 0.42200000000002547,
+     "p95": 0.46900000000005093
+    },
+    "calls_per_question": {
+     "chat": 0.6,
+     "embedding": 5.4
+    },
+    "tokens_per_question": {
+     "input": 883.6,
+     "output": 55.6
+    },
+    "cost_per_question": null,
+    "cost_reason": "no price basis configured for these models (MODEL_PRICES); tokens are reported instead"
+   },
+   "zh_term": {
+    "questions": 10,
+    "answerable": 10,
+    "unanswerable": 0,
+    "evidence_recall@1": 0.9,
+    "evidence_hit@1": 1.0,
+    "evidence_recall@3": 1.0,
+    "evidence_hit@3": 1.0,
+    "evidence_recall@5": 1.0,
+    "evidence_hit@5": 1.0,
+    "mrr": 1.0,
+    "denominator_retrieval": "10 answerable questions",
+    "citation_support_auto": 0.5714285714285714,
+    "denominator_citations": "14 citations on answerable questions",
+    "citation_support_human": null,
+    "citation_support_human_reason": "not reviewed by a person in this run",
+    "time_error_s_median": 0.0,
+    "time_error_s_mean": 33.0,
+    "abstention_on_unanswerable": null,
+    "denominator_abstention": "0 no-answer questions",
+    "false_abstention_on_answerable": 0.0,
+    "keyword_proxy": 0.2,
+    "keyword_proxy_note": "automatic: all answer_keywords appear in answered answers; not a quality judgment",
+    "statuses": {
+     "answered": 10
+    },
+    "routes": {
+     "cheap": 10
+    },
+    "channel_failures": {},
+    "errors": 0,
+    "latency_total_s": {
+     "p50": 0.875,
+     "p95": 0.8900000000001,
+     "mean": 0.8592000000000553
+    },
+    "latency_retrieval_s": {
+     "p50": 0.45299999999997453,
+     "p95": 0.4839999999999236
+    },
+    "calls_per_question": {
+     "chat": 1.0,
+     "embedding": 6.0
+    },
+    "tokens_per_question": {
+     "input": 1416.6,
+     "output": 84.2
+    },
+    "cost_per_question": null,
+    "cost_reason": "no price basis configured for these models (MODEL_PRICES); tokens are reported instead"
+   }
+  }
+ },
+ "fusion_rerank": {
+  "overall": {
+   "questions": 64,
+   "answerable": 54,
+   "unanswerable": 10,
+   "evidence_recall@1": 0.18518518518518517,
+   "evidence_hit@1": 0.18518518518518517,
+   "evidence_recall@3": 0.7592592592592593,
+   "evidence_hit@3": 0.7777777777777778,
+   "evidence_recall@5": 0.8888888888888888,
+   "evidence_hit@5": 0.8888888888888888,
+   "mrr": 0.4765432098765431,
+   "denominator_retrieval": "54 answerable questions",
+   "citation_support_auto": 0.6,
+   "denominator_citations": "50 citations on answerable questions",
+   "citation_support_human": null,
+   "citation_support_human_reason": "not reviewed by a person in this run",
+   "time_error_s_median": 0.0,
+   "time_error_s_mean": 17.77777777777778,
+   "abstention_on_unanswerable": 1.0,
+   "denominator_abstention": "10 no-answer questions",
+   "false_abstention_on_answerable": 0.4444444444444444,
+   "keyword_proxy": 0.46153846153846156,
+   "keyword_proxy_note": "automatic: all answer_keywords appear in answered answers; not a quality judgment",
+   "statuses": {
+    "answered": 30,
+    "uncertain": 12,
+    "refused": 22
+   },
+   "routes": {
+    "cheap": 42,
+    "refused": 22
+   },
+   "channel_failures": {},
+   "errors": 0,
+   "latency_total_s": {
+    "p50": 0.9529999999999745,
+    "p95": 0.9849999999999,
+    "mean": 0.8220000000000027
+   },
+   "latency_retrieval_s": {
+    "p50": 0.5620000000001255,
+    "p95": 0.5789999999999509
+   },
+   "calls_per_question": {
+    "chat": 0.65625,
+    "embedding": 5.8125,
+    "rerank": 1.0
+   },
+   "tokens_per_question": {
+    "input": 1113.25,
+    "output": 56.0625
+   },
+   "cost_per_question": null,
+   "cost_reason": "no price basis configured for these models (MODEL_PRICES); tokens are reported instead"
+  },
+  "by_split": {
+   "holdout": {
+    "questions": 30,
+    "answerable": 26,
+    "unanswerable": 4,
+    "evidence_recall@1": 0.07692307692307693,
+    "evidence_hit@1": 0.07692307692307693,
+    "evidence_recall@3": 0.6923076923076923,
+    "evidence_hit@3": 0.6923076923076923,
+    "evidence_recall@5": 0.8461538461538461,
+    "evidence_hit@5": 0.8461538461538461,
+    "mrr": 0.39743589743589747,
+    "denominator_retrieval": "26 answerable questions",
+    "citation_support_auto": 0.5833333333333334,
+    "denominator_citations": "24 citations on answerable questions",
+    "citation_support_human": null,
+    "citation_support_human_reason": "not reviewed by a person in this run",
+    "time_error_s_median": 0.0,
+    "time_error_s_mean": 30.0,
+    "abstention_on_unanswerable": 1.0,
+    "denominator_abstention": "4 no-answer questions",
+    "false_abstention_on_answerable": 0.46153846153846156,
+    "keyword_proxy": 0.5,
+    "keyword_proxy_note": "automatic: all answer_keywords appear in answered answers; not a quality judgment",
+    "statuses": {
+     "answered": 14,
+     "refused": 12,
+     "uncertain": 4
+    },
+    "routes": {
+     "cheap": 18,
+     "refused": 12
+    },
+    "channel_failures": {},
+    "errors": 0,
+    "latency_total_s": {
+     "p50": 0.9529999999999745,
+     "p95": 0.9849999999999,
+     "mean": 0.7874999999999772
+    },
+    "latency_retrieval_s": {
+     "p50": 0.5470000000000255,
+     "p95": 0.5930000000000746
+    },
+    "calls_per_question": {
+     "chat": 0.6,
+     "embedding": 5.6,
+     "rerank": 1.0
+    },
+    "tokens_per_question": {
+     "input": 1015.6666666666666,
+     "output": 50.2
+    },
+    "cost_per_question": null,
+    "cost_reason": "no price basis configured for these models (MODEL_PRICES); tokens are reported instead"
+   },
+   "tune": {
+    "questions": 34,
+    "answerable": 28,
+    "unanswerable": 6,
+    "evidence_recall@1": 0.2857142857142857,
+    "evidence_hit@1": 0.2857142857142857,
+    "evidence_recall@3": 0.8214285714285714,
+    "evidence_hit@3": 0.8571428571428571,
+    "evidence_recall@5": 0.9285714285714286,
+    "evidence_hit@5": 0.9285714285714286,
+    "mrr": 0.55,
+    "denominator_retrieval": "28 answerable questions",
+    "citation_support_auto": 0.6153846153846154,
+    "denominator_citations": "26 citations on answerable questions",
+    "citation_support_human": null,
+    "citation_support_human_reason": "not reviewed by a person in this run",
+    "time_error_s_median": 0.0,
+    "time_error_s_mean": 6.428571428571429,
+    "abstention_on_unanswerable": 1.0,
+    "denominator_abstention": "6 no-answer questions",
+    "false_abstention_on_answerable": 0.42857142857142855,
+    "keyword_proxy": 0.42857142857142855,
+    "keyword_proxy_note": "automatic: all answer_keywords appear in answered answers; not a quality judgment",
+    "statuses": {
+     "answered": 16,
+     "uncertain": 8,
+     "refused": 10
+    },
+    "routes": {
+     "cheap": 24,
+     "refused": 10
+    },
+    "channel_failures": {},
+    "errors": 0,
+    "latency_total_s": {
+     "p50": 0.9680000000000746,
+     "p95": 1.0,
+     "mean": 0.8524411764706135
+    },
+    "latency_retrieval_s": {
+     "p50": 0.5620000000001255,
+     "p95": 0.5789999999999509
+    },
+    "calls_per_question": {
+     "chat": 0.7058823529411765,
+     "embedding": 6.0,
+     "rerank": 1.0
+    },
+    "tokens_per_question": {
+     "input": 1199.3529411764705,
+     "output": 61.23529411764706
+    },
+    "cost_per_question": null,
+    "cost_reason": "no price basis configured for these models (MODEL_PRICES); tokens are reported instead"
+   }
+  },
+  "by_category": {
+   "cross_segment": {
+    "questions": 8,
+    "answerable": 8,
+    "unanswerable": 0,
+    "evidence_recall@1": 0.0,
+    "evidence_hit@1": 0.0,
+    "evidence_recall@3": 0.875,
+    "evidence_hit@3": 1.0,
+    "evidence_recall@5": 1.0,
+    "evidence_hit@5": 1.0,
+    "mrr": 0.375,
+    "denominator_retrieval": "8 answerable questions",
+    "citation_support_auto": 0.6,
+    "denominator_citations": "10 citations on answerable questions",
+    "citation_support_human": null,
+    "citation_support_human_reason": "not reviewed by a person in this run",
+    "time_error_s_median": 0.0,
+    "time_error_s_mean": 3.75,
+    "abstention_on_unanswerable": null,
+    "denominator_abstention": "0 no-answer questions",
+    "false_abstention_on_answerable": 0.25,
+    "keyword_proxy": 0.3333333333333333,
+    "keyword_proxy_note": "automatic: all answer_keywords appear in answered answers; not a quality judgment",
+    "statuses": {
+     "answered": 6,
+     "uncertain": 2
+    },
+    "routes": {
+     "cheap": 8
+    },
+    "channel_failures": {},
+    "errors": 0,
+    "latency_total_s": {
+     "p50": 0.9680000000000746,
+     "p95": 0.9849999999999,
+     "mean": 0.9648750000000064
+    },
+    "latency_retrieval_s": {
+     "p50": 0.5470000000000255,
+     "p95": 0.5779999999999745
+    },
+    "calls_per_question": {
+     "chat": 1.0,
+     "embedding": 6.0,
+     "rerank": 1.0
+    },
+    "tokens_per_question": {
+     "input": 1401.0,
+     "output": 83.25
+    },
+    "cost_per_question": null,
+    "cost_reason": "no price basis configured for these models (MODEL_PRICES); tokens are reported instead"
+   },
+   "follow_up": {
+    "questions": 8,
+    "answerable": 8,
+    "unanswerable": 0,
+    "evidence_recall@1": 0.0,
+    "evidence_hit@1": 0.0,
+    "evidence_recall@3": 1.0,
+    "evidence_hit@3": 1.0,
+    "evidence_recall@5": 1.0,
+    "evidence_hit@5": 1.0,
+    "mrr": 0.4166666666666667,
+    "denominator_retrieval": "8 answerable questions",
+    "citation_support_auto": 0.6,
+    "denominator_citations": "10 citations on answerable questions",
+    "citation_support_human": null,
+    "citation_support_human_reason": "not reviewed by a person in this run",
+    "time_error_s_median": 7.5,
+    "time_error_s_mean": 11.25,
+    "abstention_on_unanswerable": null,
+    "denominator_abstention": "0 no-answer questions",
+    "false_abstention_on_answerable": 0.5,
+    "keyword_proxy": null,
+    "keyword_proxy_note": "automatic: all answer_keywords appear in answered answers; not a quality judgment",
+    "statuses": {
+     "uncertain": 4,
+     "answered": 4
+    },
+    "routes": {
+     "cheap": 8
+    },
+    "channel_failures": {},
+    "errors": 0,
+    "latency_total_s": {
+     "p50": 0.9690000000000509,
+     "p95": 0.984000000000151,
+     "mean": 0.9706250000000409
+    },
+    "latency_retrieval_s": {
+     "p50": 0.5629999999998745,
+     "p95": 0.5779999999999745
+    },
+    "calls_per_question": {
+     "chat": 1.0,
+     "embedding": 6.0,
+     "rerank": 1.0
+    },
+    "tokens_per_question": {
+     "input": 1532.75,
+     "output": 84.25
+    },
+    "cost_per_question": null,
+    "cost_reason": "no price basis configured for these models (MODEL_PRICES); tokens are reported instead"
+   },
+   "no_answer": {
+    "questions": 10,
+    "answerable": 0,
+    "unanswerable": 10,
+    "evidence_recall@1": null,
+    "evidence_hit@1": null,
+    "evidence_recall@3": null,
+    "evidence_hit@3": null,
+    "evidence_recall@5": null,
+    "evidence_hit@5": null,
+    "mrr": null,
+    "denominator_retrieval": "0 answerable questions",
+    "citation_support_auto": null,
+    "denominator_citations": "0 citations on answerable questions",
+    "citation_support_human": null,
+    "citation_support_human_reason": "not reviewed by a person in this run",
+    "time_error_s_median": null,
+    "time_error_s_mean": null,
+    "abstention_on_unanswerable": 1.0,
+    "denominator_abstention": "10 no-answer questions",
+    "false_abstention_on_answerable": null,
+    "keyword_proxy": null,
+    "keyword_proxy_note": "automatic: all answer_keywords appear in answered answers; not a quality judgment",
+    "statuses": {
+     "uncertain": 4,
+     "refused": 6
+    },
+    "routes": {
+     "cheap": 4,
+     "refused": 6
+    },
+    "channel_failures": {},
+    "errors": 0,
+    "latency_total_s": {
+     "p50": 0.5930000000000746,
+     "p95": 1.0160000000000764,
+     "mean": 0.7389000000000123
+    },
+    "latency_retrieval_s": {
+     "p50": 0.5779999999999745,
+     "p95": 0.5940000000000509
+    },
+    "calls_per_question": {
+     "chat": 0.4,
+     "embedding": 6.0,
+     "rerank": 1.0
+    },
+    "tokens_per_question": {
+     "input": 869.4,
+     "output": 33.2
+    },
+    "cost_per_question": null,
+    "cost_reason": "no price basis configured for these models (MODEL_PRICES); tokens are reported instead"
+   },
+   "transcript": {
+    "questions": 22,
+    "answerable": 22,
+    "unanswerable": 0,
+    "evidence_recall@1": 0.09090909090909091,
+    "evidence_hit@1": 0.09090909090909091,
+    "evidence_recall@3": 0.8181818181818182,
+    "evidence_hit@3": 0.8181818181818182,
+    "evidence_recall@5": 0.9090909090909091,
+    "evidence_hit@5": 0.9090909090909091,
+    "mrr": 0.45757575757575764,
+    "denominator_retrieval": "22 answerable questions",
+    "citation_support_auto": 0.6,
+    "denominator_citations": "30 citations on answerable questions",
+    "citation_support_human": null,
+    "citation_support_human_reason": "not reviewed by a person in this run",
+    "time_error_s_median": 0.0,
+    "time_error_s_mean": 5.454545454545454,
+    "abstention_on_unanswerable": null,
+    "denominator_abstention": "0 no-answer questions",
+    "false_abstention_on_answerable": 0.09090909090909091,
+    "keyword_proxy": 0.5,
+    "keyword_proxy_note": "automatic: all answer_keywords appear in answered answers; not a quality judgment",
+    "statuses": {
+     "answered": 20,
+     "uncertain": 2
+    },
+    "routes": {
+     "cheap": 22
+    },
+    "channel_failures": {},
+    "errors": 0,
+    "latency_total_s": {
+     "p50": 0.9689999999998236,
+     "p95": 0.9849999999999,
+     "mean": 0.9659999999999875
+    },
+    "latency_retrieval_s": {
+     "p50": 0.5470000000000255,
+     "p95": 0.5779999999999745
+    },
+    "calls_per_question": {
+     "chat": 1.0,
+     "embedding": 6.0,
+     "rerank": 1.0
+    },
+    "tokens_per_question": {
+     "input": 1518.090909090909,
+     "output": 87.0909090909091
+    },
+    "cost_per_question": null,
+    "cost_reason": "no price basis configured for these models (MODEL_PRICES); tokens are reported instead"
+   },
+   "visual": {
+    "questions": 16,
+    "answerable": 16,
+    "unanswerable": 0,
+    "evidence_recall@1": 0.5,
+    "evidence_hit@1": 0.5,
+    "evidence_recall@3": 0.5,
+    "evidence_hit@3": 0.5,
+    "evidence_recall@5": 0.75,
+    "evidence_hit@5": 0.75,
+    "mrr": 0.5833333333333333,
+    "denominator_retrieval": "16 answerable questions",
+    "citation_support_auto": null,
+    "denominator_citations": "0 citations on answerable questions",
+    "citation_support_human": null,
+    "citation_support_human_reason": "not reviewed by a person in this run",
+    "time_error_s_median": 15.0,
+    "time_error_s_mean": 45.0,
+    "abstention_on_unanswerable": null,
+    "denominator_abstention": "0 no-answer questions",
+    "false_abstention_on_answerable": 1.0,
+    "keyword_proxy": null,
+    "keyword_proxy_note": "automatic: all answer_keywords appear in answered answers; not a quality judgment",
+    "statuses": {
+     "refused": 16
+    },
+    "routes": {
+     "refused": 16
+    },
+    "channel_failures": {},
+    "errors": 0,
+    "latency_total_s": {
+     "p50": 0.5470000000000255,
+     "p95": 0.5939999999998236,
+     "mean": 0.5301874999999967
+    },
+    "latency_retrieval_s": {
+     "p50": 0.5470000000000255,
+     "p95": 0.5779999999999745
+    },
+    "calls_per_question": {
+     "embedding": 5.25,
+     "rerank": 1.0
+    },
+    "tokens_per_question": {
+     "input": 355.375,
+     "output": 0.0
+    },
+    "cost_per_question": null,
+    "cost_reason": "no price basis configured for these models (MODEL_PRICES); tokens are reported instead"
+   }
+  },
+  "by_tag": {
+   "code_symbol": {
+    "questions": 20,
+    "answerable": 20,
+    "unanswerable": 0,
+    "evidence_recall@1": 0.1,
+    "evidence_hit@1": 0.1,
+    "evidence_recall@3": 0.5,
+    "evidence_hit@3": 0.5,
+    "evidence_recall@5": 0.7,
+    "evidence_hit@5": 0.7,
+    "mrr": 0.34500000000000003,
+    "denominator_retrieval": "20 answerable questions",
+    "citation_support_auto": 0.5,
+    "denominator_citations": "16 citations on answerable questions",
+    "citation_support_human": null,
+    "citation_support_human_reason": "not reviewed by a person in this run",
+    "time_error_s_median": 15.0,
+    "time_error_s_mean": 39.0,
+    "abstention_on_unanswerable": null,
+    "denominator_abstention": "0 no-answer questions",
+    "false_abstention_on_answerable": 0.5,
+    "keyword_proxy": 0.4,
+    "keyword_proxy_note": "automatic: all answer_keywords appear in answered answers; not a quality judgment",
+    "statuses": {
+     "answered": 10,
+     "uncertain": 2,
+     "refused": 8
+    },
+    "routes": {
+     "cheap": 12,
+     "refused": 8
+    },
+    "channel_failures": {},
+    "errors": 0,
+    "latency_total_s": {
+     "p50": 0.9529999999999745,
+     "p95": 0.984000000000151,
+     "mean": 0.7781499999999824
+    },
+    "latency_retrieval_s": {
+     "p50": 0.5469999999997981,
+     "p95": 0.5779999999999745
+    },
+    "calls_per_question": {
+     "chat": 0.6,
+     "embedding": 5.4,
+     "rerank": 1.0
+    },
+    "tokens_per_question": {
+     "input": 1024.8,
+     "output": 53.3
+    },
+    "cost_per_question": null,
+    "cost_reason": "no price basis configured for these models (MODEL_PRICES); tokens are reported instead"
+   },
+   "zh_term": {
+    "questions": 10,
+    "answerable": 10,
+    "unanswerable": 0,
+    "evidence_recall@1": 0.0,
+    "evidence_hit@1": 0.0,
+    "evidence_recall@3": 0.9,
+    "evidence_hit@3": 1.0,
+    "evidence_recall@5": 1.0,
+    "evidence_hit@5": 1.0,
+    "mrr": 0.4333333333333333,
+    "denominator_retrieval": "10 answerable questions",
+    "citation_support_auto": 0.6666666666666666,
+    "denominator_citations": "12 citations on answerable questions",
+    "citation_support_human": null,
+    "citation_support_human_reason": "not reviewed by a person in this run",
+    "time_error_s_median": 0.0,
+    "time_error_s_mean": 3.0,
+    "abstention_on_unanswerable": null,
+    "denominator_abstention": "0 no-answer questions",
+    "false_abstention_on_answerable": 0.0,
+    "keyword_proxy": 0.2,
+    "keyword_proxy_note": "automatic: all answer_keywords appear in answered answers; not a quality judgment",
+    "statuses": {
+     "answered": 10
+    },
+    "routes": {
+     "cheap": 10
+    },
+    "channel_failures": {},
+    "errors": 0,
+    "latency_total_s": {
+     "p50": 0.9690000000000509,
+     "p95": 0.9849999999999,
+     "mean": 0.9673000000000002
+    },
+    "latency_retrieval_s": {
+     "p50": 0.5470000000000255,
+     "p95": 0.5779999999999745
+    },
+    "calls_per_question": {
+     "chat": 1.0,
+     "embedding": 6.0,
+     "rerank": 1.0
+    },
+    "tokens_per_question": {
+     "input": 1499.4,
+     "output": 79.8
+    },
+    "cost_per_question": null,
+    "cost_reason": "no price basis configured for these models (MODEL_PRICES); tokens are reported instead"
+   }
+  }
+ },
+ "deep": {
+  "overall": {
+   "questions": 64,
+   "answerable": 54,
+   "unanswerable": 10,
+   "evidence_recall@1": 0.18518518518518517,
+   "evidence_hit@1": 0.18518518518518517,
+   "evidence_recall@3": 0.7037037037037037,
+   "evidence_hit@3": 0.7407407407407407,
+   "evidence_recall@5": 0.8518518518518519,
+   "evidence_hit@5": 0.8888888888888888,
+   "mrr": 0.4098765432098763,
+   "denominator_retrieval": "54 answerable questions",
+   "citation_support_auto": 0.45,
+   "denominator_citations": "80 citations on answerable questions",
+   "citation_support_human": null,
+   "citation_support_human_reason": "not reviewed by a person in this run",
+   "time_error_s_median": 0.0,
+   "time_error_s_mean": 44.25925925925926,
+   "abstention_on_unanswerable": 1.0,
+   "denominator_abstention": "10 no-answer questions",
+   "false_abstention_on_answerable": 0.18518518518518517,
+   "keyword_proxy": 0.3888888888888889,
+   "keyword_proxy_note": "automatic: all answer_keywords appear in answered answers; not a quality judgment",
+   "statuses": {
+    "answered": 44,
+    "uncertain": 20
+   },
+   "routes": {
+    "deep": 64
+   },
+   "channel_failures": {},
+   "errors": 0,
+   "latency_total_s": {
+    "p50": 1.609000000000151,
+    "p95": 1.6569999999999254,
+    "mean": 1.6054843749999996
+   },
+   "latency_retrieval_s": {
+    "p50": 0.375,
+    "p95": 0.42200000000002547
+   },
+   "calls_per_question": {
+    "chat": 2.0,
+    "embedding": 5.8125
+   },
+   "tokens_per_question": {
+    "input": 3142.78125,
+    "output": 244.21875
+   },
+   "cost_per_question": null,
+   "cost_reason": "no price basis configured for these models (MODEL_PRICES); tokens are reported instead"
+  },
+  "by_split": {
+   "holdout": {
+    "questions": 30,
+    "answerable": 26,
+    "unanswerable": 4,
+    "evidence_recall@1": 0.07692307692307693,
+    "evidence_hit@1": 0.07692307692307693,
+    "evidence_recall@3": 0.6923076923076923,
+    "evidence_hit@3": 0.6923076923076923,
+    "evidence_recall@5": 0.8461538461538461,
+    "evidence_hit@5": 0.8461538461538461,
+    "mrr": 0.3333333333333333,
+    "denominator_retrieval": "26 answerable questions",
+    "citation_support_auto": 0.35,
+    "denominator_citations": "40 citations on answerable questions",
+    "citation_support_human": null,
+    "citation_support_human_reason": "not reviewed by a person in this run",
+    "time_error_s_median": 15.0,
+    "time_error_s_mean": 55.38461538461539,
+    "abstention_on_unanswerable": 1.0,
+    "denominator_abstention": "4 no-answer questions",
+    "false_abstention_on_answerable": 0.15384615384615385,
+    "keyword_proxy": 0.3333333333333333,
+    "keyword_proxy_note": "automatic: all answer_keywords appear in answered answers; not a quality judgment",
+    "statuses": {
+     "answered": 22,
+     "uncertain": 8
+    },
+    "routes": {
+     "deep": 30
+    },
+    "channel_failures": {},
+    "errors": 0,
+    "latency_total_s": {
+     "p50": 1.6089999999999236,
+     "p95": 1.6720000000000255,
+     "mean": 1.5942333333333256
+    },
+    "latency_retrieval_s": {
+     "p50": 0.375,
+     "p95": 0.4370000000001255
+    },
+    "calls_per_question": {
+     "chat": 2.0,
+     "embedding": 5.6
+    },
+    "tokens_per_question": {
+     "input": 3082.8,
+     "output": 240.53333333333333
+    },
+    "cost_per_question": null,
+    "cost_reason": "no price basis configured for these models (MODEL_PRICES); tokens are reported instead"
+   },
+   "tune": {
+    "questions": 34,
+    "answerable": 28,
+    "unanswerable": 6,
+    "evidence_recall@1": 0.2857142857142857,
+    "evidence_hit@1": 0.2857142857142857,
+    "evidence_recall@3": 0.7142857142857143,
+    "evidence_hit@3": 0.7857142857142857,
+    "evidence_recall@5": 0.8571428571428571,
+    "evidence_hit@5": 0.9285714285714286,
+    "mrr": 0.48095238095238096,
+    "denominator_retrieval": "28 answerable questions",
+    "citation_support_auto": 0.55,
+    "denominator_citations": "40 citations on answerable questions",
+    "citation_support_human": null,
+    "citation_support_human_reason": "not reviewed by a person in this run",
+    "time_error_s_median": 0.0,
+    "time_error_s_mean": 33.92857142857143,
+    "abstention_on_unanswerable": 1.0,
+    "denominator_abstention": "6 no-answer questions",
+    "false_abstention_on_answerable": 0.21428571428571427,
+    "keyword_proxy": 0.4444444444444444,
+    "keyword_proxy_note": "automatic: all answer_keywords appear in answered answers; not a quality judgment",
+    "statuses": {
+     "answered": 22,
+     "uncertain": 12
+    },
+    "routes": {
+     "deep": 34
+    },
+    "channel_failures": {},
+    "errors": 0,
+    "latency_total_s": {
+     "p50": 1.609000000000151,
+     "p95": 1.6569999999999254,
+     "mean": 1.6154117647058883
+    },
+    "latency_retrieval_s": {
+     "p50": 0.375,
+     "p95": 0.42200000000002547
+    },
+    "calls_per_question": {
+     "chat": 2.0,
+     "embedding": 6.0
+    },
+    "tokens_per_question": {
+     "input": 3195.705882352941,
+     "output": 247.47058823529412
+    },
+    "cost_per_question": null,
+    "cost_reason": "no price basis configured for these models (MODEL_PRICES); tokens are reported instead"
+   }
+  },
+  "by_category": {
+   "cross_segment": {
+    "questions": 8,
+    "answerable": 8,
+    "unanswerable": 0,
+    "evidence_recall@1": 0.0,
+    "evidence_hit@1": 0.0,
+    "evidence_recall@3": 0.75,
+    "evidence_hit@3": 1.0,
+    "evidence_recall@5": 0.75,
+    "evidence_hit@5": 1.0,
+    "mrr": 0.3333333333333333,
+    "denominator_retrieval": "8 answerable questions",
+    "citation_support_auto": 0.3333333333333333,
+    "denominator_citations": "12 citations on answerable questions",
+    "citation_support_human": null,
+    "citation_support_human_reason": "not reviewed by a person in this run",
+    "time_error_s_median": 45.0,
+    "time_error_s_mean": 50.0,
+    "abstention_on_unanswerable": null,
+    "denominator_abstention": "0 no-answer questions",
+    "false_abstention_on_answerable": 0.25,
+    "keyword_proxy": 0.3333333333333333,
+    "keyword_proxy_note": "automatic: all answer_keywords appear in answered answers; not a quality judgment",
+    "statuses": {
+     "answered": 6,
+     "uncertain": 2
+    },
+    "routes": {
+     "deep": 8
+    },
+    "channel_failures": {},
+    "errors": 0,
+    "latency_total_s": {
+     "p50": 1.6089999999999236,
+     "p95": 1.6099999999999,
+     "mean": 1.6036250000000223
+    },
+    "latency_retrieval_s": {
+     "p50": 0.375,
+     "p95": 0.3910000000000764
+    },
+    "calls_per_question": {
+     "chat": 2.0,
+     "embedding": 6.0
+    },
+    "tokens_per_question": {
+     "input": 3090.75,
+     "output": 254.5
+    },
+    "cost_per_question": null,
+    "cost_reason": "no price basis configured for these models (MODEL_PRICES); tokens are reported instead"
+   },
+   "follow_up": {
+    "questions": 8,
+    "answerable": 8,
+    "unanswerable": 0,
+    "evidence_recall@1": 0.0,
+    "evidence_hit@1": 0.0,
+    "evidence_recall@3": 0.75,
+    "evidence_hit@3": 0.75,
+    "evidence_recall@5": 1.0,
+    "evidence_hit@5": 1.0,
+    "mrr": 0.3,
+    "denominator_retrieval": "8 answerable questions",
+    "citation_support_auto": 0.8,
+    "denominator_citations": "10 citations on answerable questions",
+    "citation_support_human": null,
+    "citation_support_human_reason": "not reviewed by a person in this run",
+    "time_error_s_median": 0.0,
+    "time_error_s_mean": 3.75,
+    "abstention_on_unanswerable": null,
+    "denominator_abstention": "0 no-answer questions",
+    "false_abstention_on_answerable": 0.0,
+    "keyword_proxy": null,
+    "keyword_proxy_note": "automatic: all answer_keywords appear in answered answers; not a quality judgment",
+    "statuses": {
+     "answered": 8
+    },
+    "routes": {
+     "deep": 8
+    },
+    "channel_failures": {},
+    "errors": 0,
+    "latency_total_s": {
+     "p50": 1.6089999999999236,
+     "p95": 1.640999999999849,
+     "mean": 1.6131249999999966
+    },
+    "latency_retrieval_s": {
+     "p50": 0.375,
+     "p95": 0.4069999999999254
+    },
+    "calls_per_question": {
+     "chat": 2.0,
+     "embedding": 6.0
+    },
+    "tokens_per_question": {
+     "input": 3049.5,
+     "output": 240.25
+    },
+    "cost_per_question": null,
+    "cost_reason": "no price basis configured for these models (MODEL_PRICES); tokens are reported instead"
+   },
+   "no_answer": {
+    "questions": 10,
+    "answerable": 0,
+    "unanswerable": 10,
+    "evidence_recall@1": null,
+    "evidence_hit@1": null,
+    "evidence_recall@3": null,
+    "evidence_hit@3": null,
+    "evidence_recall@5": null,
+    "evidence_hit@5": null,
+    "mrr": null,
+    "denominator_retrieval": "0 answerable questions",
+    "citation_support_auto": null,
+    "denominator_citations": "0 citations on answerable questions",
+    "citation_support_human": null,
+    "citation_support_human_reason": "not reviewed by a person in this run",
+    "time_error_s_median": null,
+    "time_error_s_mean": null,
+    "abstention_on_unanswerable": 1.0,
+    "denominator_abstention": "10 no-answer questions",
+    "false_abstention_on_answerable": null,
+    "keyword_proxy": null,
+    "keyword_proxy_note": "automatic: all answer_keywords appear in answered answers; not a quality judgment",
+    "statuses": {
+     "uncertain": 10
+    },
+    "routes": {
+     "deep": 10
+    },
+    "channel_failures": {},
+    "errors": 0,
+    "latency_total_s": {
+     "p50": 1.640999999999849,
+     "p95": 1.6720000000000255,
+     "mean": 1.6391999999999824
+    },
+    "latency_retrieval_s": {
+     "p50": 0.40600000000017644,
+     "p95": 0.45299999999997453
+    },
+    "calls_per_question": {
+     "chat": 2.0,
+     "embedding": 6.0
+    },
+    "tokens_per_question": {
+     "input": 3429.2,
+     "output": 241.2
+    },
+    "cost_per_question": null,
+    "cost_reason": "no price basis configured for these models (MODEL_PRICES); tokens are reported instead"
+   },
+   "transcript": {
+    "questions": 22,
+    "answerable": 22,
+    "unanswerable": 0,
+    "evidence_recall@1": 0.09090909090909091,
+    "evidence_hit@1": 0.09090909090909091,
+    "evidence_recall@3": 0.8181818181818182,
+    "evidence_hit@3": 0.8181818181818182,
+    "evidence_recall@5": 0.9090909090909091,
+    "evidence_hit@5": 0.9090909090909091,
+    "mrr": 0.35151515151515145,
+    "denominator_retrieval": "22 answerable questions",
+    "citation_support_auto": 0.5625,
+    "denominator_citations": "32 citations on answerable questions",
+    "citation_support_human": null,
+    "citation_support_human_reason": "not reviewed by a person in this run",
+    "time_error_s_median": 0.0,
+    "time_error_s_mean": 5.454545454545454,
+    "abstention_on_unanswerable": null,
+    "denominator_abstention": "0 no-answer questions",
+    "false_abstention_on_answerable": 0.09090909090909091,
+    "keyword_proxy": 0.6,
+    "keyword_proxy_note": "automatic: all answer_keywords appear in answered answers; not a quality judgment",
+    "statuses": {
+     "answered": 20,
+     "uncertain": 2
+    },
+    "routes": {
+     "deep": 22
+    },
+    "channel_failures": {},
+    "errors": 0,
+    "latency_total_s": {
+     "p50": 1.609000000000151,
+     "p95": 1.625,
+     "mean": 1.605863636363634
+    },
+    "latency_retrieval_s": {
+     "p50": 0.375,
+     "p95": 0.390999999999849
+    },
+    "calls_per_question": {
+     "chat": 2.0,
+     "embedding": 6.0
+    },
+    "tokens_per_question": {
+     "input": 3052.818181818182,
+     "output": 245.8181818181818
+    },
+    "cost_per_question": null,
+    "cost_reason": "no price basis configured for these models (MODEL_PRICES); tokens are reported instead"
+   },
+   "visual": {
+    "questions": 16,
+    "answerable": 16,
+    "unanswerable": 0,
+    "evidence_recall@1": 0.5,
+    "evidence_hit@1": 0.5,
+    "evidence_recall@3": 0.5,
+    "evidence_hit@3": 0.5,
+    "evidence_recall@5": 0.75,
+    "evidence_hit@5": 0.75,
+    "mrr": 0.5833333333333333,
+    "denominator_retrieval": "16 answerable questions",
+    "citation_support_auto": 0.23076923076923078,
+    "denominator_citations": "26 citations on answerable questions",
+    "citation_support_human": null,
+    "citation_support_human_reason": "not reviewed by a person in this run",
+    "time_error_s_median": 52.5,
+    "time_error_s_mean": 115.0,
+    "abstention_on_unanswerable": null,
+    "denominator_abstention": "0 no-answer questions",
+    "false_abstention_on_answerable": 0.375,
+    "keyword_proxy": 0.0,
+    "keyword_proxy_note": "automatic: all answer_keywords appear in answered answers; not a quality judgment",
+    "statuses": {
+     "answered": 10,
+     "uncertain": 6
+    },
+    "routes": {
+     "deep": 16
+    },
+    "channel_failures": {},
+    "errors": 0,
+    "latency_total_s": {
+     "p50": 1.594000000000051,
+     "p95": 1.625,
+     "mean": 1.581000000000003
+    },
+    "latency_retrieval_s": {
+     "p50": 0.375,
+     "p95": 0.3910000000000764
+    },
+    "calls_per_question": {
+     "chat": 2.0,
+     "embedding": 5.25
+    },
+    "tokens_per_question": {
+     "input": 3160.125,
+     "output": 240.75
+    },
+    "cost_per_question": null,
+    "cost_reason": "no price basis configured for these models (MODEL_PRICES); tokens are reported instead"
+   }
+  },
+  "by_tag": {
+   "code_symbol": {
+    "questions": 20,
+    "answerable": 20,
+    "unanswerable": 0,
+    "evidence_recall@1": 0.1,
+    "evidence_hit@1": 0.1,
+    "evidence_recall@3": 0.5,
+    "evidence_hit@3": 0.5,
+    "evidence_recall@5": 0.7,
+    "evidence_hit@5": 0.7,
+    "mrr": 0.295,
+    "denominator_retrieval": "20 answerable questions",
+    "citation_support_auto": 0.3333333333333333,
+    "denominator_citations": "30 citations on answerable questions",
+    "citation_support_human": null,
+    "citation_support_human_reason": "not reviewed by a person in this run",
+    "time_error_s_median": 0.0,
+    "time_error_s_mean": 53.5,
+    "abstention_on_unanswerable": null,
+    "denominator_abstention": "0 no-answer questions",
+    "false_abstention_on_answerable": 0.2,
+    "keyword_proxy": 0.375,
+    "keyword_proxy_note": "automatic: all answer_keywords appear in answered answers; not a quality judgment",
+    "statuses": {
+     "answered": 16,
+     "uncertain": 4
+    },
+    "routes": {
+     "deep": 20
+    },
+    "channel_failures": {},
+    "errors": 0,
+    "latency_total_s": {
+     "p50": 1.594000000000051,
+     "p95": 1.625,
+     "mean": 1.584399999999971
+    },
+    "latency_retrieval_s": {
+     "p50": 0.375,
+     "p95": 0.390999999999849
+    },
+    "calls_per_question": {
+     "chat": 2.0,
+     "embedding": 5.4
+    },
+    "tokens_per_question": {
+     "input": 3187.1,
+     "output": 260.4
+    },
+    "cost_per_question": null,
+    "cost_reason": "no price basis configured for these models (MODEL_PRICES); tokens are reported instead"
+   },
+   "zh_term": {
+    "questions": 10,
+    "answerable": 10,
+    "unanswerable": 0,
+    "evidence_recall@1": 0.0,
+    "evidence_hit@1": 0.0,
+    "evidence_recall@3": 0.9,
+    "evidence_hit@3": 1.0,
+    "evidence_recall@5": 0.9,
+    "evidence_hit@5": 1.0,
+    "mrr": 0.33333333333333337,
+    "denominator_retrieval": "10 answerable questions",
+    "citation_support_auto": 0.42857142857142855,
+    "denominator_citations": "14 citations on answerable questions",
+    "citation_support_human": null,
+    "citation_support_human_reason": "not reviewed by a person in this run",
+    "time_error_s_median": 15.0,
+    "time_error_s_mean": 24.0,
+    "abstention_on_unanswerable": null,
+    "denominator_abstention": "0 no-answer questions",
+    "false_abstention_on_answerable": 0.0,
+    "keyword_proxy": 0.2,
+    "keyword_proxy_note": "automatic: all answer_keywords appear in answered answers; not a quality judgment",
+    "statuses": {
+     "answered": 10
+    },
+    "routes": {
+     "deep": 10
+    },
+    "channel_failures": {},
+    "errors": 0,
+    "latency_total_s": {
+     "p50": 1.609000000000151,
+     "p95": 1.6099999999999,
+     "mean": 1.6061000000000605
+    },
+    "latency_retrieval_s": {
+     "p50": 0.375,
+     "p95": 0.3910000000000764
+    },
+    "calls_per_question": {
+     "chat": 2.0,
+     "embedding": 6.0
+    },
+    "tokens_per_question": {
+     "input": 3099.6,
+     "output": 240.2
+    },
+    "cost_per_question": null,
+    "cost_reason": "no price basis configured for these models (MODEL_PRICES); tokens are reported instead"
+   }
+  }
+ },
+ "auto": {
+  "overall": {
+   "questions": 64,
+   "answerable": 54,
+   "unanswerable": 10,
+   "evidence_recall@1": 0.18518518518518517,
+   "evidence_hit@1": 0.18518518518518517,
+   "evidence_recall@3": 0.7037037037037037,
+   "evidence_hit@3": 0.7407407407407407,
+   "evidence_recall@5": 0.8518518518518519,
+   "evidence_hit@5": 0.8888888888888888,
+   "mrr": 0.4098765432098763,
+   "denominator_retrieval": "54 answerable questions",
+   "citation_support_auto": 0.5,
+   "denominator_citations": "72 citations on answerable questions",
+   "citation_support_human": null,
+   "citation_support_human_reason": "not reviewed by a person in this run",
+   "time_error_s_median": 0.0,
+   "time_error_s_mean": 40.925925925925924,
+   "abstention_on_unanswerable": 1.0,
+   "denominator_abstention": "10 no-answer questions",
+   "false_abstention_on_answerable": 0.18518518518518517,
+   "keyword_proxy": 0.2777777777777778,
+   "keyword_proxy_note": "automatic: all answer_keywords appear in answered answers; not a quality judgment",
+   "statuses": {
+    "answered": 44,
+    "uncertain": 14,
+    "refused": 6
+   },
+   "routes": {
+    "cheap": 30,
+    "deep": 28,
+    "refused": 6
+   },
+   "channel_failures": {},
+   "errors": 0,
+   "latency_total_s": {
+    "p50": 0.7970000000000255,
+    "p95": 2.0319999999999254,
+    "mean": 1.1831093750000008
+   },
+   "latency_retrieval_s": {
+    "p50": 0.375,
+    "p95": 0.4069999999999254
+   },
+   "calls_per_question": {
+    "chat": 1.53125,
+    "embedding": 5.8125
+   },
+   "tokens_per_question": {
+    "input": 2107.90625,
+    "output": 160.90625
+   },
+   "cost_per_question": null,
+   "cost_reason": "no price basis configured for these models (MODEL_PRICES); tokens are reported instead"
+  },
+  "by_split": {
+   "holdout": {
+    "questions": 30,
+    "answerable": 26,
+    "unanswerable": 4,
+    "evidence_recall@1": 0.07692307692307693,
+    "evidence_hit@1": 0.07692307692307693,
+    "evidence_recall@3": 0.6923076923076923,
+    "evidence_hit@3": 0.6923076923076923,
+    "evidence_recall@5": 0.8461538461538461,
+    "evidence_hit@5": 0.8461538461538461,
+    "mrr": 0.3333333333333333,
+    "denominator_retrieval": "26 answerable questions",
+    "citation_support_auto": 0.3888888888888889,
+    "denominator_citations": "36 citations on answerable questions",
+    "citation_support_human": null,
+    "citation_support_human_reason": "not reviewed by a person in this run",
+    "time_error_s_median": 15.0,
+    "time_error_s_mean": 54.23076923076923,
+    "abstention_on_unanswerable": 1.0,
+    "denominator_abstention": "4 no-answer questions",
+    "false_abstention_on_answerable": 0.15384615384615385,
+    "keyword_proxy": 0.3333333333333333,
+    "keyword_proxy_note": "automatic: all answer_keywords appear in answered answers; not a quality judgment",
+    "statuses": {
+     "answered": 22,
+     "refused": 4,
+     "uncertain": 4
+    },
+    "routes": {
+     "cheap": 14,
+     "deep": 12,
+     "refused": 4
+    },
+    "channel_failures": {},
+    "errors": 0,
+    "latency_total_s": {
+     "p50": 0.7970000000000255,
+     "p95": 2.0150000000001,
+     "mean": 1.1020666666666632
+    },
+    "latency_retrieval_s": {
+     "p50": 0.375,
+     "p95": 0.4219999999997981
+    },
+    "calls_per_question": {
+     "chat": 1.4,
+     "embedding": 5.6
+    },
+    "tokens_per_question": {
+     "input": 1874.6,
+     "output": 147.46666666666667
+    },
+    "cost_per_question": null,
+    "cost_reason": "no price basis configured for these models (MODEL_PRICES); tokens are reported instead"
+   },
+   "tune": {
+    "questions": 34,
+    "answerable": 28,
+    "unanswerable": 6,
+    "evidence_recall@1": 0.2857142857142857,
+    "evidence_hit@1": 0.2857142857142857,
+    "evidence_recall@3": 0.7142857142857143,
+    "evidence_hit@3": 0.7857142857142857,
+    "evidence_recall@5": 0.8571428571428571,
+    "evidence_hit@5": 0.9285714285714286,
+    "mrr": 0.48095238095238096,
+    "denominator_retrieval": "28 answerable questions",
+    "citation_support_auto": 0.6111111111111112,
+    "denominator_citations": "36 citations on answerable questions",
+    "citation_support_human": null,
+    "citation_support_human_reason": "not reviewed by a person in this run",
+    "time_error_s_median": 0.0,
+    "time_error_s_mean": 28.571428571428573,
+    "abstention_on_unanswerable": 1.0,
+    "denominator_abstention": "6 no-answer questions",
+    "false_abstention_on_answerable": 0.21428571428571427,
+    "keyword_proxy": 0.2222222222222222,
+    "keyword_proxy_note": "automatic: all answer_keywords appear in answered answers; not a quality judgment",
+    "statuses": {
+     "answered": 22,
+     "uncertain": 10,
+     "refused": 2
+    },
+    "routes": {
+     "cheap": 16,
+     "deep": 16,
+     "refused": 2
+    },
+    "channel_failures": {},
+    "errors": 0,
+    "latency_total_s": {
+     "p50": 0.7970000000000255,
+     "p95": 2.0620000000001255,
+     "mean": 1.254617647058828
+    },
+    "latency_retrieval_s": {
+     "p50": 0.375,
+     "p95": 0.4069999999999254
+    },
+    "calls_per_question": {
+     "chat": 1.6470588235294117,
+     "embedding": 6.0
+    },
+    "tokens_per_question": {
+     "input": 2313.764705882353,
+     "output": 172.76470588235293
+    },
+    "cost_per_question": null,
+    "cost_reason": "no price basis configured for these models (MODEL_PRICES); tokens are reported instead"
+   }
+  },
+  "by_category": {
+   "cross_segment": {
+    "questions": 8,
+    "answerable": 8,
+    "unanswerable": 0,
+    "evidence_recall@1": 0.0,
+    "evidence_hit@1": 0.0,
+    "evidence_recall@3": 0.75,
+    "evidence_hit@3": 1.0,
+    "evidence_recall@5": 0.75,
+    "evidence_hit@5": 1.0,
+    "mrr": 0.3333333333333333,
+    "denominator_retrieval": "8 answerable questions",
+    "citation_support_auto": 0.5,
+    "denominator_citations": "8 citations on answerable questions",
+    "citation_support_human": null,
+    "citation_support_human_reason": "not reviewed by a person in this run",
+    "time_error_s_median": 7.5,
+    "time_error_s_mean": 31.25,
+    "abstention_on_unanswerable": null,
+    "denominator_abstention": "0 no-answer questions",
+    "false_abstention_on_answerable": 0.25,
+    "keyword_proxy": 0.0,
+    "keyword_proxy_note": "automatic: all answer_keywords appear in answered answers; not a quality judgment",
+    "statuses": {
+     "answered": 6,
+     "uncertain": 2
+    },
+    "routes": {
+     "cheap": 6,
+     "deep": 2
+    },
+    "channel_failures": {},
+    "errors": 0,
+    "latency_total_s": {
+     "p50": 0.7970000000000255,
+     "p95": 2.0,
+     "mean": 1.091875000000016
+    },
+    "latency_retrieval_s": {
+     "p50": 0.375,
+     "p95": 0.3910000000000764
+    },
+    "calls_per_question": {
+     "chat": 1.5,
+     "embedding": 6.0
+    },
+    "tokens_per_question": {
+     "input": 1810.25,
+     "output": 148.25
+    },
+    "cost_per_question": null,
+    "cost_reason": "no price basis configured for these models (MODEL_PRICES); tokens are reported instead"
+   },
+   "follow_up": {
+    "questions": 8,
+    "answerable": 8,
+    "unanswerable": 0,
+    "evidence_recall@1": 0.0,
+    "evidence_hit@1": 0.0,
+    "evidence_recall@3": 0.75,
+    "evidence_hit@3": 0.75,
+    "evidence_recall@5": 1.0,
+    "evidence_hit@5": 1.0,
+    "mrr": 0.3,
+    "denominator_retrieval": "8 answerable questions",
+    "citation_support_auto": 0.8,
+    "denominator_citations": "10 citations on answerable questions",
+    "citation_support_human": null,
+    "citation_support_human_reason": "not reviewed by a person in this run",
+    "time_error_s_median": 0.0,
+    "time_error_s_mean": 3.75,
+    "abstention_on_unanswerable": null,
+    "denominator_abstention": "0 no-answer questions",
+    "false_abstention_on_answerable": 0.0,
+    "keyword_proxy": null,
+    "keyword_proxy_note": "automatic: all answer_keywords appear in answered answers; not a quality judgment",
+    "statuses": {
+     "answered": 8
+    },
+    "routes": {
+     "deep": 4,
+     "cheap": 4
+    },
+    "channel_failures": {},
+    "errors": 0,
+    "latency_total_s": {
+     "p50": 0.7970000000000255,
+     "p95": 2.0470000000000255,
+     "mean": 1.4082500000000095
+    },
+    "latency_retrieval_s": {
+     "p50": 0.375,
+     "p95": 0.40600000000017644
+    },
+    "calls_per_question": {
+     "chat": 2.0,
+     "embedding": 6.0
+    },
+    "tokens_per_question": {
+     "input": 2533.75,
+     "output": 192.0
+    },
+    "cost_per_question": null,
+    "cost_reason": "no price basis configured for these models (MODEL_PRICES); tokens are reported instead"
+   },
+   "no_answer": {
+    "questions": 10,
+    "answerable": 0,
+    "unanswerable": 10,
+    "evidence_recall@1": null,
+    "evidence_hit@1": null,
+    "evidence_recall@3": null,
+    "evidence_hit@3": null,
+    "evidence_recall@5": null,
+    "evidence_hit@5": null,
+    "mrr": null,
+    "denominator_retrieval": "0 answerable questions",
+    "citation_support_auto": null,
+    "denominator_citations": "0 citations on answerable questions",
+    "citation_support_human": null,
+    "citation_support_human_reason": "not reviewed by a person in this run",
+    "time_error_s_median": null,
+    "time_error_s_mean": null,
+    "abstention_on_unanswerable": 1.0,
+    "denominator_abstention": "10 no-answer questions",
+    "false_abstention_on_answerable": null,
+    "keyword_proxy": null,
+    "keyword_proxy_note": "automatic: all answer_keywords appear in answered answers; not a quality judgment",
+    "statuses": {
+     "uncertain": 4,
+     "refused": 6
+    },
+    "routes": {
+     "deep": 4,
+     "refused": 6
+    },
+    "channel_failures": {},
+    "errors": 0,
+    "latency_total_s": {
+     "p50": 0.4219999999997981,
+     "p95": 2.0629999999998745,
+     "mean": 1.0562999999999874
+    },
+    "latency_retrieval_s": {
+     "p50": 0.40599999999994907,
+     "p95": 0.4370000000001255
+    },
+    "calls_per_question": {
+     "chat": 1.2,
+     "embedding": 6.0
+    },
+    "tokens_per_question": {
+     "input": 1976.8,
+     "output": 140.2
+    },
+    "cost_per_question": null,
+    "cost_reason": "no price basis configured for these models (MODEL_PRICES); tokens are reported instead"
+   },
+   "transcript": {
+    "questions": 22,
+    "answerable": 22,
+    "unanswerable": 0,
+    "evidence_recall@1": 0.09090909090909091,
+    "evidence_hit@1": 0.09090909090909091,
+    "evidence_recall@3": 0.8181818181818182,
+    "evidence_hit@3": 0.8181818181818182,
+    "evidence_recall@5": 0.9090909090909091,
+    "evidence_hit@5": 0.9090909090909091,
+    "mrr": 0.35151515151515145,
+    "denominator_retrieval": "22 answerable questions",
+    "citation_support_auto": 0.6428571428571429,
+    "denominator_citations": "28 citations on answerable questions",
+    "citation_support_human": null,
+    "citation_support_human_reason": "not reviewed by a person in this run",
+    "time_error_s_median": 0.0,
+    "time_error_s_mean": 4.090909090909091,
+    "abstention_on_unanswerable": null,
+    "denominator_abstention": "0 no-answer questions",
+    "false_abstention_on_answerable": 0.09090909090909091,
+    "keyword_proxy": 0.5,
+    "keyword_proxy_note": "automatic: all answer_keywords appear in answered answers; not a quality judgment",
+    "statuses": {
+     "answered": 20,
+     "uncertain": 2
+    },
+    "routes": {
+     "cheap": 20,
+     "deep": 2
+    },
+    "channel_failures": {},
+    "errors": 0,
+    "latency_total_s": {
+     "p50": 0.7819999999999254,
+     "p95": 2.015999999999849,
+     "mean": 0.9005000000000171
+    },
+    "latency_retrieval_s": {
+     "p50": 0.375,
+     "p95": 0.3910000000000764
+    },
+    "calls_per_question": {
+     "chat": 1.1818181818181819,
+     "embedding": 6.0
+    },
+    "tokens_per_question": {
+     "input": 1355.6363636363637,
+     "output": 105.54545454545455
+    },
+    "cost_per_question": null,
+    "cost_reason": "no price basis configured for these models (MODEL_PRICES); tokens are reported instead"
+   },
+   "visual": {
+    "questions": 16,
+    "answerable": 16,
+    "unanswerable": 0,
+    "evidence_recall@1": 0.5,
+    "evidence_hit@1": 0.5,
+    "evidence_recall@3": 0.5,
+    "evidence_hit@3": 0.5,
+    "evidence_recall@5": 0.75,
+    "evidence_hit@5": 0.75,
+    "mrr": 0.5833333333333333,
+    "denominator_retrieval": "16 answerable questions",
+    "citation_support_auto": 0.23076923076923078,
+    "denominator_citations": "26 citations on answerable questions",
+    "citation_support_human": null,
+    "citation_support_human_reason": "not reviewed by a person in this run",
+    "time_error_s_median": 52.5,
+    "time_error_s_mean": 115.0,
+    "abstention_on_unanswerable": null,
+    "denominator_abstention": "0 no-answer questions",
+    "false_abstention_on_answerable": 0.375,
+    "keyword_proxy": 0.0,
+    "keyword_proxy_note": "automatic: all answer_keywords appear in answered answers; not a quality judgment",
+    "statuses": {
+     "answered": 10,
+     "uncertain": 6
+    },
+    "routes": {
+     "deep": 16
+    },
+    "channel_failures": {},
+    "errors": 0,
+    "latency_total_s": {
+     "p50": 1.594000000000051,
+     "p95": 1.640999999999849,
+     "mean": 1.5839999999999748
+    },
+    "latency_retrieval_s": {
+     "p50": 0.375,
+     "p95": 0.4069999999999254
+    },
+    "calls_per_question": {
+     "chat": 2.0,
+     "embedding": 5.25
+    },
+    "tokens_per_question": {
+     "input": 3160.125,
+     "output": 240.75
+    },
+    "cost_per_question": null,
+    "cost_reason": "no price basis configured for these models (MODEL_PRICES); tokens are reported instead"
+   }
+  },
+  "by_tag": {
+   "code_symbol": {
+    "questions": 20,
+    "answerable": 20,
+    "unanswerable": 0,
+    "evidence_recall@1": 0.1,
+    "evidence_hit@1": 0.1,
+    "evidence_recall@3": 0.5,
+    "evidence_hit@3": 0.5,
+    "evidence_recall@5": 0.7,
+    "evidence_hit@5": 0.7,
+    "mrr": 0.295,
+    "denominator_retrieval": "20 answerable questions",
+    "citation_support_auto": 0.3333333333333333,
+    "denominator_citations": "30 citations on answerable questions",
+    "citation_support_human": null,
+    "citation_support_human_reason": "not reviewed by a person in this run",
+    "time_error_s_median": 0.0,
+    "time_error_s_mean": 53.5,
+    "abstention_on_unanswerable": null,
+    "denominator_abstention": "0 no-answer questions",
+    "false_abstention_on_answerable": 0.2,
+    "keyword_proxy": 0.25,
+    "keyword_proxy_note": "automatic: all answer_keywords appear in answered answers; not a quality judgment",
+    "statuses": {
+     "answered": 16,
+     "uncertain": 4
+    },
+    "routes": {
+     "cheap": 10,
+     "deep": 10
+    },
+    "channel_failures": {},
+    "errors": 0,
+    "latency_total_s": {
+     "p50": 0.8130000000001019,
+     "p95": 2.015999999999849,
+     "mean": 1.218699999999967
+    },
+    "latency_retrieval_s": {
+     "p50": 0.375,
+     "p95": 0.390999999999849
+    },
+    "calls_per_question": {
+     "chat": 1.6,
+     "embedding": 5.4
+    },
+    "tokens_per_question": {
+     "input": 2289.3,
+     "output": 180.3
+    },
+    "cost_per_question": null,
+    "cost_reason": "no price basis configured for these models (MODEL_PRICES); tokens are reported instead"
+   },
+   "zh_term": {
+    "questions": 10,
+    "answerable": 10,
+    "unanswerable": 0,
+    "evidence_recall@1": 0.0,
+    "evidence_hit@1": 0.0,
+    "evidence_recall@3": 0.9,
+    "evidence_hit@3": 1.0,
+    "evidence_recall@5": 0.9,
+    "evidence_hit@5": 1.0,
+    "mrr": 0.33333333333333337,
+    "denominator_retrieval": "10 answerable questions",
+    "citation_support_auto": 0.6666666666666666,
+    "denominator_citations": "12 citations on answerable questions",
+    "citation_support_human": null,
+    "citation_support_human_reason": "not reviewed by a person in this run",
+    "time_error_s_median": 0.0,
+    "time_error_s_mean": 6.0,
+    "abstention_on_unanswerable": null,
+    "denominator_abstention": "0 no-answer questions",
+    "false_abstention_on_answerable": 0.0,
+    "keyword_proxy": 0.2,
+    "keyword_proxy_note": "automatic: all answer_keywords appear in answered answers; not a quality judgment",
+    "statuses": {
+     "answered": 10
+    },
+    "routes": {
+     "cheap": 10
+    },
+    "channel_failures": {},
+    "errors": 0,
+    "latency_total_s": {
+     "p50": 0.7810000000001764,
+     "p95": 0.7970000000000255,
+     "mean": 0.7859000000000606
+    },
+    "latency_retrieval_s": {
+     "p50": 0.375,
+     "p95": 0.39000000000010004
+    },
+    "calls_per_question": {
+     "chat": 1.0,
+     "embedding": 6.0
+    },
+    "tokens_per_question": {
+     "input": 1086.4,
+     "output": 79.8
+    },
+    "cost_per_question": null,
+    "cost_reason": "no price basis configured for these models (MODEL_PRICES); tokens are reported instead"
+   }
+  }
+ },
+ "auto_keyword": {
+  "overall": {
+   "questions": 64,
+   "answerable": 54,
+   "unanswerable": 10,
+   "evidence_recall@1": 0.6296296296296297,
+   "evidence_hit@1": 0.6666666666666666,
+   "evidence_recall@3": 0.7777777777777778,
+   "evidence_hit@3": 0.7777777777777778,
+   "evidence_recall@5": 0.8148148148148148,
+   "evidence_hit@5": 0.8148148148148148,
+   "mrr": 0.7345679012345679,
+   "denominator_retrieval": "54 answerable questions",
+   "citation_support_auto": 0.5,
+   "denominator_citations": "80 citations on answerable questions",
+   "citation_support_human": null,
+   "citation_support_human_reason": "not reviewed by a person in this run",
+   "time_error_s_median": 0.0,
+   "time_error_s_mean": 41.666666666666664,
+   "abstention_on_unanswerable": 1.0,
+   "denominator_abstention": "10 no-answer questions",
+   "false_abstention_on_answerable": 0.2222222222222222,
+   "keyword_proxy": 0.3888888888888889,
+   "keyword_proxy_note": "automatic: all answer_keywords appear in answered answers; not a quality judgment",
+   "statuses": {
+    "answered": 42,
+    "uncertain": 16,
+    "refused": 6
+   },
+   "routes": {
+    "cheap": 30,
+    "deep": 28,
+    "refused": 6
+   },
+   "channel_failures": {},
+   "errors": 0,
+   "latency_total_s": {
+    "p50": 0.875,
+    "p95": 2.109000000000151,
+    "mean": 1.248281249999998
+   },
+   "latency_retrieval_s": {
+    "p50": 0.45299999999997453,
+    "p95": 0.46900000000005093
+   },
+   "calls_per_question": {
+    "chat": 1.53125,
+    "embedding": 5.8125
+   },
+   "tokens_per_question": {
+    "input": 2532.9375,
+    "output": 160.71875
+   },
+   "cost_per_question": null,
+   "cost_reason": "no price basis configured for these models (MODEL_PRICES); tokens are reported instead"
+  },
+  "by_split": {
+   "holdout": {
+    "questions": 30,
+    "answerable": 26,
+    "unanswerable": 4,
+    "evidence_recall@1": 0.6923076923076923,
+    "evidence_hit@1": 0.6923076923076923,
+    "evidence_recall@3": 0.6923076923076923,
+    "evidence_hit@3": 0.6923076923076923,
+    "evidence_recall@5": 0.6923076923076923,
+    "evidence_hit@5": 0.6923076923076923,
+    "mrr": 0.717948717948718,
+    "denominator_retrieval": "26 answerable questions",
+    "citation_support_auto": 0.3684210526315789,
+    "denominator_citations": "38 citations on answerable questions",
+    "citation_support_human": null,
+    "citation_support_human_reason": "not reviewed by a person in this run",
+    "time_error_s_median": 10.0,
+    "time_error_s_mean": 41.92307692307692,
+    "abstention_on_unanswerable": 1.0,
+    "denominator_abstention": "4 no-answer questions",
+    "false_abstention_on_answerable": 0.3076923076923077,
+    "keyword_proxy": 0.375,
+    "keyword_proxy_note": "automatic: all answer_keywords appear in answered answers; not a quality judgment",
+    "statuses": {
+     "answered": 18,
+     "uncertain": 8,
+     "refused": 4
+    },
+    "routes": {
+     "cheap": 14,
+     "deep": 12,
+     "refused": 4
+    },
+    "channel_failures": {},
+    "errors": 0,
+    "latency_total_s": {
+     "p50": 0.875,
+     "p95": 2.0939999999998236,
+     "mean": 1.171866666666665
+    },
+    "latency_retrieval_s": {
+     "p50": 0.45299999999997453,
+     "p95": 0.46900000000005093
+    },
+    "calls_per_question": {
+     "chat": 1.4,
+     "embedding": 5.6
+    },
+    "tokens_per_question": {
+     "input": 2394.133333333333,
+     "output": 148.73333333333332
+    },
+    "cost_per_question": null,
+    "cost_reason": "no price basis configured for these models (MODEL_PRICES); tokens are reported instead"
+   },
+   "tune": {
+    "questions": 34,
+    "answerable": 28,
+    "unanswerable": 6,
+    "evidence_recall@1": 0.5714285714285714,
+    "evidence_hit@1": 0.6428571428571429,
+    "evidence_recall@3": 0.8571428571428571,
+    "evidence_hit@3": 0.8571428571428571,
+    "evidence_recall@5": 0.9285714285714286,
+    "evidence_hit@5": 0.9285714285714286,
+    "mrr": 0.75,
+    "denominator_retrieval": "28 answerable questions",
+    "citation_support_auto": 0.6190476190476191,
+    "denominator_citations": "42 citations on answerable questions",
+    "citation_support_human": null,
+    "citation_support_human_reason": "not reviewed by a person in this run",
+    "time_error_s_median": 0.0,
+    "time_error_s_mean": 41.42857142857143,
+    "abstention_on_unanswerable": 1.0,
+    "denominator_abstention": "6 no-answer questions",
+    "false_abstention_on_answerable": 0.14285714285714285,
+    "keyword_proxy": 0.4,
+    "keyword_proxy_note": "automatic: all answer_keywords appear in answered answers; not a quality judgment",
+    "statuses": {
+     "answered": 24,
+     "uncertain": 8,
+     "refused": 2
+    },
+    "routes": {
+     "cheap": 16,
+     "deep": 16,
+     "refused": 2
+    },
+    "channel_failures": {},
+    "errors": 0,
+    "latency_total_s": {
+     "p50": 0.890999999999849,
+     "p95": 2.109000000000151,
+     "mean": 1.3157058823529388
+    },
+    "latency_retrieval_s": {
+     "p50": 0.45299999999997453,
+     "p95": 0.46900000000005093
+    },
+    "calls_per_question": {
+     "chat": 1.6470588235294117,
+     "embedding": 6.0
+    },
+    "tokens_per_question": {
+     "input": 2655.4117647058824,
+     "output": 171.2941176470588
+    },
+    "cost_per_question": null,
+    "cost_reason": "no price basis configured for these models (MODEL_PRICES); tokens are reported instead"
+   }
+  },
+  "by_category": {
+   "cross_segment": {
+    "questions": 8,
+    "answerable": 8,
+    "unanswerable": 0,
+    "evidence_recall@1": 0.75,
+    "evidence_hit@1": 1.0,
+    "evidence_recall@3": 1.0,
+    "evidence_hit@3": 1.0,
+    "evidence_recall@5": 1.0,
+    "evidence_hit@5": 1.0,
+    "mrr": 1.0,
+    "denominator_retrieval": "8 answerable questions",
+    "citation_support_auto": 0.5,
+    "denominator_citations": "12 citations on answerable questions",
+    "citation_support_human": null,
+    "citation_support_human_reason": "not reviewed by a person in this run",
+    "time_error_s_median": 82.5,
+    "time_error_s_mean": 116.25,
+    "abstention_on_unanswerable": null,
+    "denominator_abstention": "0 no-answer questions",
+    "false_abstention_on_answerable": 0.25,
+    "keyword_proxy": 0.3333333333333333,
+    "keyword_proxy_note": "automatic: all answer_keywords appear in answered answers; not a quality judgment",
+    "statuses": {
+     "answered": 6,
+     "uncertain": 2
+    },
+    "routes": {
+     "cheap": 6,
+     "deep": 2
+    },
+    "channel_failures": {},
+    "errors": 0,
+    "latency_total_s": {
+     "p50": 0.875,
+     "p95": 2.0779999999999745,
+     "mean": 1.1718749999999716
+    },
+    "latency_retrieval_s": {
+     "p50": 0.45299999999997453,
+     "p95": 0.46900000000005093
+    },
+    "calls_per_question": {
+     "chat": 1.5,
+     "embedding": 6.0
+    },
+    "tokens_per_question": {
+     "input": 2457.75,
+     "output": 152.25
+    },
+    "cost_per_question": null,
+    "cost_reason": "no price basis configured for these models (MODEL_PRICES); tokens are reported instead"
+   },
+   "follow_up": {
+    "questions": 8,
+    "answerable": 8,
+    "unanswerable": 0,
+    "evidence_recall@1": 0.75,
+    "evidence_hit@1": 0.75,
+    "evidence_recall@3": 1.0,
+    "evidence_hit@3": 1.0,
+    "evidence_recall@5": 1.0,
+    "evidence_hit@5": 1.0,
+    "mrr": 0.8333333333333333,
+    "denominator_retrieval": "8 answerable questions",
+    "citation_support_auto": 0.8333333333333334,
+    "denominator_citations": "12 citations on answerable questions",
+    "citation_support_human": null,
+    "citation_support_human_reason": "not reviewed by a person in this run",
+    "time_error_s_median": 0.0,
+    "time_error_s_mean": 3.75,
+    "abstention_on_unanswerable": null,
+    "denominator_abstention": "0 no-answer questions",
+    "false_abstention_on_answerable": 0.25,
+    "keyword_proxy": null,
+    "keyword_proxy_note": "automatic: all answer_keywords appear in answered answers; not a quality judgment",
+    "statuses": {
+     "uncertain": 2,
+     "answered": 6
+    },
+    "routes": {
+     "deep": 4,
+     "cheap": 4
+    },
+    "channel_failures": {},
+    "errors": 0,
+    "latency_total_s": {
+     "p50": 0.890999999999849,
+     "p95": 2.1099999999999,
+     "mean": 1.4883749999999623
+    },
+    "latency_retrieval_s": {
+     "p50": 0.45299999999997453,
+     "p95": 0.46900000000005093
+    },
+    "calls_per_question": {
+     "chat": 2.0,
+     "embedding": 6.0
+    },
+    "tokens_per_question": {
+     "input": 3339.5,
+     "output": 208.25
+    },
+    "cost_per_question": null,
+    "cost_reason": "no price basis configured for these models (MODEL_PRICES); tokens are reported instead"
+   },
+   "no_answer": {
+    "questions": 10,
+    "answerable": 0,
+    "unanswerable": 10,
+    "evidence_recall@1": null,
+    "evidence_hit@1": null,
+    "evidence_recall@3": null,
+    "evidence_hit@3": null,
+    "evidence_recall@5": null,
+    "evidence_hit@5": null,
+    "mrr": null,
+    "denominator_retrieval": "0 answerable questions",
+    "citation_support_auto": null,
+    "denominator_citations": "0 citations on answerable questions",
+    "citation_support_human": null,
+    "citation_support_human_reason": "not reviewed by a person in this run",
+    "time_error_s_median": null,
+    "time_error_s_mean": null,
+    "abstention_on_unanswerable": 1.0,
+    "denominator_abstention": "10 no-answer questions",
+    "false_abstention_on_answerable": null,
+    "keyword_proxy": null,
+    "keyword_proxy_note": "automatic: all answer_keywords appear in answered answers; not a quality judgment",
+    "statuses": {
+     "uncertain": 4,
+     "refused": 6
+    },
+    "routes": {
+     "deep": 4,
+     "refused": 6
+    },
+    "channel_failures": {},
+    "errors": 0,
+    "latency_total_s": {
+     "p50": 0.45299999999997453,
+     "p95": 2.109000000000151,
+     "mean": 1.0968000000000528
+    },
+    "latency_retrieval_s": {
+     "p50": 0.45299999999997453,
+     "p95": 0.4539999999999509
+    },
+    "calls_per_question": {
+     "chat": 1.2,
+     "embedding": 6.0
+    },
+    "tokens_per_question": {
+     "input": 2194.4,
+     "output": 134.0
+    },
+    "cost_per_question": null,
+    "cost_reason": "no price basis configured for these models (MODEL_PRICES); tokens are reported instead"
+   },
+   "transcript": {
+    "questions": 22,
+    "answerable": 22,
+    "unanswerable": 0,
+    "evidence_recall@1": 0.9090909090909091,
+    "evidence_hit@1": 0.9090909090909091,
+    "evidence_recall@3": 1.0,
+    "evidence_hit@3": 1.0,
+    "evidence_recall@5": 1.0,
+    "evidence_hit@5": 1.0,
+    "mrr": 0.9545454545454546,
+    "denominator_retrieval": "22 answerable questions",
+    "citation_support_auto": 0.6875,
+    "denominator_citations": "32 citations on answerable questions",
+    "citation_support_human": null,
+    "citation_support_human_reason": "not reviewed by a person in this run",
+    "time_error_s_median": 0.0,
+    "time_error_s_mean": 2.727272727272727,
+    "abstention_on_unanswerable": null,
+    "denominator_abstention": "0 no-answer questions",
+    "false_abstention_on_answerable": 0.0,
+    "keyword_proxy": 0.5454545454545454,
+    "keyword_proxy_note": "automatic: all answer_keywords appear in answered answers; not a quality judgment",
+    "statuses": {
+     "answered": 22
+    },
+    "routes": {
+     "cheap": 20,
+     "deep": 2
+    },
+    "channel_failures": {},
+    "errors": 0,
+    "latency_total_s": {
+     "p50": 0.875,
+     "p95": 2.0939999999998236,
+     "mean": 0.9715909090909091
+    },
+    "latency_retrieval_s": {
+     "p50": 0.45299999999997453,
+     "p95": 0.46900000000005093
+    },
+    "calls_per_question": {
+     "chat": 1.1818181818181819,
+     "embedding": 6.0
+    },
+    "tokens_per_question": {
+     "input": 1747.2727272727273,
+     "output": 108.54545454545455
+    },
+    "cost_per_question": null,
+    "cost_reason": "no price basis configured for these models (MODEL_PRICES); tokens are reported instead"
+   },
+   "visual": {
+    "questions": 16,
+    "answerable": 16,
+    "unanswerable": 0,
+    "evidence_recall@1": 0.125,
+    "evidence_hit@1": 0.125,
+    "evidence_recall@3": 0.25,
+    "evidence_hit@3": 0.25,
+    "evidence_recall@5": 0.375,
+    "evidence_hit@5": 0.375,
+    "mrr": 0.25,
+    "denominator_retrieval": "16 answerable questions",
+    "citation_support_auto": 0.08333333333333333,
+    "denominator_citations": "24 citations on answerable questions",
+    "citation_support_human": null,
+    "citation_support_human_reason": "not reviewed by a person in this run",
+    "time_error_s_median": 30.0,
+    "time_error_s_mean": 76.875,
+    "abstention_on_unanswerable": null,
+    "denominator_abstention": "0 no-answer questions",
+    "false_abstention_on_answerable": 0.5,
+    "keyword_proxy": 0.0,
+    "keyword_proxy_note": "automatic: all answer_keywords appear in answered answers; not a quality judgment",
+    "statuses": {
+     "answered": 8,
+     "uncertain": 8
+    },
+    "routes": {
+     "deep": 16
+    },
+    "channel_failures": {},
+    "errors": 0,
+    "latency_total_s": {
+     "p50": 1.6400000000001,
+     "p95": 1.7029999999999745,
+     "mean": 1.641562499999992
+    },
+    "latency_retrieval_s": {
+     "p50": 0.4210000000000491,
+     "p95": 0.4680000000000746
+    },
+    "calls_per_question": {
+     "chat": 2.0,
+     "embedding": 5.25
+    },
+    "tokens_per_question": {
+     "input": 3459.125,
+     "output": 229.625
+    },
+    "cost_per_question": null,
+    "cost_reason": "no price basis configured for these models (MODEL_PRICES); tokens are reported instead"
+   }
+  },
+  "by_tag": {
+   "code_symbol": {
+    "questions": 20,
+    "answerable": 20,
+    "unanswerable": 0,
+    "evidence_recall@1": 0.5,
+    "evidence_hit@1": 0.5,
+    "evidence_recall@3": 0.6,
+    "evidence_hit@3": 0.6,
+    "evidence_recall@5": 0.6,
+    "evidence_hit@5": 0.6,
+    "mrr": 0.575,
+    "denominator_retrieval": "20 answerable questions",
+    "citation_support_auto": 0.4,
+    "denominator_citations": "30 citations on answerable questions",
+    "citation_support_human": null,
+    "citation_support_human_reason": "not reviewed by a person in this run",
+    "time_error_s_median": 5.0,
+    "time_error_s_mean": 23.0,
+    "abstention_on_unanswerable": null,
+    "denominator_abstention": "0 no-answer questions",
+    "false_abstention_on_answerable": 0.2,
+    "keyword_proxy": 0.375,
+    "keyword_proxy_note": "automatic: all answer_keywords appear in answered answers; not a quality judgment",
+    "statuses": {
+     "answered": 16,
+     "uncertain": 4
+    },
+    "routes": {
+     "cheap": 10,
+     "deep": 10
+    },
+    "channel_failures": {},
+    "errors": 0,
+    "latency_total_s": {
+     "p50": 0.875,
+     "p95": 2.0939999999998236,
+     "mean": 1.2844999999999687
+    },
+    "latency_retrieval_s": {
+     "p50": 0.4370000000001255,
+     "p95": 0.46900000000005093
+    },
+    "calls_per_question": {
+     "chat": 1.6,
+     "embedding": 5.4
+    },
+    "tokens_per_question": {
+     "input": 2734.1,
+     "output": 176.9
+    },
+    "cost_per_question": null,
+    "cost_reason": "no price basis configured for these models (MODEL_PRICES); tokens are reported instead"
+   },
+   "zh_term": {
+    "questions": 10,
+    "answerable": 10,
+    "unanswerable": 0,
+    "evidence_recall@1": 0.9,
+    "evidence_hit@1": 1.0,
+    "evidence_recall@3": 1.0,
+    "evidence_hit@3": 1.0,
+    "evidence_recall@5": 1.0,
+    "evidence_hit@5": 1.0,
+    "mrr": 1.0,
+    "denominator_retrieval": "10 answerable questions",
+    "citation_support_auto": 0.5714285714285714,
+    "denominator_citations": "14 citations on answerable questions",
+    "citation_support_human": null,
+    "citation_support_human_reason": "not reviewed by a person in this run",
+    "time_error_s_median": 0.0,
+    "time_error_s_mean": 33.0,
+    "abstention_on_unanswerable": null,
+    "denominator_abstention": "0 no-answer questions",
+    "false_abstention_on_answerable": 0.0,
+    "keyword_proxy": 0.2,
+    "keyword_proxy_note": "automatic: all answer_keywords appear in answered answers; not a quality judgment",
+    "statuses": {
+     "answered": 10
+    },
+    "routes": {
+     "cheap": 10
+    },
+    "channel_failures": {},
+    "errors": 0,
+    "latency_total_s": {
+     "p50": 0.875,
+     "p95": 0.8910000000000764,
+     "mean": 0.8639000000000123
+    },
+    "latency_retrieval_s": {
+     "p50": 0.45299999999997453,
+     "p95": 0.46900000000005093
+    },
+    "calls_per_question": {
+     "chat": 1.0,
+     "embedding": 6.0
+    },
+    "tokens_per_question": {
+     "input": 1416.6,
+     "output": 84.2
+    },
+    "cost_per_question": null,
+    "cost_reason": "no price basis configured for these models (MODEL_PRICES); tokens are reported instead"
+   }
+  }
+ },
+ "agent": {
+  "overall": {
+   "questions": 64,
+   "answerable": 54,
+   "unanswerable": 10,
+   "evidence_recall@1": 0.18518518518518517,
+   "evidence_hit@1": 0.18518518518518517,
+   "evidence_recall@3": 0.7037037037037037,
+   "evidence_hit@3": 0.7407407407407407,
+   "evidence_recall@5": 0.8518518518518519,
+   "evidence_hit@5": 0.8888888888888888,
+   "mrr": 0.41707818930041124,
+   "denominator_retrieval": "54 answerable questions",
+   "citation_support_auto": 0.45454545454545453,
+   "denominator_citations": "88 citations on answerable questions",
+   "citation_support_human": null,
+   "citation_support_human_reason": "not reviewed by a person in this run",
+   "time_error_s_median": 0.0,
+   "time_error_s_mean": 60.18518518518518,
+   "abstention_on_unanswerable": 1.0,
+   "denominator_abstention": "10 no-answer questions",
+   "false_abstention_on_answerable": 0.14814814814814814,
+   "keyword_proxy": 0.42105263157894735,
+   "keyword_proxy_note": "automatic: all answer_keywords appear in answered answers; not a quality judgment",
+   "statuses": {
+    "answered": 46,
+    "uncertain": 18
+   },
+   "routes": {
+    "deep": 64
+   },
+   "channel_failures": {},
+   "errors": 0,
+   "latency_total_s": {
+    "p50": 3.155999999999949,
+    "p95": 3.1879999999998745,
+    "mean": 3.144015625000005
+   },
+   "latency_retrieval_s": {
+    "p50": 3.155999999999949,
+    "p95": 3.1879999999998745
+   },
+   "calls_per_question": {
+    "chat": 5.0,
+    "embedding": 5.8125
+   },
+   "tokens_per_question": {
+    "input": 22252.21875,
+    "output": 473.6875
+   },
+   "cost_per_question": null,
+   "cost_reason": "no price basis configured for these models (MODEL_PRICES); tokens are reported instead"
+  },
+  "by_split": {
+   "holdout": {
+    "questions": 30,
+    "answerable": 26,
+    "unanswerable": 4,
+    "evidence_recall@1": 0.07692307692307693,
+    "evidence_hit@1": 0.07692307692307693,
+    "evidence_recall@3": 0.6923076923076923,
+    "evidence_hit@3": 0.6923076923076923,
+    "evidence_recall@5": 0.8461538461538461,
+    "evidence_hit@5": 0.8461538461538461,
+    "mrr": 0.33547008547008544,
+    "denominator_retrieval": "26 answerable questions",
+    "citation_support_auto": 0.3181818181818182,
+    "denominator_citations": "44 citations on answerable questions",
+    "citation_support_human": null,
+    "citation_support_human_reason": "not reviewed by a person in this run",
+    "time_error_s_median": 30.0,
+    "time_error_s_mean": 82.6923076923077,
+    "abstention_on_unanswerable": 1.0,
+    "denominator_abstention": "4 no-answer questions",
+    "false_abstention_on_answerable": 0.15384615384615385,
+    "keyword_proxy": 0.3333333333333333,
+    "keyword_proxy_note": "automatic: all answer_keywords appear in answered answers; not a quality judgment",
+    "statuses": {
+     "answered": 22,
+     "uncertain": 8
+    },
+    "routes": {
+     "deep": 30
+    },
+    "channel_failures": {},
+    "errors": 0,
+    "latency_total_s": {
+     "p50": 3.1400000000001,
+     "p95": 3.188000000000102,
+     "mean": 3.137466666666675
+    },
+    "latency_retrieval_s": {
+     "p50": 3.1400000000001,
+     "p95": 3.188000000000102
+    },
+    "calls_per_question": {
+     "chat": 5.0,
+     "embedding": 5.6
+    },
+    "tokens_per_question": {
+     "input": 22189.533333333333,
+     "output": 467.93333333333334
+    },
+    "cost_per_question": null,
+    "cost_reason": "no price basis configured for these models (MODEL_PRICES); tokens are reported instead"
+   },
+   "tune": {
+    "questions": 34,
+    "answerable": 28,
+    "unanswerable": 6,
+    "evidence_recall@1": 0.2857142857142857,
+    "evidence_hit@1": 0.2857142857142857,
+    "evidence_recall@3": 0.7142857142857143,
+    "evidence_hit@3": 0.7857142857142857,
+    "evidence_recall@5": 0.8571428571428571,
+    "evidence_hit@5": 0.9285714285714286,
+    "mrr": 0.4928571428571428,
+    "denominator_retrieval": "28 answerable questions",
+    "citation_support_auto": 0.5909090909090909,
+    "denominator_citations": "44 citations on answerable questions",
+    "citation_support_human": null,
+    "citation_support_human_reason": "not reviewed by a person in this run",
+    "time_error_s_median": 0.0,
+    "time_error_s_mean": 39.285714285714285,
+    "abstention_on_unanswerable": 1.0,
+    "denominator_abstention": "6 no-answer questions",
+    "false_abstention_on_answerable": 0.14285714285714285,
+    "keyword_proxy": 0.5,
+    "keyword_proxy_note": "automatic: all answer_keywords appear in answered answers; not a quality judgment",
+    "statuses": {
+     "answered": 24,
+     "uncertain": 10
+    },
+    "routes": {
+     "deep": 34
+    },
+    "channel_failures": {},
+    "errors": 0,
+    "latency_total_s": {
+     "p50": 3.155999999999949,
+     "p95": 3.1879999999998745,
+     "mean": 3.149794117647061
+    },
+    "latency_retrieval_s": {
+     "p50": 3.155999999999949,
+     "p95": 3.1879999999998745
+    },
+    "calls_per_question": {
+     "chat": 5.0,
+     "embedding": 6.0
+    },
+    "tokens_per_question": {
+     "input": 22307.529411764706,
+     "output": 478.7647058823529
+    },
+    "cost_per_question": null,
+    "cost_reason": "no price basis configured for these models (MODEL_PRICES); tokens are reported instead"
+   }
+  },
+  "by_category": {
+   "cross_segment": {
+    "questions": 8,
+    "answerable": 8,
+    "unanswerable": 0,
+    "evidence_recall@1": 0.0,
+    "evidence_hit@1": 0.0,
+    "evidence_recall@3": 0.75,
+    "evidence_hit@3": 1.0,
+    "evidence_recall@5": 0.75,
+    "evidence_hit@5": 1.0,
+    "mrr": 0.3333333333333333,
+    "denominator_retrieval": "8 answerable questions",
+    "citation_support_auto": 0.3333333333333333,
+    "denominator_citations": "12 citations on answerable questions",
+    "citation_support_human": null,
+    "citation_support_human_reason": "not reviewed by a person in this run",
+    "time_error_s_median": 82.5,
+    "time_error_s_mean": 116.25,
+    "abstention_on_unanswerable": null,
+    "denominator_abstention": "0 no-answer questions",
+    "false_abstention_on_answerable": 0.25,
+    "keyword_proxy": 0.3333333333333333,
+    "keyword_proxy_note": "automatic: all answer_keywords appear in answered answers; not a quality judgment",
+    "statuses": {
+     "answered": 6,
+     "uncertain": 2
+    },
+    "routes": {
+     "deep": 8
+    },
+    "channel_failures": {},
+    "errors": 0,
+    "latency_total_s": {
+     "p50": 3.140999999999849,
+     "p95": 3.1720000000000255,
+     "mean": 3.144375000000025
+    },
+    "latency_retrieval_s": {
+     "p50": 3.140999999999849,
+     "p95": 3.1720000000000255
+    },
+    "calls_per_question": {
+     "chat": 5.0,
+     "embedding": 6.0
+    },
+    "tokens_per_question": {
+     "input": 22488.0,
+     "output": 496.75
+    },
+    "cost_per_question": null,
+    "cost_reason": "no price basis configured for these models (MODEL_PRICES); tokens are reported instead"
+   },
+   "follow_up": {
+    "questions": 8,
+    "answerable": 8,
+    "unanswerable": 0,
+    "evidence_recall@1": 0.0,
+    "evidence_hit@1": 0.0,
+    "evidence_recall@3": 0.75,
+    "evidence_hit@3": 0.75,
+    "evidence_recall@5": 1.0,
+    "evidence_hit@5": 1.0,
+    "mrr": 0.3,
+    "denominator_retrieval": "8 answerable questions",
+    "citation_support_auto": 0.7142857142857143,
+    "denominator_citations": "14 citations on answerable questions",
+    "citation_support_human": null,
+    "citation_support_human_reason": "not reviewed by a person in this run",
+    "time_error_s_median": 7.5,
+    "time_error_s_mean": 45.0,
+    "abstention_on_unanswerable": null,
+    "denominator_abstention": "0 no-answer questions",
+    "false_abstention_on_answerable": 0.0,
+    "keyword_proxy": null,
+    "keyword_proxy_note": "automatic: all answer_keywords appear in answered answers; not a quality judgment",
+    "statuses": {
+     "answered": 8
+    },
+    "routes": {
+     "deep": 8
+    },
+    "channel_failures": {},
+    "errors": 0,
+    "latency_total_s": {
+     "p50": 3.155999999999949,
+     "p95": 3.2660000000000764,
+     "mean": 3.177500000000009
+    },
+    "latency_retrieval_s": {
+     "p50": 3.155999999999949,
+     "p95": 3.2660000000000764
+    },
+    "calls_per_question": {
+     "chat": 5.0,
+     "embedding": 6.0
+    },
+    "tokens_per_question": {
+     "input": 22652.75,
+     "output": 498.75
+    },
+    "cost_per_question": null,
+    "cost_reason": "no price basis configured for these models (MODEL_PRICES); tokens are reported instead"
+   },
+   "no_answer": {
+    "questions": 10,
+    "answerable": 0,
+    "unanswerable": 10,
+    "evidence_recall@1": null,
+    "evidence_hit@1": null,
+    "evidence_recall@3": null,
+    "evidence_hit@3": null,
+    "evidence_recall@5": null,
+    "evidence_hit@5": null,
+    "mrr": null,
+    "denominator_retrieval": "0 answerable questions",
+    "citation_support_auto": null,
+    "denominator_citations": "0 citations on answerable questions",
+    "citation_support_human": null,
+    "citation_support_human_reason": "not reviewed by a person in this run",
+    "time_error_s_median": null,
+    "time_error_s_mean": null,
+    "abstention_on_unanswerable": 1.0,
+    "denominator_abstention": "10 no-answer questions",
+    "false_abstention_on_answerable": null,
+    "keyword_proxy": null,
+    "keyword_proxy_note": "automatic: all answer_keywords appear in answered answers; not a quality judgment",
+    "statuses": {
+     "uncertain": 10
+    },
+    "routes": {
+     "deep": 10
+    },
+    "channel_failures": {},
+    "errors": 0,
+    "latency_total_s": {
+     "p50": 3.1400000000001,
+     "p95": 3.1879999999998745,
+     "mean": 3.137599999999975
+    },
+    "latency_retrieval_s": {
+     "p50": 3.1400000000001,
+     "p95": 3.1879999999998745
+    },
+    "calls_per_question": {
+     "chat": 5.0,
+     "embedding": 6.0
+    },
+    "tokens_per_question": {
+     "input": 21780.0,
+     "output": 440.8
+    },
+    "cost_per_question": null,
+    "cost_reason": "no price basis configured for these models (MODEL_PRICES); tokens are reported instead"
+   },
+   "transcript": {
+    "questions": 22,
+    "answerable": 22,
+    "unanswerable": 0,
+    "evidence_recall@1": 0.09090909090909091,
+    "evidence_hit@1": 0.09090909090909091,
+    "evidence_recall@3": 0.8181818181818182,
+    "evidence_hit@3": 0.8181818181818182,
+    "evidence_recall@5": 0.9090909090909091,
+    "evidence_hit@5": 0.9090909090909091,
+    "mrr": 0.3666666666666666,
+    "denominator_retrieval": "22 answerable questions",
+    "citation_support_auto": 0.5555555555555556,
+    "denominator_citations": "36 citations on answerable questions",
+    "citation_support_human": null,
+    "citation_support_human_reason": "not reviewed by a person in this run",
+    "time_error_s_median": 0.0,
+    "time_error_s_mean": 5.454545454545454,
+    "abstention_on_unanswerable": null,
+    "denominator_abstention": "0 no-answer questions",
+    "false_abstention_on_answerable": 0.0,
+    "keyword_proxy": 0.6363636363636364,
+    "keyword_proxy_note": "automatic: all answer_keywords appear in answered answers; not a quality judgment",
+    "statuses": {
+     "answered": 22
+    },
+    "routes": {
+     "deep": 22
+    },
+    "channel_failures": {},
+    "errors": 0,
+    "latency_total_s": {
+     "p50": 3.1569999999999254,
+     "p95": 3.1879999999998745,
+     "mean": 3.153409090909101
+    },
+    "latency_retrieval_s": {
+     "p50": 3.1569999999999254,
+     "p95": 3.1879999999998745
+    },
+    "calls_per_question": {
+     "chat": 5.0,
+     "embedding": 6.0
+    },
+    "tokens_per_question": {
+     "input": 22287.454545454544,
+     "output": 481.54545454545456
+    },
+    "cost_per_question": null,
+    "cost_reason": "no price basis configured for these models (MODEL_PRICES); tokens are reported instead"
+   },
+   "visual": {
+    "questions": 16,
+    "answerable": 16,
+    "unanswerable": 0,
+    "evidence_recall@1": 0.5,
+    "evidence_hit@1": 0.5,
+    "evidence_recall@3": 0.5,
+    "evidence_hit@3": 0.5,
+    "evidence_recall@5": 0.75,
+    "evidence_hit@5": 0.75,
+    "mrr": 0.5868055555555555,
+    "denominator_retrieval": "16 answerable questions",
+    "citation_support_auto": 0.23076923076923078,
+    "denominator_citations": "26 citations on answerable questions",
+    "citation_support_human": null,
+    "citation_support_human_reason": "not reviewed by a person in this run",
+    "time_error_s_median": 52.5,
+    "time_error_s_mean": 115.0,
+    "abstention_on_unanswerable": null,
+    "denominator_abstention": "0 no-answer questions",
+    "false_abstention_on_answerable": 0.375,
+    "keyword_proxy": 0.0,
+    "keyword_proxy_note": "automatic: all answer_keywords appear in answered answers; not a quality judgment",
+    "statuses": {
+     "answered": 10,
+     "uncertain": 6
+    },
+    "routes": {
+     "deep": 16
+    },
+    "channel_failures": {},
+    "errors": 0,
+    "latency_total_s": {
+     "p50": 3.140999999999849,
+     "p95": 3.188000000000102,
+     "mean": 3.1181875000000048
+    },
+    "latency_retrieval_s": {
+     "p50": 3.140999999999849,
+     "p95": 3.188000000000102
+    },
+    "calls_per_question": {
+     "chat": 5.0,
+     "embedding": 5.25
+    },
+    "tokens_per_question": {
+     "input": 22180.75,
+     "output": 459.375
+    },
+    "cost_per_question": null,
+    "cost_reason": "no price basis configured for these models (MODEL_PRICES); tokens are reported instead"
+   }
+  },
+  "by_tag": {
+   "code_symbol": {
+    "questions": 20,
+    "answerable": 20,
+    "unanswerable": 0,
+    "evidence_recall@1": 0.1,
+    "evidence_hit@1": 0.1,
+    "evidence_recall@3": 0.5,
+    "evidence_hit@3": 0.5,
+    "evidence_recall@5": 0.7,
+    "evidence_hit@5": 0.7,
+    "mrr": 0.3144444444444444,
+    "denominator_retrieval": "20 answerable questions",
+    "citation_support_auto": 0.375,
+    "denominator_citations": "32 citations on answerable questions",
+    "citation_support_human": null,
+    "citation_support_human_reason": "not reviewed by a person in this run",
+    "time_error_s_median": 0.0,
+    "time_error_s_mean": 53.5,
+    "abstention_on_unanswerable": null,
+    "denominator_abstention": "0 no-answer questions",
+    "false_abstention_on_answerable": 0.1,
+    "keyword_proxy": 0.4444444444444444,
+    "keyword_proxy_note": "automatic: all answer_keywords appear in answered answers; not a quality judgment",
+    "statuses": {
+     "answered": 18,
+     "uncertain": 2
+    },
+    "routes": {
+     "deep": 20
+    },
+    "channel_failures": {},
+    "errors": 0,
+    "latency_total_s": {
+     "p50": 3.125,
+     "p95": 3.1720000000000255,
+     "mean": 3.1180000000000065
+    },
+    "latency_retrieval_s": {
+     "p50": 3.125,
+     "p95": 3.1720000000000255
+    },
+    "calls_per_question": {
+     "chat": 5.0,
+     "embedding": 5.4
+    },
+    "tokens_per_question": {
+     "input": 22208.1,
+     "output": 492.0
+    },
+    "cost_per_question": null,
+    "cost_reason": "no price basis configured for these models (MODEL_PRICES); tokens are reported instead"
+   },
+   "zh_term": {
+    "questions": 10,
+    "answerable": 10,
+    "unanswerable": 0,
+    "evidence_recall@1": 0.0,
+    "evidence_hit@1": 0.0,
+    "evidence_recall@3": 0.9,
+    "evidence_hit@3": 1.0,
+    "evidence_recall@5": 0.9,
+    "evidence_hit@5": 1.0,
+    "mrr": 0.33333333333333337,
+    "denominator_retrieval": "10 answerable questions",
+    "citation_support_auto": 0.25,
+    "denominator_citations": "16 citations on answerable questions",
+    "citation_support_human": null,
+    "citation_support_human_reason": "not reviewed by a person in this run",
+    "time_error_s_median": 15.0,
+    "time_error_s_mean": 39.0,
+    "abstention_on_unanswerable": null,
+    "denominator_abstention": "0 no-answer questions",
+    "false_abstention_on_answerable": 0.0,
+    "keyword_proxy": 0.2,
+    "keyword_proxy_note": "automatic: all answer_keywords appear in answered answers; not a quality judgment",
+    "statuses": {
+     "answered": 10
+    },
+    "routes": {
+     "deep": 10
+    },
+    "channel_failures": {},
+    "errors": 0,
+    "latency_total_s": {
+     "p50": 3.155999999999949,
+     "p95": 3.1870000000001255,
+     "mean": 3.14530000000002
+    },
+    "latency_retrieval_s": {
+     "p50": 3.155999999999949,
+     "p95": 3.1870000000001255
+    },
+    "calls_per_question": {
+     "chat": 5.0,
+     "embedding": 6.0
+    },
+    "tokens_per_question": {
+     "input": 22257.0,
+     "output": 480.0
+    },
+    "cost_per_question": null,
+    "cost_reason": "no price basis configured for these models (MODEL_PRICES); tokens are reported instead"
+   }
+  }
+ }
+}
