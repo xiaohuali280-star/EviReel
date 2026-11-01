@@ -253,6 +253,24 @@ class OpenRouterClient:
         return text, raw
 
 
+def _sub_batch_indices(indices: List[int]) -> bool:
+    """True when ``indices`` are equal-size sub-batches in order, each numbered from 0 (0..k-1, 0..k-1, 0..j with
+    k >= 2 and j < k). Anything else -- a repeated index such as 0, 0, or uneven runs -- is not accepted."""
+    runs, size = [], 0
+    for position, index in enumerate(indices):
+        if index == 0 and position:
+            runs.append(size)
+            size = 0
+        if index != size:
+            return False
+        size += 1
+    runs.append(size)
+    if len(runs) < 2:
+        return False
+    full = runs[0]
+    return full >= 2 and all(run == full for run in runs[:-1]) and 0 < runs[-1] <= full
+
+
 class OpenRouterEmbeddingsClient:
     def __init__(self, *, model_id: Optional[str] = None) -> None:
         cfg = get_settings()
@@ -313,9 +331,13 @@ class OpenRouterEmbeddingsClient:
         if any(isinstance(item, dict) and "index" in item for item in data):
             if any(not isinstance(item, dict) or type(item.get("index")) is not int for item in data):
                 raise RuntimeError("embedding response has invalid indices")
-            if sorted(item["index"] for item in data) != list(range(len(data))):
+            indices = [item["index"] for item in data]
+            if sorted(indices) == list(range(len(data))):
+                data = sorted(data, key=lambda item: item["index"])
+            elif not _sub_batch_indices(indices):
                 raise RuntimeError("embedding response has duplicate or missing indices")
-            data = sorted(data, key=lambda item: item["index"])
+            # else: the provider split the request into sub-batches, each numbered from 0, returned in input order
+            # (SiliconFlow: 20 inputs -> 0..7, 0..7, 0..3); positional order is the input order.
         vectors: List[List[float]] = []
         for item in data:
             emb = item.get("embedding") if isinstance(item, dict) else None
@@ -347,17 +369,23 @@ class OpenRouterEmbeddingsClient:
     ) -> Tuple[List[List[float]], int]:
         payload = self._base_payload(input_type=input_type)
         image_urls = [ensure_image_limit(url) for url in image_urls]
-        payload["input"] = [
-            {
-                "content": [
-                    {
-                        "type": "image_url",
-                        "image_url": {"url": url},
-                    }
-                ]
-            }
-            for url in image_urls
-        ]
+        cfg = get_settings()
+        if cfg.provider_name == "siliconflow" and not cfg.embedding_base_url_override:
+            # SiliconFlow's multimodal embeddings take {"image": <URL or data URI>}; the chat-style content array
+            # below is rejected with HTTP 400 (code 20015, "The parameter is invalid").
+            payload["input"] = [{"image": url} for url in image_urls]
+        else:
+            payload["input"] = [
+                {
+                    "content": [
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": url},
+                        }
+                    ]
+                }
+                for url in image_urls
+            ]
         vectors, dim = self._extract_embeddings(self._post(payload))
         if len(vectors) != len(payload["input"]):
             raise RuntimeError("embedding response count mismatch")

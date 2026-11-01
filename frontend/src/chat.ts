@@ -3,6 +3,10 @@ import type {AgentEvent, ChatPayload} from './types';
 
 export const matches = (e: AgentEvent, p: ChatPayload) => e.video_id === p.video_id && e.conversation_id === p.conversation_id && e.request_id === p.request_id;
 export const pendingKey = (cid: string) => `evireel:pending:${cid}`;
+/** Answer text for display: the program-appended references "[ev_…] (75.48–84.48s)" are dropped; the source
+ * cards under the answer carry the same evidence with a playable mm:ss time. */
+export const answerText = (content: string) =>
+  content.replace(/ ?\[ev_[0-9a-f]{32}\](?: \(\d+(?:\.\d+)?–\d+(?:\.\d+)?s\))?/g, '');
 export const RECONCILE_MS = 1500;
 export function remembered(cid: string): ChatPayload | null {
   try {

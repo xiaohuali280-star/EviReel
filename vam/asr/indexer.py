@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import math
 from pathlib import Path
 import tempfile
@@ -11,6 +12,8 @@ from vam.asr.chunker import CHUNK_RULE_VERSION, make_chunks, normalize_segments
 from vam.memory.transcript import embedding_fingerprint
 from vam.runtime import run_sync
 from vam.vision.backends import validate_embeddings
+
+logger = logging.getLogger(__name__)
 
 
 def checksum(path):
@@ -85,7 +88,10 @@ async def index_transcript(*, source, source_sha256, store, settings, transcribe
                 vectors.extend(batch_vectors)
                 dim = batch_dim
             await run_sync(store.publish, version, vectors=vectors, dim=dim)
-        except Exception:
+        except Exception as exc:
+            # The text stays readable; record why semantic search is unavailable (the API reports only the code).
+            logger.warning('transcript_embedding_failed version=%s exception=%s: %s', version, type(exc).__name__,
+                           str(exc)[:300])
             await run_sync(store.publish, version)
             return {'status': 'partial', 'error_code': 'transcript_embedding_failed',
                     'error': 'Transcript text is available; semantic embedding failed. Retry the transcript job.',

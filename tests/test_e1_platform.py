@@ -123,6 +123,43 @@ def pg(app, sql, *params):
         return conn.execute(sql, params).fetchall()
 
 
+# Self-service sign-up: a new user gets their own workspace and a session; rules, duplicates and the switch.
+def test_registration_creates_an_isolated_account_and_signs_in(platform_app, video_file):
+    _, app = platform_app()
+    with TestClient(app) as client:
+        assert client.get("/api/ui-config").json()["registration"] is True
+        for body, status, code in [({"username": "x", "password": PASSWORD}, 422, "invalid_username"),
+                                   ({"username": "bad name", "password": PASSWORD}, 422, "invalid_username"),
+                                   ({"username": "newbie", "password": "short"}, 422, "weak_password")]:
+            response = client.post("/api/auth/register", json=body)
+            assert (response.status_code, response.json()["error"]["code"]) == (status, code)
+        created = client.post("/api/auth/register", json={"username": "newbie", "password": PASSWORD})
+        assert created.status_code == 201, created.text
+        me = created.json()
+        assert me["username"] == "newbie" and me["workspace"]["workspace_id"].startswith("ws_")
+        assert me["workspace"]["quota_bytes"] == app.state.indexing.settings.default_workspace_quota_bytes
+        assert client.get("/api/auth/me").json()["username"] == "newbie"      # the session cookie is set
+        newbie = As(client, client.cookies.get("evireel_session"))
+        client.cookies.clear()
+        again = client.post("/api/auth/register", json={"username": "newbie", "password": PASSWORD + "x"})
+        assert (again.status_code, again.json()["error"]["code"]) == (409, "username_taken")
+        assert client.post("/api/auth/login", json={"username": "newbie", "password": PASSWORD}).status_code == 200
+        client.cookies.clear()
+        # Isolation: the new account sees nothing of another user's workspace.
+        alice, _ = users(client, app, "alice")["alice"]
+        view = create(alice, video_file.read_bytes()[:6 * MiB], "secret.mp4")
+        assert newbie.get(f"/api/uploads/{view['upload_id']}").status_code == 404
+        assert newbie.get("/api/videos").json()["items"] == []
+        rows = pg(app, "SELECT w.workspace_id FROM users u JOIN memberships m ON m.user_id=u.user_id "
+                       "JOIN workspaces w ON w.workspace_id=m.workspace_id WHERE u.username=%s AND m.role='owner'", "newbie")
+        assert [r["workspace_id"] for r in rows] == [me["workspace"]["workspace_id"]]
+    _, closed = platform_app(auth_allow_registration=False)
+    with TestClient(closed) as client:
+        assert client.get("/api/ui-config").json()["registration"] is False
+        denied = client.post("/api/auth/register", json={"username": "someone", "password": PASSWORD})
+        assert (denied.status_code, denied.json()["error"]["code"]) == (403, "registration_disabled")
+
+
 # 1 + 6: interrupt, "refresh", resend only missing parts; bytes identical; playback/Range/index work.
 def test_resume_sends_only_missing_parts_and_new_video_is_playable(platform_app, video_file):
     settings, app = platform_app()

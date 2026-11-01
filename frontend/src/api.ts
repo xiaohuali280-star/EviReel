@@ -52,6 +52,8 @@ const messages: Record<string, string> = {
   queue_full: '处理队列已满，请稍后重试。', study_queue_full: '笔记生成任务较多，请稍后重试。',
   study_running: '该视频正在生成笔记，请等待完成。', question_too_large: '问题超过字数上限，请缩短后重试。',
   invalid_credentials: '用户名或密码不正确。', unauthenticated: '登录已过期，请重新登录。',
+  invalid_username: '用户名需为 3–64 位字母、数字或 _ . -。', weak_password: '密码至少需要 10 位。',
+  username_taken: '该用户名已被注册，请换一个或直接登录。', registration_disabled: '当前未开放注册，请联系管理员创建账号。',
   quota_exceeded: '学习空间的存储配额不足，请删除部分视频后重试。', too_many_uploads: '未完成的上传过多，请先完成或放弃其中一个。',
   upload_not_found: '上传会话不存在或无权访问。', video_not_found: '视频不存在或无权访问。',
   storage_unavailable: '对象存储暂不可用，请稍后重试。', upload_limit: '视频超过上传大小上限。', unsupported_media: '不支持的视频格式。',

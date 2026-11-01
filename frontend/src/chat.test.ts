@@ -58,3 +58,13 @@ describe('ChatChannel', () => {
     channel.close();
   });
 });
+
+describe('answerText', () => {
+  it('drops program-appended evidence references and their seconds, keeps the claim text', async () => {
+    const {answerText} = await import('./chat');
+    const id = 'ev_' + '0'.repeat(32);
+    expect(answerText(`课后作业需要提交到 Gradescope 平台。 [${id}] (118.00–118.00s)`)).toBe('课后作业需要提交到 Gradescope 平台。');
+    expect(answerText(`A [${id}] (75.48–84.48s) [${id}] (1–2s)\nB [${id}]`)).toBe('A\nB');
+    expect(answerText('O(E log E) 是复杂度 (2–3 秒)')).toBe('O(E log E) 是复杂度 (2–3 秒)');
+  });
+});

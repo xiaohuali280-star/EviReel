@@ -124,3 +124,24 @@ test('pause and continue, then cross-user isolation in the browser', async ({pag
   expect(content.status()).toBe(404);
   await bob.close();
 });
+
+test('a new user signs up from the sign-in page, lands in an empty own space, and a taken name is refused', async ({page}) => {
+  const name = `new_${Date.now().toString(36)}`;
+  await page.goto('/app/');
+  await page.getByRole('button', {name: '立即注册'}).click();
+  await expect(page.getByRole('heading', {name: '欢迎注册'})).toBeVisible();
+  await page.getByLabel('用户名').fill(name);
+  await page.getByLabel('密码').fill(password);
+  await page.getByRole('button', {name: '注册', exact: true}).click();
+  await expect(page.getByRole('button', {name: '上传视频'})).toBeEnabled();
+  await expect(page.getByRole('heading', {name: '还没有上传视频'})).toBeVisible();       // nothing from other users
+  await page.context().clearCookies();
+  await page.goto('/app/');
+  await page.getByRole('button', {name: '立即注册'}).click();
+  await page.getByLabel('用户名').fill(name);
+  await page.getByLabel('密码').fill(password);
+  await page.getByRole('button', {name: '注册', exact: true}).click();
+  await expect(page.getByRole('alert')).toContainText('已被注册');
+  await page.getByRole('button', {name: '去登录'}).click();
+  await expect(page.getByRole('heading', {name: '登录 EviReel'})).toBeVisible();
+});

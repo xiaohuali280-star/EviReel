@@ -267,6 +267,22 @@ def test_missing_source_is_repaired_without_dropping_material(tmp_path):
     asyncio.run(scenario())
 
 
+def test_fenced_json_from_the_model_is_accepted(tmp_path):
+    """Real chat models often wrap the JSON in a ```json fence; the notes parser accepts it like the answer path."""
+    async def scenario():
+        async def fenced(messages):
+            records = json.loads(messages[-1]['content'])
+            body = json.dumps({'chapters': [{'title': '章节', 'points': ['要点'], 'source_ids': [r['source_id'] for r in records]}]},
+                              ensure_ascii=False)
+            return '```json\n' + body + '\n```'
+
+        service = StudyService(IndexingService(Settings(_env_file=None, data_root=str(tmp_path))), model=fenced)
+        chapters = await service.draft([{'evidence_id': 'one', 'text': 'one', 'start_t': 0, 'end_t': 1}])
+        assert chapters[0]['source_ids'] == ['one']
+
+    asyncio.run(scenario())
+
+
 def test_search_pagination_ui_limits_and_static(client, audio_media, tmp_path):
     vid, _ = p2.ingest(client, audio_media)
     config = client.get('/api/ui-config').json()

@@ -17,7 +17,7 @@ from vam.runtime import run_sync
 from vam.video_registry import DomainError
 
 COOKIE = "evireel_session"
-PUBLIC = {"/api/auth/login", "/api/ui-config", "/api/health"}
+PUBLIC = {"/api/auth/login", "/api/auth/register", "/api/ui-config", "/api/health"}
 VIDEO_PATH = re.compile(r"^/api/videos/(v_[0-9a-f]{32})(?:/|$)")
 JOB_PATH = re.compile(r"^/api/jobs/([0-9a-f]{32})(?:/|$)")
 CONVERSATION_PATH = re.compile(r"^/api/conversations/(c_[0-9a-f]{32})(?:/|$)")

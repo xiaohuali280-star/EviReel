@@ -186,6 +186,7 @@ def create_app(*, settings=None, backend=None, indexer=None, transcriber=None, r
         from vam.indexing.media import ALLOWED_EXTENSIONS
         return {'upload_mode': 'resumable' if settings.platform_enabled else 'single',
                 'auth_required': settings.platform_enabled,
+                'registration': settings.platform_enabled and settings.auth_allow_registration,
                 'max_upload_bytes': settings.max_upload_bytes, 'max_video_duration_s': settings.max_video_duration_s,
                 'extensions': sorted(ALLOWED_EXTENSIONS), 'message_chars': settings.conversation_message_chars,
                 'study_auto_generate': settings.study_auto_generate, 'model_configured': bool(settings.api_key or study_model)}

@@ -105,6 +105,9 @@ class Settings(BaseSettings):
     default_workspace_quota_bytes: int = Field(20 * 1024 ** 3, ge=0)
     auth_session_ttl_s: int = Field(7 * 24 * 3600, ge=300, le=90 * 24 * 3600)
     auth_cookie_secure: bool = False
+    # Platform mode: anyone can create an account (and their own workspace with the default quota) from the
+    # sign-in page. False = accounts only via `python -m vam.platform.migrate create-user`.
+    auth_allow_registration: bool = True
     # E2 durable pipeline (platform mode only). "inline" keeps the in-process indexer; "worker"
     # records jobs in PostgreSQL and runs stages in Celery workers fed by the outbox dispatcher.
     pipeline_mode: Literal["inline", "worker"] = "inline"

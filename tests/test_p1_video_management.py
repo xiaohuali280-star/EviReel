@@ -330,6 +330,36 @@ def test_embedding_indices_are_reordered_and_validated(settings):
         adapter._extract_embeddings({"data": [
             {"index": 0, "embedding": [1.]}, {"index": 0, "embedding": [0.]}]})
 
+def test_embedding_sub_batches_numbered_from_zero_keep_input_order(settings):
+    """SiliconFlow splits 20 inputs into sub-batches of 8 and numbers each from 0 (0..7, 0..7, 0..3), in order."""
+    from vam.llm.openrouter import OpenRouterEmbeddingsClient
+    adapter = OpenRouterEmbeddingsClient()
+    indices = list(range(8)) + list(range(8)) + list(range(4))
+    vectors, _ = adapter._extract_embeddings({"data": [{"index": i, "embedding": [float(n), 1.]} for n, i in enumerate(indices)]})
+    assert [v[0] for v in vectors] == [float(n) for n in range(20)]
+    for bad in ([0, 1, 0, 1, 2], [0, 1, 2, 0, 1, 0, 1], [0, 1, 1, 0], [1, 0, 1, 2]):   # uneven runs, repeats, no 0 start
+        with pytest.raises(RuntimeError, match="indices"):
+            adapter._extract_embeddings({"data": [{"index": i, "embedding": [1., 0.]} for i in bad]})
+
+def test_siliconflow_image_embeddings_use_the_image_input_format(settings):
+    from vam.llm.openrouter import OpenRouterEmbeddingsClient
+    sent = {}
+
+    def post(self, payload):
+        sent.update(payload)
+        return {"data": [{"index": 0, "embedding": [1., 0.]}]}
+    png = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+    settings.siliconflow_api_key, settings.embedding_base_url_override = "k", ""
+    with patch("vam.llm.openrouter.OpenRouterEmbeddingsClient._post", post), \
+            patch.object(type(settings), "provider_name", property(lambda self: "siliconflow")):
+        OpenRouterEmbeddingsClient().generate_image_embeddings([png])
+    assert set(sent["input"][0]) == {"image"} and sent["input"][0]["image"].startswith("data:image/")
+    sent.clear()
+    with patch("vam.llm.openrouter.OpenRouterEmbeddingsClient._post", post), \
+            patch.object(type(settings), "provider_name", property(lambda self: "openrouter")):
+        OpenRouterEmbeddingsClient().generate_image_embeddings([png])
+    assert sent["input"][0]["content"][0]["type"] == "image_url"                     # other providers unchanged
+
 def test_fingerprint_does_not_persist_credentials(settings):
     settings.embedding_base_url_override = "https://user:secret@example.com/v1?api_key=secret"
     fingerprint = OpenRouterGeminiBackend().fingerprint()

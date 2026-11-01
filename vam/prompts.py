@@ -341,6 +341,8 @@ def grounded_answer_system():
         'Every claim needs at least one actual supplied ID. Do not insert IDs, URLs, '
         'or time labels in claim text; the program will append validated references and times. '
         'Warnings may only be speech_visual_conflict, possible_asr_error, insufficient_evidence. '
+        'Use possible_asr_error when the transcript only seems misrecognized (homophones, garbled terms or formulas '
+        'that the screen shows correctly); use speech_visual_conflict only when speech and screen disagree in meaning. '
         'Citation validity does not itself prove the meaning of a claim.'
     )
 def conversation_context_system():

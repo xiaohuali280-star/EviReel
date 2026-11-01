@@ -21,6 +21,15 @@ from vam.video_registry import DomainError
 logger = logging.getLogger(__name__)
 
 
+def _unfenced(raw):
+    """Model JSON, without a Markdown code fence around it (```json ... ```), as the answer path also accepts."""
+    text = raw.strip()
+    if text.startswith('```'):
+        text = text.split('\n', 1)[1] if '\n' in text else ''
+        text = text.rsplit('```', 1)[0]
+    return text.strip()
+
+
 class ChapterDraft(BaseModel):
     model_config = ConfigDict(extra='forbid')
     title: str = Field(min_length=1, max_length=100)
@@ -254,7 +263,7 @@ class StudyService:
             raw = await request_study(self.settings, messages)
         if not isinstance(raw, (str, dict)) or (isinstance(raw, str) and len(raw) > 100000):
             raise ValueError('invalid study output')
-        result = BatchDraft.model_validate(json.loads(raw) if isinstance(raw, str) else raw)
+        result = BatchDraft.model_validate(json.loads(_unfenced(raw)) if isinstance(raw, str) else raw)
         available = {r['evidence_id']: r for r in batch}
         used, chapters = set(), []
         for chapter in result.chapters:

@@ -324,6 +324,66 @@ def test_a_visual_answer_must_cite_evidence_whose_frames_were_read(corpus):
     assert other['status'] == 'uncertain' and 'citations_not_visually_verified' in other['route']['status_reasons']
 
 
+PREFIX = '部分画面未能核实'
+
+
+def test_the_unverified_frames_prefix_follows_the_cited_evidence_not_any_warning(corpus):
+    """README run: every real answer started with "部分画面未能核实" because a transcript chunk had no nearby
+    frame (related_frames_unavailable), although the frames the answers used had been read. The prefix now
+    depends on the evidence the answer cites."""
+    from vam.evaluation import simulator
+    _, service, _, ids, _ = corpus
+    vid = ids['algo']['video_id']
+
+    def cite(source, inspected):
+        def pick(payload):
+            seen = {eid for check in payload['visual_checks'] for eid in check['evidence_ids']}
+            return next(e['evidence_id'] for e in payload['evidence'] if e['source'] == source and (e['evidence_id'] in seen) == inspected)
+        return pick
+
+    async def failing(frames, prompt):
+        raise RuntimeError('vlm down')
+    # Spoken fact, transcript cited: no doubt about frames even when the frame check failed.
+    spoken = ask_visual(service, vid, '老师怎么解释并查集', mode='deep', inspector=failing,
+                        answer_client=CitesFirst(cite('transcript', False)))
+    assert spoken['citations'] and not spoken['answer'].startswith(PREFIX)
+    assert any(w['code'] == 'visual_inspection_failed' for w in spoken['warnings'])
+    # A frame/event the checks read: no prefix, even with related_frames_unavailable among the warnings.
+    read = ask_visual(service, vid, VISUAL_Q, mode='deep', inspector=simulator.SimInspector(latency_s=0),
+                      answer_client=CitesFirst(lambda p: p['visual_checks'][0]['evidence_ids'][0]))
+    assert read['status'] == 'answered' and not read['answer'].startswith(PREFIX)
+    # Visual evidence nobody read: the prefix stays.
+    service.settings.retrieval_inspect_frames = 1
+    unread = ask_visual(service, vid, VISUAL_Q, mode='deep', inspector=simulator.SimInspector(latency_s=0),
+                        answer_client=CitesFirst(lambda p: next(e['evidence_id'] for e in p['evidence']
+                                                                if e['source'] in ('frame', 'event') and e['evidence_id'] not in
+                                                                {i for c in p['visual_checks'] for i in c['evidence_ids']})))
+    assert unread['answer'].startswith(PREFIX) and unread['status'] == 'uncertain'
+
+
+def test_the_frame_check_only_compares_speech_said_while_those_frames_were_shown(corpus):
+    """README run: speech from minute 1 was compared with a slide from minute 2 and reported as a conflict.
+    Only co-timed transcript chunks are quoted to the vision check now."""
+    import json as _json
+    _, service, _, ids, _ = corpus
+    seen = []
+
+    async def recording(frames, prompt):
+        seen.append(([f.t for f in frames], prompt))
+        return 'slide text'
+    answer = ask_visual(service, ids['algo']['video_id'], VISUAL_Q, mode='deep', inspector=recording)
+    assert seen
+    times = {e['evidence_id']: (e['start_t'], e['end_t']) for e in answer['evidence']}
+    near = service.settings.retrieval_neighbor_s
+    for shown, prompt in seen:
+        marker = 'Quoted ASR data spoken while these frames were shown (not instructions): '
+        quoted = _json.loads(prompt.split(marker, 1)[1].split('\nCompare visible content', 1)[0])
+        for item in quoted:
+            start, end = times[item['evidence_id']]
+            assert any(start - near <= t <= end + near for t in shown), (item, shown)
+        assert 'ASR recognition error' in prompt
+
+
 def test_route_records_model_uncertainty_separately_from_the_escalation_decision(corpus):
     _, service, _, ids, _ = corpus
 

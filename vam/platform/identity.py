@@ -92,6 +92,24 @@ class IdentityService:
         if not row:
             raise ValueError("workspace not found")
 
+    def register(self, username: str, password: str):
+        """Self-service sign-up: a new user who owns a new workspace (default quota), signed in at once.
+        Returns the session like ``login``."""
+        if not USERNAME.fullmatch(username or ""):
+            raise DomainError(422, "invalid_username", "Username must be 3-64 letters, digits, '_', '.' or '-'")
+        if not 10 <= len(password or "") <= 256:
+            raise DomainError(422, "weak_password", "Password must be 10-256 characters")
+        try:
+            self.create_user(username, password)
+        except ValueError:
+            raise DomainError(409, "username_taken", "This username is already taken") from None
+        except Exception as exc:
+            # Two sign-ups for one name at once: the second insert hits the UNIQUE constraint.
+            if type(exc).__name__ == "UniqueViolation":
+                raise DomainError(409, "username_taken", "This username is already taken") from None
+            raise
+        return self.login(username, password)
+
     # -- sessions ------------------------------------------------------------
     def login(self, username: str, password: str):
         global _DUMMY_HASH
