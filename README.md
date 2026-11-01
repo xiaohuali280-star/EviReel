@@ -12,12 +12,6 @@
     <img src="https://img.shields.io/badge/faster--whisper-ASR-6E40C9?style=flat-square" alt="faster-whisper">
     <a href="./LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue?style=flat-square" alt="MIT License"></a>
   </p>
-  <p>
-    <a href="https://github.com/xiaohuali280-star/EviReel/actions/workflows/p0-baseline.yml"><img src="https://github.com/xiaohuali280-star/EviReel/actions/workflows/p0-baseline.yml/badge.svg" alt="CPU tests"></a>
-    <a href="https://github.com/xiaohuali280-star/EviReel/actions/workflows/e1-platform.yml"><img src="https://github.com/xiaohuali280-star/EviReel/actions/workflows/e1-platform.yml/badge.svg" alt="E1 platform"></a>
-    <a href="https://github.com/xiaohuali280-star/EviReel/actions/workflows/e2-pipeline.yml"><img src="https://github.com/xiaohuali280-star/EviReel/actions/workflows/e2-pipeline.yml/badge.svg" alt="E2 pipeline"></a>
-    <a href="https://github.com/xiaohuali280-star/EviReel/actions/workflows/e3-concurrency.yml"><img src="https://github.com/xiaohuali280-star/EviReel/actions/workflows/e3-concurrency.yml/badge.svg" alt="E3 concurrency"></a>
-  </p>
 </div>
 
 <div align="center">
