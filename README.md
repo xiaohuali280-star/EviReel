@@ -1,188 +1,206 @@
-# EviReel
+<div align="center">
+  <h2>EviReel</h2>
 
-**基于分层多模态记忆与 Agentic RAG 的可溯源视频学习助手。**
+  <p>
+    <img src="https://img.shields.io/badge/Python-3.10%2B-3776AB?style=flat-square" alt="Python 3.10+">
+    <img src="https://img.shields.io/badge/FastAPI-WebSocket-009688?style=flat-square" alt="FastAPI">
+    <img src="https://img.shields.io/badge/React-19-61DAFB?style=flat-square" alt="React 19">
+    <img src="https://img.shields.io/badge/PostgreSQL-16-4169E1?style=flat-square" alt="PostgreSQL 16">
+    <img src="https://img.shields.io/badge/MinIO-S3-C72E49?style=flat-square" alt="MinIO">
+    <img src="https://img.shields.io/badge/Redis-7-DC382D?style=flat-square" alt="Redis">
+    <img src="https://img.shields.io/badge/RabbitMQ%20%2B%20Celery-4.1-FF6600?style=flat-square" alt="RabbitMQ + Celery">
+    <img src="https://img.shields.io/badge/faster--whisper-ASR-6E40C9?style=flat-square" alt="faster-whisper">
+    <a href="./LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue?style=flat-square" alt="MIT License"></a>
+  </p>
+  <p>
+    <a href="https://github.com/xiaohuali280-star/EviReel/actions/workflows/p0-baseline.yml"><img src="https://github.com/xiaohuali280-star/EviReel/actions/workflows/p0-baseline.yml/badge.svg" alt="CPU tests"></a>
+    <a href="https://github.com/xiaohuali280-star/EviReel/actions/workflows/e1-platform.yml"><img src="https://github.com/xiaohuali280-star/EviReel/actions/workflows/e1-platform.yml/badge.svg" alt="E1 platform"></a>
+    <a href="https://github.com/xiaohuali280-star/EviReel/actions/workflows/e2-pipeline.yml"><img src="https://github.com/xiaohuali280-star/EviReel/actions/workflows/e2-pipeline.yml/badge.svg" alt="E2 pipeline"></a>
+    <a href="https://github.com/xiaohuali280-star/EviReel/actions/workflows/e3-concurrency.yml"><img src="https://github.com/xiaohuali280-star/EviReel/actions/workflows/e3-concurrency.yml/badge.svg" alt="E3 concurrency"></a>
+  </p>
+</div>
 
-将课程、讲座和演示视频整理成可阅读的文稿、可定位的知识点与可导出的学习资料。围绕当前视频提问，在回答中查看来源，再跳回对应片段核对。
+<div align="center">
 
-[示例展示](#示例展示) · [设计背景](#设计背景) · [功能介绍](#功能介绍) · [技术栈](#技术栈) · [工作流程](#工作流程)
+面向课程视频的**可溯源学习助手**。
 
-## 示例展示
+把一段讲课视频变成可阅读的文稿、可定位的知识点和可导出的学习资料；<br>
+每个 AI 回答都附带可点击跳转的视频证据，回到原片就能核对。
 
-### 网页学习工作区
+[项目预览](#项目预览) · [核心功能](#核心功能) · [系统流程](#系统流程) · [技术栈](#技术栈) · [本地运行](#本地运行)
 
-在同一页面播放视频、阅读章节笔记，并向 AI 助手提问。右侧来源卡片可点击跳转，核对对应视频片段。
+</div>
 
-![当前 EviReel 网页：视频播放、章节笔记和带来源的 AI 问答](img/current-20261028/workspace.jpg)
+## 项目预览
 
-> 本节 8 张截图均于 **2026-10-28** 从当前版本重新构建、运行并操作网页后截取，展示可调宽度、侧栏折叠、学习区收起和文稿双模式等现有功能。演示采用合成视频与显式测试模型，验证操作流程，不代表真实课程的模型效果。详见 [本次网页测试记录](docs/README_WEB_TEST_20261028.md)。
+上传视频后，后台自动转写字幕、抽取并筛选画面、建立索引；在同一个工作区里播放视频、阅读章节笔记和文稿，并向 AI 助手提问。回答中的每条来源都可以点击，跳回对应的视频片段。
+
+**注册与登录**：新用户在登录页即可注册，注册后自动创建自己的学习空间；视频、对话和上传会话按学习空间隔离，彼此不可见。
+
+<img src="img/readme-20261101/register.jpg" alt="EviReel 注册页" width="720" />
+
+**带来源的问答**：第二个问题问的是只写在幻灯片上、讲解里没说的内容，回答引用的是画面证据；另外两个回答标注了“字幕可能存在识别错误”，因为对应的字幕确实有误识别（如把 O(E log E) 识别成 “e-log e”）。
+
+![EviReel 工作区：视频播放与带来源的 AI 问答](img/readme-20261101/qa.jpg)
+
+**章节笔记**：由模型按字幕和画面分章生成，每章附来源时间，可导出 Markdown / PPTX / PDF。
+
+![章节目录、笔记内容与本章来源](img/readme-20261101/notes.jpg)
 
 <details>
-<summary>查看上传、处理、文稿双模式、收起布局与手机页面</summary>
-
-**上传前**
-
-![当前网页上传前：上传入口与 AI 助手欢迎区](img/current-20261028/empty.jpg)
+<summary>查看处理中与文稿双模式</summary>
 
 **视频处理中**
 
-![当前网页处理状态：视频正在处理中与 AI 助手欢迎区](img/current-20261028/processing.jpg)
+![上传后的处理状态与 AI 助手欢迎区](img/readme-20261101/processing.jpg)
 
 **文稿：段落阅读**
 
-默认合并为便于阅读的自然段，保留原文及来源时间。
-
-![当前网页文稿段落阅读：模式切换与合并正文](img/current-20261028/paragraphs.jpg)
+![合并为自然段的语音文稿，保留时间](img/readme-20261101/paragraphs.jpg)
 
 **文稿：逐句模式**
 
-切回原始识别片段，点击时间定位并核对；仍可下载 TXT / SRT。
-
-![当前网页文稿逐句模式：原始片段与播放定位](img/current-20261028/segments.jpg)
-
-**侧栏折叠与两栏比例调整**
-
-![当前网页侧栏折叠为图标栏，并调整学习区与 AI 助手宽度](img/current-20261028/compact.jpg)
-
-**笔记与文稿收起**
-
-![当前网页学习内容收起，只保留章节与笔记和文稿入口](img/current-20261028/minimized.jpg)
-
-**手机布局**
-
-<img src="img/current-20261028/mobile.jpg" alt="当前 EviReel 手机网页：紧凑导航、视频、学习内容和 AI 助手" width="360" />
+![原始识别片段，点击跳转播放位置](img/readme-20261101/segments.jpg)
 
 </details>
 
-### 典型学习场景
+## 核心功能
 
-以下是提问与操作示例，不是预先录制的真实模型答案；实际结果取决于视频材料和可用索引。
+课程视频的知识一半在**讲解**里、一半在**画面**上；学习者要的不是一段总结，而是“能找回、能核对”。EviReel 针对这类场景里的具体痛点，给出下面的解决方案。
 
-| 学习目标 | 可以怎样操作 | 查看什么 |
-| --- | --- | --- |
-| 找到一个知识点 | 问“老师在哪里介绍了生成树的性质？” | 相关回答、来源片段和可跳转时间 |
-| 核对画面与讲解 | 问“这张图怎样说明生成树的性质？” | 有视觉能力时的画面核验；仅文稿模式会明确标注 |
-| 理解当前内容 | 选中章节或定位播放位置，再问“这部分主要在讲什么？” | 对应范围内的说明与来源；范围不明时先澄清 |
-| 连续追问 | 接着问“这个概念后面举了什么例子？” | 结合历史解析指代，再查找相关材料 |
-| 整理复习资料 | 使用笔记或课件入口 | 任务状态、章节预览及 Markdown / PPTX / PDF 下载 |
-| 阅读与校对文稿 | 在段落阅读和逐句模式间切换 | 同一份识别原文及片段时间；可下载 TXT / SRT |
+### 🔍 长视频里找不到老师讲过的那一处
 
-### 进一步了解
+> 一节课一两个小时，复习时只能反复拖进度条；字幕搜索又漏掉写在幻灯片上的公式和代码。
 
-- [部署与学习接口](docs/P5_DEPLOYMENT.md)：启动网页、运行配置、学习任务与导出。
-- [视频管理 API](docs/P1_VIDEO_API.md) · [语音与字幕](docs/P2_TRANSCRIPT_API.md)
-- [检索与证据](docs/P3_SEARCH_API.md) · [持久会话协议](docs/P4_CONVERSATION_API.md)
-- [聊天与快捷入口实现记录](docs/CHAT_ACTIONS_DELIVERY.md) · [文稿阅读实现记录](docs/TRANSCRIPT_READING_DELIVERY.md)
+- **分层视觉记忆**：抽帧并筛掉模糊、重复帧，帧聚合成事件、事件再生成摘要，三层都可检索，结果回溯到具体帧和时间。
+- **多通道召回 + 融合**：画面帧、事件、摘要、字幕向量各自召回，用 RRF 按名次融合，可选重排；每条结果都是可点击跳转的时间点。
+- **面向中文与代码的关键词通道**：向量检索对“并查集”“`uf.find`”这类精确词不敏感。中文按两字切分，代码符号既保留完整写法又拆成各部分，BM25 打分后参与融合。
 
-## 设计背景
+### 🧾 AI 的回答不知道真假，也可能说的是幻灯片上根本没有的东西
 
-长视频承载了大量知识，但“看过”并不等于“能快速找回”。复习一段课程时，学习者往往需要反复拖动进度条，寻找老师讲过的定义、例子或推导过程；整理文稿和笔记又会消耗额外时间。
+> 没有来源的总结无法核对；模型还可能引用已经被替换的旧索引，或把字幕里没有的画面内容当成“看到了”。
 
-视频信息还分布在不同通道中：语音解释概念，画面呈现公式、图表和操作步骤。仅搜索字幕可能遗漏视觉细节，仅概括画面又可能失去讲解中的条件与因果关系。没有来源的 AI 总结，则难以判断是否忠实于原视频。
+- **证据约束的回答**：每次请求固定一组索引版本，回答只能引用本次检索登记过的证据；程序校验视频、版本和时间，引用旧版本证据会被拒绝。
+- **看帧核验**：问题涉及画面时，由视觉模型读取相关帧再回答。截图中的第二个问题（作业提交平台只写在幻灯片上）就是靠读帧答对的。
+- **状态由规则判定**：画面问题只有在画面真的被读到、且引用了读到的证据时才算“已回答”；读取失败、超时或没有可用帧时标为“不确定”并写明原因，不只听模型自报。
 
-EviReel 围绕这三个问题设计：
+### 💸 每个问题都让视觉模型看帧，又慢又贵
 
-- **让内容可查找**：预先处理视频，建立带时间信息的画面与语音记录，减少反复浏览全片的成本。
-- **让回答可核对**：将回答关联到视频证据，支持回到原片检查，而不是只提供一段无法追溯的文字。
-- **让知识可复用**：把视频内容整理成章节笔记、文稿和学习课件，支持阅读、复习与导出。
+> 大部分问题只看字幕就能回答，但“省钱版”可能答错，或在该拒答时乱答。
 
-项目沿用 Visual Agentic Memory（VAM）的分层视觉记忆与检索能力，并提供面向视频学习的网页工作区。
+- **三种回答路径**：`deep` 总是先看帧；`cheap` 只用检索证据；`auto` 按明确规则选择，证据太弱且与画面无关时直接拒答、不调用模型。
+- **有界升级**：`auto` 最多升级一轮，看帧数和升级时间都有上限；每个回答记录 `status` 与 `route`，能说清每一笔调用花在哪里。
 
-## 功能介绍
+### 📶 大视频上传断网就得重来，处理到一半服务重启也白做
 
-### 视频资料管理与播放
+> 课程视频动辄几个 GB；转写、抽帧、向量化又是几分钟到几十分钟的长任务。
 
-- 上传视频，查看上传进度、后台处理状态，并在失败后重试。
-- 管理多个视频，按文件名搜索；通过回收站恢复或永久删除资料。
-- 在浏览器中播放视频，支持倍速、全屏，以及从章节、文稿和回答来源跳转到对应时间。
-- 每个视频拥有独立的索引与会话范围，切换视频时隔离返回结果。
+- **可续传分片直传（E1）**：浏览器把分片直接传到对象存储，PostgreSQL 记账；续传前用 ListParts 对账并逐片校验 MD5，不会把两份文件的分片拼在一起。
+- **可靠流水线（E2）**：任务受理和待发布消息写在同一个事务里（Outbox），再投递到 RabbitMQ；每次执行持有带租约的 attempt token，Worker 被 `kill -9` 后由别人接手，旧执行者的结果写不回去；分阶段检查点让重试从断点继续。14 个真实中间件故障测试在 CI 中运行。
+- **可恢复的对话**：每个问题带请求号，服务端先持久化再执行、先保存结果再推送；刷新页面或断网后按同一请求号恢复，不会重复调用模型。
 
-### 文稿阅读与章节笔记
+### 👥 热门课程多人同时提问，系统被一把锁卡住
 
-- 从音轨生成带片段级时间信息的语音文稿，支持 TXT、SRT 导出。
-- 文稿默认按自然段阅读，也可切换为原始识别片段；阅读与播放位置联动。
-- 根据可用语音文稿或视觉事件文字生成章节标题、知识点和来源定位。
-- 支持 Markdown 笔记及 PPTX、PDF 学习课件导出；已有有效资料可复用。
-- 资料生成由后台任务执行，显示进度与失败状态；来源更新后，旧资料会标记为过期。
+> 压测发现瓶颈是“每个视频一把锁”：同一视频的问题只能排队，索引更新时还会阻塞读者。
 
-### 带来源的 AI 问答
+- **版本快照 + 跨实例读租约（E3）**：读请求固定在某一代索引上并行读取，新版本发布不阻塞读者；旧版本等租约排空后才回收，回收认领与清理分离，并发清扫只执行一次。
+- **共享的模型限流与用量账本**：所有模型调用经过统一网关，Redis 放限流窗口，PostgreSQL 记录每次调用并按工作区执行每日预算。
+- 同一视频 20 并发时 P95 从 17.9 s 降到 2.4 s（本机单实例压测，模型调用为模拟器，不是真实供应商性能）；两个 API 实例经 nginx 轮询，停掉一个后 20/20 请求成功。
 
-- 围绕当前视频提问，结合画面帧、事件、摘要和语音文稿查找相关内容。
-- Agent 可根据中间结果继续搜索或核验画面，处理需要多步定位的问题。
-- 回答附带经过程序校验的来源信息，点击有效来源可回看视频。
-- 支持连续追问、历史会话与指代解析；指代不明确时请求澄清。
-- 即使语义索引暂不可用，只要存在可读文稿，仍可使用文本问答路径；界面会标明“基于语音文稿 · 未分析画面”。
+### 📏 “感觉回答变好了”无法证明
 
-### 一体化学习工作区
+> 改检索或路由之前，需要一把能重复使用的尺子。
 
-- 视频播放、章节与文稿、AI 助手集中在同一页面。
-- 提供 AI 看视频、笔记、文稿、课件快捷入口，以及推荐问题。
-- 资源卡片支持查看、下载和生成状态恢复。
-- 学习区与助手之间可拖动调整宽度，侧栏及学习内容可收起，适配桌面与手机。
-- 对话请求与最终结果持久化，支持刷新、断线后的状态查询和结果恢复。
+- **可重跑的评测工具（E4）**：题集分五类、分调参集与保留集；指标写明分母；每次运行记录代码版本、数据哈希、模型身份与计价依据；配置一次只改一件事，包括多轮 Agent 对照。路由规则曾因评测结果改过一次。
+- 目前只在合成题集和确定性模拟器上验证了工具和规则，真实视频、人工标注、真实模型效果和费用尚未评测，见 [EVALUATION.md](docs/engineering/EVALUATION.md)。
 
-> 当前产品面向单工作区、当前视频学习，不包含账号权限体系、跨视频问答或联网搜索。语音识别与模型总结可能存在误差，引用校验也不等于事实正确性保证；重要内容应结合原视频核对。
+## 系统流程
+
+```mermaid
+flowchart LR
+    U["用户 · Web / HTTP"] --> API["FastAPI · REST / WebSocket"]
+    API --> CS["会话服务<br/>请求号持久化 · 可恢复"]
+    CS --> R["指代解析 → 路由"]
+
+    R --> CL["澄清"]
+    R --> ST["学习资料<br/>笔记 / 文稿 / 课件"]
+    R --> TX["文稿问答<br/>画面索引不可用时"]
+    R --> RT["多通道检索"]
+    R --> AG["Agent"]
+
+    RT --> RT2["帧 / 事件 / 摘要 / 字幕向量 + 关键词<br/>→ RRF → 可选重排"]
+    AG --> AG2["规划 → 检索 → 看帧<br/>轮次与候选有上限"]
+
+    RT2 --> RS["回答路由<br/>deep / cheap / auto"]
+    AG2 --> GA
+    RS -->|证据足够或已看帧| GA["有依据的回答<br/>引用校验 · 版本固定"]
+    RS -->|证据太弱| RF["规则拒答<br/>不调用模型"]
+    TX --> GA
+
+    GA --> OUT["回答 + 可跳转来源<br/>status · route"]
+    RF --> OUT
+    CL --> OUT
+    ST --> OUT
+```
+
+视频上传后的处理流水线：分片直传对象存储 → 事务 Outbox 投递任务 → Worker 分阶段执行（抽帧筛选 → 帧向量 → 事件与摘要；ASR → 字幕块与向量）→ 发布新一代索引，读者持有租约不受影响。
 
 ## 技术栈
 
-| 层级 | 技术与实现 | 在产品中的作用 |
-| --- | --- | --- |
-| 网页前端 | React、TypeScript、Vite、原生 CSS、Lucide React | 视频工作区、资料阅读、聊天、响应式布局与交互 |
-| 后端服务 | Python 3.10+、FastAPI、Uvicorn、Pydantic | HTTP API、WebSocket 事件、输入校验和业务服务 |
-| 媒体处理 | FFmpeg / FFprobe、OpenCV、Pillow、scikit-image | 媒体检查、播放预处理、抽帧、图像筛选与音频提取 |
-| 语音识别 | faster-whisper，可选 ASR 依赖 | 本地语音转写、时间映射与字幕切块；默认 CPU / INT8 配置 |
-| 多模态模型 | OpenAI 兼容接口；SiliconFlow / OpenRouter 适配 | 问题路由、视觉核验、答案与学习资料生成 |
-| 向量表示 | 多模态 Embedding、PyTorch | 将画面与文字转换为可比较的向量 |
-| 检索与回答 | Frame / Event / Summary / Transcript、多路召回、RRF、可选 Cohere Rerank | 汇集证据、融合排序、可选文本重排与来源约束回答 |
-| 持久化 | SQLite 与本地文件系统 | 视频元数据、任务、会话、字幕、向量及生成资料 |
-| 后台执行 | asyncio Task、并发限制、持久化任务状态 | 索引、问答和学习资料生成的异步执行与状态恢复 |
-| 文档导出 | python-pptx、ReportLab | PPTX 课件与 PDF 导出 |
-| 工程验证 | pytest、Vitest、Playwright、GitHub Actions | 后端、前端与浏览器流程验证 |
+| 层次 | 关键技术 | 核心用途 |
+| :--- | :--- | :--- |
+| 前端 | React 19、TypeScript、Vite | 视频工作区、文稿阅读、带来源的聊天、可续传上传 |
+| API | FastAPI、Pydantic、WebSocket | REST 接口、实时事件、平台鉴权 |
+| 异步处理和缓存 | RabbitMQ、Celery、Redis | 可靠处理流水线；共享限流、查询缓存、跨实例通知 |
+| 数据与存储 | PostgreSQL、MinIO / S3、SQLite | 读模型、任务与租约、用量账本；视频与索引文件 |
+| 视频语言和 AI | FFmpeg、faster-whisper、Qwen3-VL（OpenAI 兼容接口） | 抽帧与音频、语音转写、多模态向量、视觉核验与回答 |
+| 部署 | Docker Compose、nginx、GitHub Actions | 中间件与多实例编排、四条 CI 流水线 |
 
-当前向量检索由 SQLite 保存数据，应用层计算相似度；未使用独立向量数据库。后台执行仍由单服务进程管理，持久化状态用于恢复记录与结果，服务重启后不会自动续跑模型计算。
+## 本地运行
 
-模型与运行参数可配置，具体以 [配置示例](.env.example) 和 [配置代码](vam/config.py) 为准。生产部署使用单 worker；部署方式见 [部署与学习接口文档](docs/P5_DEPLOYMENT.md)。
+### 环境要求
 
-## 工作流程
+| 组件 | 要求 | 说明 |
+| :--- | :--- | :--- |
+| Python | 3.10+ | 后端 |
+| FFmpeg / FFprobe | 可在终端调用，或在 `.env` 中配置路径 | 抽帧与音频提取 |
+| 模型服务 | 一个 OpenAI 兼容的 API key | 默认 SiliconFlow；不配置时只能播放和转写 |
+| Docker Compose v2 | 平台模式需要 | 启动 PostgreSQL、MinIO、Redis、RabbitMQ |
 
-### 1. 上传视频，建立可检索资料
+### 单机模式
 
-1. **接收与校验**：后端接收文件，检查格式、大小与媒体信息，保存原片并登记视频。
-2. **创建后台任务**：返回视频与任务标识，网页持续展示处理状态。
-3. **构建视觉索引**：抽取画面，筛除模糊或冗余帧，生成图像向量，组织帧与事件等视觉记忆。
-4. **构建语音资料**：提取音轨，执行 ASR，将时间映射到视频，再整理片段、文本块与文本向量。
-5. **发布可用结果**：记录各项能力的就绪情况；字幕可读与字幕语义搜索可用是两个独立状态。无音轨时跳过语音处理。
-6. **生成学习资料**：配置模型并启用自动生成时，启动独立学习任务；也可通过快捷入口请求生成。
+不需要任何中间件，数据保存在本地 SQLite 与文件中。
 
-```mermaid
-flowchart TD
-    A["上传视频"] --> B["校验、保存与登记"]
-    B --> C["后台索引任务"]
-    C --> D["抽帧与筛选 → 图像向量 → 视觉记忆"]
-    C --> E["提取音轨 → ASR → 时间映射与切块"]
-    E --> F["可读文稿与文本向量"]
-    D --> G["发布可用索引并更新状态"]
-    F --> G
-    G --> H["视频播放、资料阅读与问答"]
-    G --> I["独立学习任务：按配置或用户请求生成"]
-    I --> J["章节笔记与学习课件"]
+```bash
+python -m venv .venv
+source .venv/bin/activate            # Windows: .venv\Scripts\activate
+pip install -e ".[asr]"              # 不需要语音转写可去掉 [asr]
+cp .env.example .env                 # 填入 SILICONFLOW_API_KEY，按需调整模型
+vam-server                           # 浏览器打开 http://127.0.0.1:8000/app/
 ```
 
-### 2. 提问，查证，再回到原视频
+语音模型默认不自动下载（`ASR_LOCAL_FILES_ONLY=true`），需先把 faster-whisper 模型放进 `ASR_MODEL_CACHE`。
 
-1. 选择视频并发送问题；会话服务保存请求，整理历史上下文，必要时解析“刚才那个”“这部分”等指代。
-2. 根据当前能力和请求范围选择路径：可用索引支持多模态检索；可读文稿支持文本问答；资料类快捷入口交给学习任务处理。
-3. 在检索路径中，Agent 选择查询与核验动作；候选结果经过融合及可选重排，必要时检查画面。
-4. 基于本次允许使用的来源生成回答，校验引用身份与时间信息；证据不足时给出提示。
-5. 最终结果先保存，再发送给客户端。用户可查看来源卡片，并跳回相应视频片段。
+### 平台模式
 
-普通 HTTP 检索也可以直接使用检索管线，无需经过 Agent。系统不会把所有问答都强制变成同一条多轮流程。
+完整中间件、两个 API 实例经 nginx 轮询，以及按队列拆分的 Worker（Linux 或 WSL2）：
 
-### 3. 整理与导出
+```bash
+cp deploy/e1/dev.env.example deploy/e1/dev.env      # 改成自己的开发口令
+cat deploy/e2/dev.env.example >> deploy/e1/dev.env
+docker compose --env-file deploy/e1/dev.env -f deploy/e3/compose.yml up -d --build --wait
+docker compose --env-file deploy/e1/dev.env -f deploy/e3/compose.yml exec api-1 \
+  sh -c 'EVIREEL_NEW_PASSWORD=<口令> python -m vam.platform.migrate create-user --username demo'
+```
 
-学习任务读取可用材料，分批生成章节和知识点，经来源校验后发布成品。用户可以阅读笔记，下载 Markdown、PPTX 或 PDF；语音文稿可单独下载 TXT 或 SRT。
+浏览器打开 `http://127.0.0.1:8000/app/`，在登录页注册新账号，或用上面创建的账号登录（设置 `AUTH_ALLOW_REGISTRATION=false` 可关闭自助注册）。
 
-学习课件由已生成笔记组织而成，不是对原视频 PPT 的自动还原。生成失败会保留此前成功的成品；索引或来源更新后，旧资料会标记为过期，可重新生成。
+## 当前边界
 
----
+- 问答范围是“当前视频”，不支持跨视频检索或联网搜索。
+- 平台模式的 API 与 Worker 共享一个数据卷，是单机部署；没有做多机部署与双实例吞吐实测。
+- 语音识别和模型总结都可能出错；引用校验保证来源真实存在，不保证结论正确，重要内容请回原视频核对。
 
-EviReel 基于 VAM 框架演进，保留终端工具与 API 入口。项目采用 [MIT License](LICENSE)。
+## License
+
+本项目基于 [MIT License](LICENSE) 开源，视频在线索引（抽帧筛选、帧向量与事件分段）、分层视觉记忆与 Agentic 检索功能部分代码引用至：[yiliu-li/Visual-Agentic-Memory](https://github.com/yiliu-li/Visual-Agentic-Memory)（MIT License）。
